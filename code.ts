@@ -27,6 +27,7 @@ declare const figma: {
   createFrame: () => any;
   createRectangle: () => any;
   createText: () => any;
+  group: (nodes: any[], parent: any, index?: number) => any;
   mixed: symbol;
   on: (event: 'selectionchange' | 'close' | 'documentchange', callback: (event?: any) => void) => void;
 };
@@ -100,9 +101,43 @@ figma.showUI(__html__, { width: 360, height: 780 });
     hasSelection: hasSelection
   });
 
-  // 캔버스 선택에 따라 코멘트 투명도 갱신
+  // 캔버스에서 코멘트(어노테이션)를 직접 클릭한 경우 → 그것만 선명, 나머지는 흐리게 + 맨 앞으로
   try {
-    updateAnnotationOpacityFromCanvas(selection || []);
+    const annNodeIds: string[] = [];
+    const annSegIds: string[] = [];
+    const regularNodes: any[] = [];
+    for (const n of selection || []) {
+      const p = parseAnnNode(n);
+      if (p) {
+        annNodeIds.push(p.nodeId);
+        annSegIds.push(annSegId(p.key));
+      } else {
+        regularNodes.push(n);
+      }
+    }
+    if (annSegIds.length > 0) {
+      // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
+      updateAnnotationOpacityBySeg(annSegIds);
+      bringAnnotationsToFront(annNodeIds);
+    } else {
+      // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
+      updateAnnotationOpacityFromCanvas(selection || []);
+    }
+
+    // 캔버스 선택 → 검토 목록에서도 같은 항목을 선택 표시하도록 nodeId 목록 전송
+    const targetIds = new Set<string>();
+    for (const id of annNodeIds) targetIds.add(id); // 코멘트를 직접 클릭한 경우 그 대상 노드
+    if (regularNodes.length > 0) {
+      const selIds = new Set<string>();
+      for (const n of regularNodes) if (n && n.id) selIds.add(n.id);
+      // 선택한 노드(또는 그 프레임) 안에 있는 검토 대상 노드들을 찾는다
+      for (const [nodeId, ancestors] of annotationAncestorIds) {
+        for (const id of selIds) {
+          if (ancestors.has(id)) { targetIds.add(nodeId); break; }
+        }
+      }
+    }
+    figma.ui.postMessage({ type: 'canvas-selection', nodeIds: Array.from(targetIds) });
   } catch (_e) {}
 });
 
@@ -1021,11 +1056,42 @@ const HL_INFIX = "HL__";
 // 한 노드의 여러 변경을 구분하는 세그먼트 구분자
 const SEG_SEP = "##";
 
-// 어노테이션 노드 이름 파싱 -> { kind, nodeId, seg, key }
-// 이름 형식: PREFIX + [HL_INFIX] + nodeId + SEG_SEP + segIndex
-function parseAnnName(name: string): { kind: 'hl' | 'tooltip'; nodeId: string; seg: string; key: string } | null {
-  if (typeof name !== 'string' || !name.startsWith(ANNOTATION_PREFIX)) return null;
-  const key = name.slice(ANNOTATION_PREFIX.length); // 오프셋 맵 키 (HL_INFIX/세그 포함)
+// 한 세그먼트가 여러 줄에 걸칠 때 줄별 형광펜을 구분하는 구분자 (SEG_SEP과 겹치면 안 됨)
+const LINE_SEP = "~";
+
+// 추적 키는 노드 "이름"이 아니라 pluginData에 저장한다.
+// (프레임 노드는 캔버스에 이름표가 떠서, 내부용 키가 이름으로 노출되면 지저분하기 때문)
+const PLUGIN_DATA_KEY = 'uxAnnKey';
+
+// 캔버스에 보일 깔끔한 표시 이름
+const HL_DISPLAY_NAME = 'UX 형광 표시';
+const COMMENT_DISPLAY_NAME = '수정 제안';
+
+// 어노테이션 노드에 키를 심는다
+function tagAnnotation(node: any, key: string): void {
+  try { node.setPluginData(PLUGIN_DATA_KEY, key); } catch (_e) {}
+}
+
+// 노드에서 어노테이션 키를 읽는다 (pluginData 우선, 옛 버전의 이름 기반도 폴백 인식)
+function getAnnNodeKey(node: any): string {
+  try {
+    const k = node.getPluginData(PLUGIN_DATA_KEY);
+    if (k) return k;
+  } catch (_e) {}
+  if (typeof node.name === 'string' && node.name.startsWith(ANNOTATION_PREFIX)) {
+    return node.name.slice(ANNOTATION_PREFIX.length);
+  }
+  return '';
+}
+
+function isAnnotationNode(node: any): boolean {
+  return getAnnNodeKey(node) !== '';
+}
+
+// 키 문자열 파싱 -> { kind, nodeId, seg, key }
+// 키 형식: [HL_INFIX] + nodeId + SEG_SEP + segIndex (+ LINE_SEP + lineIndex)
+function parseAnnKey(key: string): { kind: 'hl' | 'tooltip'; nodeId: string; seg: string; key: string } | null {
+  if (!key) return null;
   let rest = key;
   let kind: 'hl' | 'tooltip' = 'tooltip';
   if (rest.startsWith(HL_INFIX)) { kind = 'hl'; rest = rest.slice(HL_INFIX.length); }
@@ -1033,6 +1099,21 @@ function parseAnnName(name: string): { kind: 'hl' | 'tooltip'; nodeId: string; s
   const nodeId = sep >= 0 ? rest.slice(0, sep) : rest;
   const seg = sep >= 0 ? rest.slice(sep + SEG_SEP.length) : '0';
   return { kind, nodeId, seg, key };
+}
+
+// 노드 파싱
+function parseAnnNode(node: any): { kind: 'hl' | 'tooltip'; nodeId: string; seg: string; key: string } | null {
+  return parseAnnKey(getAnnNodeKey(node));
+}
+
+// 어노테이션이 속한 "세그먼트(코멘트) 식별자" = nodeId##segIndex.
+// 형광펜(HL_INFIX)·줄 접미사(LINE_SEP)를 떼서, 같은 변경의 코멘트와 형광펜이 같은 값을 갖게 한다.
+function annSegId(key: string): string {
+  let rest = key || '';
+  if (rest.startsWith(HL_INFIX)) rest = rest.slice(HL_INFIX.length);
+  const li = rest.indexOf(LINE_SEP);
+  if (li >= 0) rest = rest.slice(0, li);
+  return rest;
 }
 
 // nodeId -> 대상 노드 참조 캐시 (폴링 시 동기적으로 위치 읽기용)
@@ -1044,6 +1125,19 @@ const annotationAncestorIds = new Map<string, Set<string>>();
 // 어노테이션 key(이름에서 PREFIX 뗀 부분) -> 대상 노드 기준 상대 위치 (프레임 이동 시 위치 갱신용)
 // 코멘트/형광펜 모두 이 맵으로 위치를 따라감
 const annotationOffset = new Map<string, { dx: number; dy: number }>();
+
+// nodeId -> 그 노드의 어노테이션 노드들.
+// 생성/제거/위치추적 모두 이 인덱스를 사용해 페이지 전수 스캔(getAllAnnotations)을 피한다.
+const annotationsByNode = new Map<string, Array<{ ann: any; key: string }>>();
+
+// 방금 만든 어노테이션을 인덱스에 등록
+function registerAnnotation(ann: any): void {
+  const p = parseAnnNode(ann);
+  if (!p) return;
+  let arr = annotationsByNode.get(p.nodeId);
+  if (!arr) { arr = []; annotationsByNode.set(p.nodeId, arr); }
+  arr.push({ ann, key: p.key });
+}
 
 // 형광펜 색 (노란 형광)
 const HIGHLIGHT_COLOR = { r: 1, g: 0.92, b: 0.2 };
@@ -1076,36 +1170,39 @@ function getTopLevelParentFrame(nodeId: string): any | null {
   return current;
 }
 
-// 특정 노드의 어노테이션이 하나라도 있는지 검색
+// 특정 노드의 어노테이션이 하나라도 있는지 검색 (인덱스 사용 — 텍스트 편집마다 호출되므로 전수 스캔 회피)
 function findAnnotation(nodeId: string): any | null {
-  for (const child of figma.currentPage.children as any[]) {
-    const p = parseAnnName(child.name);
-    if (p && p.nodeId === nodeId) return child;
+  const arr = annotationsByNode.get(nodeId);
+  if (arr) {
+    for (const { ann } of arr) {
+      if (ann && !ann.removed) return ann;
+    }
   }
   return null;
 }
 
 // 특정 노드의 모든 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
+// 인덱스(annotationsByNode)로 바로 찾으므로 페이지 전수 스캔이 없다.
 function removeAnnotationByNodeId(nodeId: string): void {
-  for (const child of [...(figma.currentPage.children as any[])]) {
-    const p = parseAnnName(child.name);
-    if (p && p.nodeId === nodeId) {
-      annotationOffset.delete(p.key);
-      try { child.remove(); } catch (_e) {}
-    }
+  const arr = annotationsByNode.get(nodeId);
+  if (!arr) return;
+  for (const { ann, key } of arr) {
+    annotationOffset.delete(key);
+    try { ann.remove(); } catch (_e) {}
   }
+  annotationsByNode.delete(nodeId);
 }
 
-// 모든 어노테이션 프레임 수집
+// 모든 어노테이션 노드 수집 (제거/토글용 — pluginData 태그 또는 옛 이름 기반 모두 인식)
 function getAllAnnotations(): any[] {
   const result: any[] = [];
   for (const child of figma.currentPage.children as any[]) {
-    if (typeof child.name === 'string' && child.name.startsWith(ANNOTATION_PREFIX)) {
+    if (isAnnotationNode(child)) {
       result.push(child);
     }
     if (child.children) {
       for (const gc of child.children) {
-        if (typeof gc.name === 'string' && gc.name.startsWith(ANNOTATION_PREFIX)) {
+        if (isAnnotationNode(gc)) {
           result.push(gc);
         }
       }
@@ -1114,20 +1211,27 @@ function getAllAnnotations(): any[] {
   return result;
 }
 
-// 선택 상태에 따라 어노테이션 투명도 조절
-// selectedIds가 비어있으면 전부 불투명, 아니면 선택된 것만 불투명/나머지는 반투명
+// 선택 상태에 따라 어노테이션 투명도 조절 (노드 단위 — 목록 항목 선택 등에 사용)
+// selectedIds가 비어있으면 전부 불투명, 아니면 선택된 노드만 불투명/나머지는 반투명
 function updateAnnotationOpacity(selectedIds: string[]): void {
   const selected = new Set(selectedIds);
-  for (const ann of getAllAnnotations()) {
-    const parsed = parseAnnName(ann.name);
-    if (!parsed) continue;
-    try {
-      if (selected.size === 0 || selected.has(parsed.nodeId)) {
-        ann.opacity = 1;
-      } else {
-        ann.opacity = 0.35;
-      }
-    } catch (_e) {}
+  for (const [nodeId, arr] of annotationsByNode) {
+    const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : 0.35;
+    for (const { ann } of arr) {
+      try { if (ann && !ann.removed) ann.opacity = op; } catch (_e) {}
+    }
+  }
+}
+
+// 세그먼트(코멘트) 단위 투명도 조절 — 같은 노드에 여러 코멘트가 있어도 선택한 것만 선명.
+// selectedSegIds가 비어있으면 전부 불투명.
+function updateAnnotationOpacityBySeg(selectedSegIds: string[]): void {
+  const selected = new Set(selectedSegIds);
+  for (const [, arr] of annotationsByNode) {
+    for (const { ann, key } of arr) {
+      const op = (selected.size === 0 || selected.has(annSegId(key))) ? 1 : 0.35;
+      try { if (ann && !ann.removed) ann.opacity = op; } catch (_e) {}
+    }
   }
 }
 
@@ -1144,21 +1248,33 @@ function updateAnnotationOpacityFromCanvas(selection: any[]): void {
   // (생성 시점에 캐시해 둔 조상 id 집합과 교집합으로 판정 — dynamic-page에서도 안정적)
   const matched: string[] = [];
   if (selectedIds.size > 0) {
-    for (const ann of getAllAnnotations()) {
-      const parsed = parseAnnName(ann.name);
-      if (!parsed) continue;
-      const ancestors = annotationAncestorIds.get(parsed.nodeId);
+    for (const nodeId of annotationsByNode.keys()) {
+      const ancestors = annotationAncestorIds.get(nodeId);
       if (!ancestors) continue;
-      let hit = false;
       for (const id of selectedIds) {
-        if (ancestors.has(id)) { hit = true; break; }
+        if (ancestors.has(id)) { matched.push(nodeId); break; }
       }
-      if (hit) matched.push(parsed.nodeId);
     }
   }
 
   // 관련된 코멘트가 하나도 없으면 전부 불투명(평상 상태) 유지
   updateAnnotationOpacity(matched);
+  // 선택된 노드의 코멘트/형광펜을 맨 앞으로 (겹칠 때 가려지지 않도록)
+  bringAnnotationsToFront(matched);
+}
+
+// 지정한 노드들의 어노테이션을 z-order 맨 앞으로 올린다 (페이지 끝에 다시 붙이면 최상단)
+function bringAnnotationsToFront(nodeIds: string[]): void {
+  for (const nodeId of nodeIds) {
+    const arr = annotationsByNode.get(nodeId);
+    if (!arr) continue;
+    // 생성 순서(형광펜 → 배경 → 텍스트)대로 다시 붙여 상대 순서 유지 (텍스트가 위)
+    for (const { ann } of arr) {
+      try {
+        if (ann && !ann.removed) figma.currentPage.appendChild(ann);
+      } catch (_e) {}
+    }
+  }
 }
 
 // before/after에서 바뀐 구간만 추출 (공통 접두/접미 제거)
@@ -1240,6 +1356,33 @@ function diffSegments(before: string, after: string): Array<{ bStart: number; bE
   return segments;
 }
 
+// 변경 구간 사이의 "공통(안 바뀐) 글자"가 이 이하면 한 덩어리로 합친다.
+// LCS가 중간에 우연히 겹치는 한두 글자(예: "하시겠습니까"→"할까요"의 "까") 때문에
+// 변경이 둘로 쪼개져 표시되는 걸 방지 — 미리보기 목록처럼 하나로 보이게 한다.
+const SEGMENT_MERGE_GAP = 3;
+
+function mergeCloseSegments(
+  segs: Array<{ bStart: number; bEnd: number; aStart: number; aEnd: number }>,
+  gap: number
+): Array<{ bStart: number; bEnd: number; aStart: number; aEnd: number }> {
+  if (segs.length <= 1) return segs;
+  const merged = [{ ...segs[0] }];
+  for (let i = 1; i < segs.length; i++) {
+    const prev = merged[merged.length - 1];
+    const cur = segs[i];
+    const bGap = cur.bStart - prev.bEnd; // 두 변경 사이 안 바뀐 글자 수 (before 기준)
+    const aGap = cur.aStart - prev.aEnd; // (after 기준)
+    if (Math.min(bGap, aGap) <= gap) {
+      // 사이의 공통 글자까지 포함해 하나로 확장
+      prev.bEnd = cur.bEnd;
+      prev.aEnd = cur.aEnd;
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+  return merged;
+}
+
 // 세그먼트 라벨: "원래 → 변경"
 function buildSegmentLabel(beforeSeg: string, afterSeg: string): string {
   const clip = (s: string) => (s.length > 24 ? s.slice(0, 24) + '…' : s);
@@ -1296,14 +1439,16 @@ function getRangeStyle(node: any, idx: number): { font: any; size: number; ls: a
 // 변경 세그먼트들의 화면상 위치/크기를 동기 측정 (줄바꿈/정렬/멀티라인 정확 대응)
 // 방법: 원본과 같은 너비의 클론으로 줄바꿈을 복제 -> 줄 높이로 줄 번호 산출,
 //       단일라인 임시 노드로 줄 안에서의 x 오프셋 측정. (absoluteRenderBounds는 실행 중 null이라 사용 불가)
+type Box = { x: number; y: number; w: number; h: number };
+
 async function measureSegments(
   node: any,
   before: string,
   segs: Array<{ bStart: number; bEnd: number; aStart: number; aEnd: number }>,
   absX: number,
   absY: number
-): Promise<Array<{ x: number; y: number; w: number; h: number } | null>> {
-  const out: Array<{ x: number; y: number; w: number; h: number } | null> = segs.map(() => null);
+): Promise<Array<{ anchor: Box; rects: Box[] } | null>> {
+  const out: Array<{ anchor: Box; rects: Box[] } | null> = segs.map(() => null);
   let clone: any = null;
   let t: any = null;
   try {
@@ -1313,8 +1458,9 @@ async function measureSegments(
     const vAlign = node.textAlignVertical;
     const origW = node.width;
     const nodeH = node.height;
+    const len = before.length;
 
-    // 단일 라인 너비 측정용 임시 노드
+    // 단일 라인 폭/높이 측정용 임시 노드 (폰트 메트릭 기반)
     t = figma.createText();
     if (font) t.fontName = font;
     t.fontSize = size || 16;
@@ -1325,73 +1471,122 @@ async function measureSegments(
     const ANCHOR = " ";
     t.characters = ANCHOR;
     const anchorW = t.width;
-    const lineH = t.height || (size || 16) * 1.2;
+    const lineH = t.height || (size || 16) * 1.3;
     const adv = (s: string): number => {
       if (!s) return 0;
       t.characters = s + ANCHOR;
       return t.width - anchorW;
     };
 
-    // 줄바꿈 복제용 클론 (너비 고정)
-    clone = node.clone();
-    figma.currentPage.appendChild(clone);
-    try { clone.effects = []; } catch (_e) {}
-    try { clone.strokes = []; } catch (_e) {}
-    try { clone.textAutoResize = 'HEIGHT'; } catch (_e) {}
-    try { clone.resize(origW, nodeH); } catch (_e) {}
+    // 한 줄에 들어가는 텍스트면 클론/줄바꿈 계산을 통째로 건너뛴다 (대부분의 UX 문구가 한 줄 → 큰 속도 이득).
+    const fullW = adv(before);
+    const singleLine = before.indexOf('\n') === -1 && fullW <= origW + 1;
 
-    // 첫 p글자가 차지하는 줄 수
-    const linesUpTo = (p: number): number => {
-      if (p <= 0) return 0;
-      clone.characters = before.slice(0, p);
-      return Math.max(1, Math.round(clone.height / lineH));
-    };
-    // linesUpTo(k) >= L 을 만족하는 최소 k (이분 탐색)
-    const firstK = (L: number): number => {
-      let lo = 0, hi = before.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (linesUpTo(mid) >= L) hi = mid; else lo = mid + 1;
+    let realLineH = lineH;
+    let totalLines = 1;
+    // 줄바꿈 계산용(멀티라인일 때만 채워짐)
+    let linesUpTo: (p: number) => number = () => 1;
+    let firstK: (L: number) => number = () => 0;
+    let lineTopOffset: (L: number) => number = () => 0;
+
+    if (!singleLine) {
+      // 줄바꿈을 원본과 동일하게 재현하기 위한 클론 (너비 고정)
+      clone = node.clone();
+      figma.currentPage.appendChild(clone);
+      try { clone.effects = []; } catch (_e) {}
+      try { clone.strokes = []; } catch (_e) {}
+      // 잘림/최대 줄 수가 걸려 있으면 자동 높이가 안 먹어 클론 높이가 박스 전체로 측정된다.
+      try { clone.textTruncation = 'DISABLED'; } catch (_e) {}
+      try { clone.maxLines = null; } catch (_e) {}
+      try { clone.textAutoResize = 'HEIGHT'; } catch (_e) {}
+      try { clone.resize(origW, clone.height); } catch (_e) {}
+
+      // 줄 높이: 한 줄인 임시 노드 기준. 클론으로 재보되 비정상(>1.8배)이면 버린다.
+      try {
+        clone.characters = '가';
+        const ch = clone.height;
+        if (ch > 0 && ch < lineH * 1.8) realLineH = ch;
+      } catch (_e) {}
+
+      linesUpTo = (p: number): number => {
+        if (p <= 0) return 0;
+        clone.characters = before.slice(0, p);
+        return Math.max(1, Math.round(clone.height / realLineH));
+      };
+      firstK = (L: number): number => {
+        let lo = 0, hi = len;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (linesUpTo(mid) >= L) hi = mid; else lo = mid + 1;
+        }
+        return lo;
+      };
+      // 줄 L의 상단 y 오프셋 = 그 앞의 (L-1)개 줄 높이.
+      // firstK(L)은 'L번째 줄의 첫 글자' 인덱스라, 그 글자를 빼야(=firstK(L)-1) (L-1)줄 높이가 된다.
+      lineTopOffset = (L: number): number => {
+        if (L <= 1) return 0;
+        const k = Math.max(0, firstK(L) - 1);
+        if (k <= 0) return 0;
+        clone.characters = before.slice(0, k);
+        return clone.height;
+      };
+      totalLines = Math.max(1, linesUpTo(len));
+    }
+
+    // 세로 기준점(텍스트 맨 위). 원본 노드는 이미 렌더돼 있어 absoluteRenderBounds를 쓸 수 있다.
+    // null이면 박스 높이 + 세로정렬로 폴백.
+    let textTop = absY;
+    {
+      let extraTop = 0;
+      const textH = totalLines * realLineH;
+      const extra = Math.max(0, nodeH - textH);
+      if (vAlign === 'CENTER') extraTop = extra / 2;
+      else if (vAlign === 'BOTTOM') extraTop = extra;
+      textTop = absY + extraTop;
+
+      let rb: any = null;
+      try { rb = node.absoluteRenderBounds; } catch (_e) {}
+      if (rb && typeof rb.y === 'number' && typeof rb.height === 'number') {
+        const inkPerLine = rb.height / Math.max(1, totalLines);
+        const topGap = Math.max(0, (realLineH - inkPerLine) / 2);
+        textTop = rb.y - topGap;
       }
-      return lo;
+    }
+
+    // 한 줄 [a,e) 안에서 [segStart, segEnd] 구간이 차지하는 박스 (y는 호출자가 전달)
+    const makeBox = (a: number, e: number, segStart: number, segEnd: number, yTop: number): Box => {
+      if (before[a] === '\n') a += 1; // 줄 경계의 \n은 다음 줄 시작 문자이므로 건너뜀
+      const cs = Math.min(Math.max(segStart, a), e);
+      const ce = Math.min(Math.max(segEnd, a), e);
+      const xStartInLine = adv(before.slice(a, cs));
+      const xEndInLine = adv(before.slice(a, ce));
+      const lineW = (a === 0 && e === len) ? fullW : adv(before.slice(a, e));
+      let leftEdge = 0;
+      if (align === 'CENTER') leftEdge = (origW - lineW) / 2;
+      else if (align === 'RIGHT') leftEdge = origW - lineW;
+      return { x: absX + leftEdge + xStartInLine, y: yTop, w: Math.max(1, xEndInLine - xStartInLine), h: realLineH };
     };
-    const totalLines = Math.max(1, linesUpTo(before.length));
-    // 세로 정렬 보정 (텍스트 전체가 노드보다 짧을 때)
-    let extraTop = 0;
-    const textH = totalLines * lineH;
-    const extra = Math.max(0, nodeH - textH);
-    if (vAlign === 'CENTER') extraTop = extra / 2;
-    else if (vAlign === 'BOTTOM') extraTop = extra;
 
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i];
       const startPos = s.bStart;
       const endPos = Math.max(s.bEnd, s.bStart);
-      // 시작 글자가 위치한 줄 (1-based). 글자가 있으면 그 글자의 줄, 없으면(맨끝 삽입) 마지막 줄
-      const Lstart = startPos < before.length ? Math.max(1, linesUpTo(startPos + 1)) : totalLines;
-      const ls0 = Math.max(0, firstK(Lstart) - 1); // 해당 줄의 첫 글자 인덱스
-      const Lend = endPos > startPos ? Math.max(1, linesUpTo(endPos)) : Lstart;
 
-      if (Lend === Lstart) {
-        // 단일 라인 세그먼트
-        const xStartInLine = adv(before.slice(ls0, startPos));
-        const xEndInLine = adv(before.slice(ls0, endPos));
-        // 줄 전체 너비 (정렬 보정용)
-        const le = Lstart < totalLines ? firstK(Lstart + 1) : before.length;
-        const lineW = adv(before.slice(ls0, le));
-        let leftEdge = 0;
-        if (align === 'CENTER') leftEdge = (origW - lineW) / 2;
-        else if (align === 'RIGHT') leftEdge = origW - lineW;
-        const x = absX + leftEdge + xStartInLine;
-        const y = absY + extraTop + (Lstart - 1) * lineH;
-        const w = Math.max(1, xEndInLine - xStartInLine);
-        out[i] = { x, y, w, h: lineH };
+      const rects: Box[] = [];
+      if (singleLine) {
+        // 클론 없이 한 박스로
+        rects.push(makeBox(0, len, startPos, endPos, textTop));
       } else {
-        // 여러 줄에 걸친 세그먼트: 줄 밴드로 근사 (전체 너비)
-        const yTop = absY + extraTop + (Lstart - 1) * lineH;
-        const yBot = absY + extraTop + Lend * lineH;
-        out[i] = { x: absX, y: yTop, w: origW, h: Math.max(lineH, yBot - yTop) };
+        const Lstart = startPos < len ? Math.max(1, linesUpTo(startPos + 1)) : totalLines;
+        const Lend = endPos > startPos ? Math.max(1, linesUpTo(endPos)) : Lstart;
+        // 구간이 걸친 각 줄마다 박스를 따로 (멀티라인일 때 프레임 전체를 덮지 않도록)
+        for (let L = Lstart; L <= Lend; L++) {
+          const a = Math.max(0, firstK(L) - 1);
+          const e = L < totalLines ? Math.max(0, firstK(L + 1) - 1) : len;
+          rects.push(makeBox(a, e, startPos, endPos, textTop + lineTopOffset(L)));
+        }
       }
+      out[i] = { anchor: rects[0], rects };
     }
   } catch (e) {
     console.log('[UX-HL] measureSegments error', e);
@@ -1414,7 +1609,8 @@ function createHighlightRect(
     const boxW = Math.max(1, geom.w + padX * 2);
     const boxH = Math.max(1, geom.h);
     const hl = figma.createRectangle();
-    hl.name = ANNOTATION_PREFIX + key;
+    hl.name = HL_DISPLAY_NAME;
+    tagAnnotation(hl, key);
     hl.fills = [{ type: 'SOLID', color: HIGHLIGHT_COLOR }];
     hl.blendMode = 'MULTIPLY';
     hl.cornerRadius = 2;
@@ -1425,57 +1621,80 @@ function createHighlightRect(
     if (!annotationsVisible) hl.visible = false;
     hl.locked = true;
     annotationOffset.set(key, { dx: boxX - absX, dy: boxY - absY });
+    registerAnnotation(hl);
   } catch (_e) {}
 }
 
 // 코멘트 말풍선 생성 (해당 세그먼트 바로 위에 배치)
+// 배경 사각형 + 텍스트를 "그룹"으로 묶는다. 그룹은 프레임과 달리 캔버스에 상시 이름표가 안 뜨고
+// (선택/호버 시에만 잠깐 보임), 클릭 한 번에 통째로 선택돼 앞으로 가져오기 좋다.
 function createCommentFrame(
   key: string, label: string, fontName: { family: string; style: string },
   anchorX: number, anchorY: number, absX: number, absY: number
 ): void {
   try {
-    const tooltip = figma.createFrame();
-    tooltip.name = ANNOTATION_PREFIX + key;
-    tooltip.cornerRadius = 8;
-    tooltip.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.78, b: 0.35 } }];
-    tooltip.layoutMode = 'HORIZONTAL';
-    tooltip.primaryAxisSizingMode = 'AUTO';
-    tooltip.counterAxisSizingMode = 'AUTO';
-    tooltip.paddingLeft = 10;
-    tooltip.paddingRight = 10;
-    tooltip.paddingTop = 6;
-    tooltip.paddingBottom = 6;
-    tooltip.itemSpacing = 0;
+    const padX = 10;
+    const padY = 6;
 
+    // 텍스트 (먼저 만들어 크기를 잰다)
     const text = figma.createText();
+    text.name = COMMENT_DISPLAY_NAME;
     text.fontName = fontName;
     text.characters = label;
-    text.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
     text.fontSize = 12;
-    tooltip.appendChild(text);
+    text.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+    text.textAutoResize = 'WIDTH_AND_HEIGHT';
+    const tw = text.width;
+    const th = text.height;
 
-    figma.currentPage.appendChild(tooltip);
-    const tx = anchorX;
-    const ty = anchorY - tooltip.height - 6;
-    tooltip.x = tx;
-    tooltip.y = ty;
-    if (!annotationsVisible) tooltip.visible = false;
-    tooltip.locked = true;
-    annotationOffset.set(key, { dx: tx - absX, dy: ty - absY });
+    // 배경 사각형 (둥근 모서리 + 1px 검정 테두리)
+    const bg = figma.createRectangle();
+    bg.name = COMMENT_DISPLAY_NAME;
+    bg.resize(tw + padX * 2, th + padY * 2);
+    bg.cornerRadius = 8;
+    bg.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.78, b: 0.35 } }];
+    bg.strokes = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
+    bg.strokeWeight = 1;
+
+    // 배경 → 텍스트 순서로 추가해야 텍스트가 위에 그려진다
+    figma.currentPage.appendChild(bg);
+    figma.currentPage.appendChild(text);
+
+    const bx = anchorX;
+    const by = anchorY - (th + padY * 2) - 6;
+    bg.x = bx;
+    bg.y = by;
+    text.x = bx + padX;
+    text.y = by + padY;
+
+    // 배경+텍스트를 하나의 그룹으로 묶기 (클릭 시 통째로 선택)
+    const group = figma.group([bg, text], figma.currentPage);
+    group.name = COMMENT_DISPLAY_NAME;
+    if (!annotationsVisible) group.visible = false;
+    group.locked = false; // 클릭해서 앞으로 가져올 수 있게 잠그지 않음 (끌어도 폴링이 제자리로 되돌림)
+
+    // 그룹 하나만 추적 (배경/텍스트는 그룹 안에 있어 함께 이동·제거됨)
+    tagAnnotation(group, key);
+    annotationOffset.set(key, { dx: group.x - absX, dy: group.y - absY });
+    registerAnnotation(group);
   } catch (_e) {}
 }
 
-// 한 노드의 어노테이션 생성/교체 (변경 구간마다 코멘트 + 형광펜)
-async function upsertAnnotation(item: { nodeId: string; before: string; after: string; x: number; y: number }): Promise<void> {
-  const fontName = await ensureAnnotationFont();
-  if (!fontName) return;
+// 한 노드의 어노테이션 "그릴 내용"만 측정해서 모은다 (실제 노드 생성은 안 함 → 화면에 안 나타남)
+type DrawJob = {
+  absX: number;
+  absY: number;
+  highlights: Array<{ key: string; geom: Box }>;
+  comments: Array<{ key: string; label: string; anchorX: number; anchorY: number }>;
+};
 
+async function measureAnnotation(item: { nodeId: string; before: string; after: string; x: number; y: number }): Promise<DrawJob | null> {
   // 기존 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
   removeAnnotationByNodeId(item.nodeId);
 
   let node: any = null;
   try { node = await figma.getNodeByIdAsync(item.nodeId); } catch (_e) {}
-  if (!node) return;
+  if (!node) return null;
 
   annotationNodeCache.set(item.nodeId, node);
   const ancestors = new Set<string>();
@@ -1489,35 +1708,61 @@ async function upsertAnnotation(item: { nodeId: string; before: string; after: s
   const absX = item.x;
   const absY = item.y;
 
-  // 변경 구간을 모두 찾아 각각의 화면 위치를 한 번에 측정
-  const segs = diffSegments(item.before, item.after);
-  if (segs.length === 0) return;
+  const segs = mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP);
+  if (segs.length === 0) return null;
   const geoms = await measureSegments(node, item.before, segs, absX, absY);
 
+  const job: DrawJob = { absX, absY, highlights: [], comments: [] };
   let idx = 0;
   for (const s of segs) {
     const bSeg = item.before.slice(s.bStart, s.bEnd);
     const aSeg = item.after.slice(s.aStart, s.aEnd);
     const label = buildSegmentLabel(bSeg, aSeg);
     const segKey = item.nodeId + SEG_SEP + idx;
-    const geom = geoms[idx] || { x: absX, y: absY, w: 1, h: 16 };
+    const measured = geoms[idx];
+    const fallback = { x: absX, y: absY, w: 1, h: 16 };
+    const rects = measured ? measured.rects : [fallback];
+    const anchor = measured ? measured.anchor : fallback;
 
-    // 변경된 기존 글자가 있을 때만 형광펜 박스
+    // 변경된 기존 글자가 있을 때만 형광펜 박스 (걸친 줄마다 따로)
     if (s.bEnd > s.bStart) {
-      createHighlightRect(HL_INFIX + segKey, geom, absX, absY);
+      rects.forEach((r, li) => {
+        job.highlights.push({ key: HL_INFIX + segKey + LINE_SEP + li, geom: r });
+      });
     }
-    // 코멘트는 해당 세그먼트 바로 위에
-    createCommentFrame(segKey, label, fontName, geom.x, geom.y, absX, absY);
+    // 코멘트는 해당 세그먼트(첫 줄) 바로 위에
+    job.comments.push({ key: segKey, label, anchorX: anchor.x, anchorY: anchor.y });
     idx++;
   }
+  return job;
 }
 
 async function createAnnotations(
-  previewData: Array<{ nodeId: string; before: string; after: string; x: number; y: number }>
+  previewData: Array<{ nodeId: string; before: string; after: string; x: number; y: number }>,
+  onProgress?: (done: number, total: number) => void
 ): Promise<void> {
-  for (const item of previewData) {
-    await upsertAnnotation(item);
+  const fontName = await ensureAnnotationFont();
+  if (!fontName) return;
+
+  // 1) 측정 단계 (비동기): 위치만 계산하고 화면엔 아무것도 안 그린다
+  const jobs: DrawJob[] = [];
+  const total = previewData.length;
+  for (let i = 0; i < total; i++) {
+    const job = await measureAnnotation(previewData[i]);
+    if (job) jobs.push(job);
+    if (onProgress && (i + 1 === total || (i + 1) % 5 === 0)) onProgress(i + 1, total);
   }
+
+  // 2) 생성 단계 (동기): 한 번에 전부 그린다 → 하나씩 뿅뿅이 아니라 한 프레임에 다같이 나타남
+  for (const job of jobs) {
+    for (const h of job.highlights) {
+      createHighlightRect(h.key, h.geom, job.absX, job.absY);
+    }
+    for (const c of job.comments) {
+      createCommentFrame(c.key, c.label, fontName, c.anchorX, c.anchorY, job.absX, job.absY);
+    }
+  }
+
   startRepositionPolling();
 }
 
@@ -1527,6 +1772,7 @@ function removeAnnotations(): void {
   annotationNodeCache.clear();
   annotationAncestorIds.clear();
   annotationOffset.clear();
+  annotationsByNode.clear();
   for (const ann of getAllAnnotations()) {
     ann.remove();
   }
@@ -1539,48 +1785,57 @@ const applyingNodeIds = new Set<string>();
 let repositionTimer: ReturnType<typeof setInterval> | null = null;
 
 function repositionAnnotations(): void {
-  const anns = getAllAnnotations();
-  for (const ann of anns) {
-    const parsed = parseAnnName(ann.name);
-    if (!parsed) continue;
-    const nodeId = parsed.nodeId;
-    let node = annotationNodeCache.get(nodeId);
-    if (!node) continue;
-    try {
-      // 노드가 삭제됐으면 캐시에서 제거
-      if (node.removed) {
-        annotationNodeCache.delete(nodeId);
-        continue;
-      }
-      const at = node.absoluteTransform;
-      const x: number = at ? at[0][2] : (node.x || 0);
-      const y: number = at ? at[1][2] : (node.y || 0);
-      // 코멘트/형광펜 모두 생성 시 저장한 상대 오프셋만큼 텍스트 노드 기준으로 이동
-      const off = annotationOffset.get(parsed.key);
-      if (off) {
-        const newX = x + off.dx;
-        const newY = y + off.dy;
-        if (Math.abs(ann.x - newX) > 0.5 || Math.abs(ann.y - newY) > 0.5) {
-          ann.x = newX;
-          ann.y = newY;
+  if (annotationsByNode.size === 0) return;
+  // 인덱스가 이미 노드별로 묶여 있으므로 노드 좌표(absoluteTransform)는 노드당 한 번만 읽는다.
+  for (const [nodeId, arr] of annotationsByNode) {
+    const node = annotationNodeCache.get(nodeId);
+    let pos: { x: number; y: number } | null = null;
+    if (node) {
+      try {
+        if (node.removed) {
+          annotationNodeCache.delete(nodeId);
+        } else {
+          const at = node.absoluteTransform;
+          pos = at ? { x: at[0][2], y: at[1][2] } : { x: node.x || 0, y: node.y || 0 };
         }
+      } catch (_e) {
+        annotationNodeCache.delete(nodeId);
       }
-    } catch (_e) {
-      // 접근 불가(삭제 등) 시 캐시 제거
-      annotationNodeCache.delete(nodeId);
     }
+
+    // 살아있는 어노테이션만 남기며(제거된 건 정리) 위치 갱신
+    let alive = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const entry = arr[i];
+      if (!entry.ann || entry.ann.removed) continue;
+      arr[alive++] = entry;
+      if (!pos) continue;
+      const off = annotationOffset.get(entry.key);
+      if (!off) continue;
+      const newX = pos.x + off.dx;
+      const newY = pos.y + off.dy;
+      try {
+        if (Math.abs(entry.ann.x - newX) > 0.5 || Math.abs(entry.ann.y - newY) > 0.5) {
+          entry.ann.x = newX;
+          entry.ann.y = newY;
+        }
+      } catch (_e) {}
+    }
+    arr.length = alive;
+    if (alive === 0) annotationsByNode.delete(nodeId);
   }
 }
 
 function startRepositionPolling(): void {
   if (repositionTimer) return;
+  // 페이지 전수 스캔 없이 레지스트리만 확인. 주기도 32ms→250ms로 낮춰 부하를 크게 줄임.
   repositionTimer = setInterval(() => {
-    if (getAllAnnotations().length > 0) {
+    if (annotationsByNode.size > 0) {
       repositionAnnotations();
     } else {
       stopRepositionPolling();
     }
-  }, 32);
+  }, 250);
 }
 
 function stopRepositionPolling(): void {
@@ -1853,30 +2108,41 @@ figma.ui.onmessage = async (msg: any) => {
       figma.viewport.scrollAndZoomIntoView(nodesToSelect);
     }
 
-    // 진행률 업데이트 (완료)
-    figma.ui.postMessage({
-      type: 'update-progress',
-      progress: 100,
-      status: '완료!'
-    });
-
-    // 로딩 숨기기
-    figma.ui.postMessage({
-      type: 'hide-loading'
-    });
-
     // 새 결과를 먼저 누적 방식으로 UI에 전송 (어노테이션 생성 실패와 무관하게 검토 결과 표시)
     figma.ui.postMessage({
       type: 'preview-add',
       data: previewData
     });
 
-    // 캔버스에 어노테이션 생성 (누적) — 실패해도 검토 결과에는 영향 없음
+    // 캔버스에 어노테이션 생성 (누적) — 이 작업도 로딩에 포함시킨다 (끝나기 전엔 로딩 유지)
+    figma.ui.postMessage({
+      type: 'update-progress',
+      progress: 96,
+      status: '표시 생성 중...'
+    });
     try {
-      await createAnnotations(previewData);
+      await createAnnotations(previewData, (done, total) => {
+        // 96% → 99% 사이를 생성 진행도로 채움
+        const p = total > 0 ? 96 + Math.floor((done / total) * 3) : 99;
+        figma.ui.postMessage({
+          type: 'update-progress',
+          progress: p,
+          status: `표시 생성 중... (${done}/${total})`
+        });
+      });
     } catch (annErr) {
       console.error('어노테이션 생성 실패:', annErr);
     }
+
+    // 모든 생성까지 끝난 뒤에야 완료 + 로딩 숨김
+    figma.ui.postMessage({
+      type: 'update-progress',
+      progress: 100,
+      status: '완료!'
+    });
+    figma.ui.postMessage({
+      type: 'hide-loading'
+    });
 
     // 새로 검토한 영역에서 수정 항목이 없으면 토스트
     if (previewData.length === 0) {
@@ -1927,12 +2193,12 @@ figma.ui.onmessage = async (msg: any) => {
     const nodesToChange: TextNode[] = [];
     const failedNodeIds: string[] = [];
     
-    // 먼저 getNodeById로 시도 (대부분의 경우 성공, 매우 빠름)
+    // 먼저 getNodeByIdAsync로 시도 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
     const totalTargetNodes = targetNodeIds.size;
     let processedCount = 0;
     for (const nodeId of targetNodeIds) {
       try {
-        const nodeById = figma.getNodeById(nodeId);
+        const nodeById = await figma.getNodeByIdAsync(nodeId);
         if (nodeById && nodeById.type === "TEXT") {
           nodesToChange.push(nodeById as TextNode);
         } else {
@@ -2140,25 +2406,28 @@ figma.ui.onmessage = async (msg: any) => {
       // 1. 먼저 캐시에서 찾기 (PREVIEW에서 찾은 노드)
       let node: TextNode | null = previewNodeCache.get(nodeId) || null;
       
-      // 2. 캐시에 없으면 getNodeById로 찾기
+      // 2. 캐시에 없으면 getNodeByIdAsync로 찾기 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
       if (!node) {
         try {
-          const nodeById = figma.getNodeById(nodeId);
+          const nodeById = await figma.getNodeByIdAsync(nodeId);
           if (nodeById && nodeById.type === "TEXT") {
             node = nodeById as TextNode;
           }
         } catch (e) {
-          // getNodeById 실패 시 무시
+          // 조회 실패 시 무시
         }
       }
-      
+
       // 3. 노드를 찾았으면 선택 및 뷰포트 이동
-      if (node && node.type === "TEXT") {
+      if (node && node.type === "TEXT" && !(node as any).removed) {
         // 해당 노드 선택
         figma.currentPage.selection = [node];
-        
+
         // 뷰포트 이동 및 확대
         figma.viewport.scrollAndZoomIntoView([node]);
+
+        // 해당 코멘트를 맨 앞으로 (selectionchange에 의존하지 않고 직접 호출)
+        bringAnnotationsToFront([nodeId]);
       }
     } catch (e) {
       console.error("[FOCUS] 노드 포커스 오류:", e);
@@ -2173,6 +2442,8 @@ figma.ui.onmessage = async (msg: any) => {
 
       // 선택 상태에 따라 코멘트 투명도 갱신 (선택=불투명, 미선택=반투명)
       updateAnnotationOpacity(nodeIds);
+      // 선택된 코멘트를 맨 앞으로 (겹칠 때 가려지지 않도록)
+      bringAnnotationsToFront(nodeIds);
 
       if (nodeIds.length === 0) {
         // 선택 해제
@@ -2186,10 +2457,10 @@ figma.ui.onmessage = async (msg: any) => {
         // 1. 캐시에서 찾기
         let node = previewNodeCache.get(nodeId) || null;
         
-        // 2. 캐시에 없으면 getNodeById로 찾기
+        // 2. 캐시에 없으면 getNodeByIdAsync로 찾기 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
         if (!node) {
           try {
-            const nodeById = figma.getNodeById(nodeId);
+            const nodeById = await figma.getNodeByIdAsync(nodeId);
             if (nodeById && nodeById.type === "TEXT") {
               node = nodeById as TextNode;
             }
@@ -2197,8 +2468,8 @@ figma.ui.onmessage = async (msg: any) => {
             // 무시
           }
         }
-        
-        if (node) {
+
+        if (node && !(node as any).removed) {
           nodesToSelect.push(node);
         }
       }

@@ -1,0 +1,2334 @@
+// /// <reference types="@figma/plugin-typings" />
+// UI 띄우기
+figma.showUI(__html__, { width: 360, height: 780 });
+// 선택 상태 변경 감지
+figma.on('selectionchange', () => {
+    const selection = figma.currentPage.selection;
+    const hasSelection = selection && selection.length > 0;
+    // UI에 선택 상태 전송
+    figma.ui.postMessage({
+        type: 'selection-changed',
+        hasSelection: hasSelection
+    });
+    // 캔버스에서 코멘트(어노테이션)를 직접 클릭한 경우 → 그것만 선명, 나머지는 흐리게 + 맨 앞으로
+    try {
+        const annNodeIds = [];
+        const annSegIds = [];
+        const regularNodes = [];
+        for (const n of selection || []) {
+            const p = parseAnnNode(n);
+            if (p) {
+                annNodeIds.push(p.nodeId);
+                annSegIds.push(annSegId(p.key));
+            }
+            else {
+                regularNodes.push(n);
+            }
+        }
+        if (annSegIds.length > 0) {
+            // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
+            updateAnnotationOpacityBySeg(annSegIds);
+            bringAnnotationsToFront(annNodeIds);
+        }
+        else {
+            // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
+            updateAnnotationOpacityFromCanvas(selection || []);
+        }
+        // 캔버스 선택 → 검토 목록에서도 같은 항목을 선택 표시하도록 nodeId 목록 전송
+        const targetIds = new Set();
+        for (const id of annNodeIds)
+            targetIds.add(id); // 코멘트를 직접 클릭한 경우 그 대상 노드
+        if (regularNodes.length > 0) {
+            const selIds = new Set();
+            for (const n of regularNodes)
+                if (n && n.id)
+                    selIds.add(n.id);
+            // 선택한 노드(또는 그 프레임) 안에 있는 검토 대상 노드들을 찾는다
+            for (const [nodeId, ancestors] of annotationAncestorIds) {
+                for (const id of selIds) {
+                    if (ancestors.has(id)) {
+                        targetIds.add(nodeId);
+                        break;
+                    }
+                }
+            }
+        }
+        figma.ui.postMessage({ type: 'canvas-selection', nodeIds: Array.from(targetIds) });
+    }
+    catch (_e) { }
+});
+// 초기 선택 상태 전송
+const initialSelection = figma.currentPage.selection;
+figma.ui.postMessage({
+    type: 'selection-changed',
+    hasSelection: initialSelection && initialSelection.length > 0
+});
+const UX_PATTERNS = [
+    { pattern: "됩니다", replacement: "돼요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
+    { pattern: "합니다", replacement: "해요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
+    { pattern: "있습니다", replacement: "있어요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
+    { pattern: "하시면", replacement: "하면", description: "조건 표현을 더 간결하게 해요.", tag: "shorten" },
+    { pattern: "하십시오", replacement: "해주세요", description: "과한 격식을 줄여 자연스럽게 해요.", tag: "tone" },
+    { pattern: "관리자 리스트", replacement: "관리자 목록", description: "표준 용어로 통일해요.", tag: "term" },
+    { pattern: "자격별", replacement: "권한별", description: "표준 용어로 통일해요.", tag: "term" },
+    { pattern: "총 사용자", replacement: "전체 사용자", description: "표준 용어로 통일해요.", tag: "term" },
+    { pattern: "휴대폰번호", replacement: "휴대전화번호", description: "표준 용어로 통일해요.", tag: "term" },
+    { pattern: "휴대폰", replacement: "휴대전화", description: "표준 용어로 통일해요.", tag: "term" },
+    { pattern: "폰번호", replacement: "휴대전화번호", description: "표준 용어로 통일해요.", tag: "term" },
+];
+// ===============================
+// 유틸리티 함수
+// ===============================
+// 정규식 특수문자 이스케이프 함수
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+// 한글 글자의 받침 유무 확인 함수
+function hasJongseong(char) {
+    const code = char.charCodeAt(0);
+    // 한글 유니코드 범위: 가(0xAC00) ~ 힣(0xD7A3)
+    if (code >= 0xAC00 && code <= 0xD7A3) {
+        // 받침이 있으면: (charCode - 0xAC00) % 28 > 0
+        return (code - 0xAC00) % 28 > 0;
+    }
+    return false;
+}
+function normalizeSpaces(s) {
+    return s.replace(/\s+/g, " ").trim();
+}
+const TYPO_RULES = [
+    // 맞춤법
+    { pattern: /\b되요\b/g, replacement: "돼요", reason: "맞춤법을 바로잡아요.", tags: ["typo", "tone"] },
+    { pattern: /안되(?=[\s.,!?]|$)/g, replacement: "안 돼", reason: "맞춤법/띄어쓰기를 바로잡아요.", tags: ["typo", "spacing"] },
+    { pattern: /\b몇일\b/g, replacement: "며칠", reason: "맞춤법을 바로잡아요.", tags: ["typo"] },
+    { pattern: /\b웬지\b/g, replacement: "왠지", reason: "맞춤법을 바로잡아요.", tags: ["typo"] },
+    // 띄어쓰기 - 조사 앞 (명사+조사 다음에 명사/동사가 올 때)
+    // 주의: 외래어나 합성어에 잘못 적용되지 않도록 제한적으로 적용
+    // 일반 단어에 잘못 적용되는 문제로 주석 처리
+    // { pattern: /([가-힣]{2,})(의)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /([가-힣]{2,})(을|를)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /([가-힣]{2,})(이|가)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /([가-힣]{2,})(은|는)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /([가-힣]{2,})(와|과)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // "에" 조사는 외래어(크리에이터 등)와 구분하기 위해 제외
+    // { pattern: /([가-힣]{2,})(에|에서|에게|에게서|로|으로|만|도|까지|부터|처럼|같이|보다|커녕)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - "-하다" 형용사 + 종결어미 (불가능합니다, 가능해요 등 - 붙여쓰기)
+    { pattern: /(불가능|가능|필요|불필요) (합니다|해요)/g, replacement: "$1$2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 보조동사/의존명사
+    { pattern: /할수/g, replacement: "할 수", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /될수/g, replacement: "될 수", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // "~할 수 있", "~길어질 수 있" 등: 앞 단어 + 의존명사 "수" + "있" 분리 (할수있, 수있보다 먼저 적용)
+    { pattern: /([가-힣]{1,})(수)(있)/g, replacement: "$1 $2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /할수있/g, replacement: "할 수 있", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /수있/g, replacement: "수 있", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /하시는게/g, replacement: "하는 게", reason: "격식을 줄이고 띄어쓰기를 자연스럽게 해요.", tags: ["spacing", "tone"] },
+    { pattern: /하는게/g, replacement: "하는 게", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 일반 단어에 잘못 적용되는 문제로 주석 처리
+    // { pattern: /([가-힣])(것|수|때|곳|데|줄|지|뿐|만큼|대로|듯이|만|뿐)([가-힣])/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /([가-힣])(있다|없다|주다|보내다|받다|주시다|드리다|보이다|되다|하다)([가-힣])/g, replacement: "$1 $2$3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 일반적인 부사 뒤 띄어쓰기
+    // 일반 단어에 잘못 적용되는 문제로 주석 처리
+    // { pattern: /바로([가-힣])/g, replacement: "바로 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /여기서([가-힣])/g, replacement: "여기서 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /거기서([가-힣])/g, replacement: "거기서 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /저기서([가-힣])/g, replacement: "저기서 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /지금([가-힣]{2,})/g, replacement: "지금 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // "이미" + 다음 단어 (부사) - "이미지"(image)는 예외
+    { pattern: /이미(?!지)([가-힣]{2,})/g, replacement: "이미 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /아직([가-힣]{2,})/g, replacement: "아직 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /곧([가-힣]{2,})/g, replacement: "곧 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /다시([가-힣]{2,})/g, replacement: "다시 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /계속([가-힣]{2,})/g, replacement: "계속 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /항상([가-힣]{2,})/g, replacement: "항상 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // "보통" + 다음 단어 - "정보통신망" 등 합성어는 예외
+    { pattern: /보통(?!신)([가-힣]{2,})/g, replacement: "보통 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /가끔([가-힣]{2,})/g, replacement: "가끔 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /자주([가-힣]{2,})/g, replacement: "자주 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /때때로([가-힣]{2,})/g, replacement: "때때로 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /빨리([가-힣]{2,})/g, replacement: "빨리 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /천천히([가-힣]{2,})/g, replacement: "천천히 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /갑자기([가-힣]{2,})/g, replacement: "갑자기 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /같이([가-힣]{2,})/g, replacement: "같이 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /함께([가-힣]{2,})/g, replacement: "함께 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /혼자([가-힣]{2,})/g, replacement: "혼자 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /먼저([가-힣]{2,})/g, replacement: "먼저 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /나중에([가-힣]{2,})/g, replacement: "나중에 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /처음([가-힣]{2,})/g, replacement: "처음 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /마지막([가-힣]{2,})/g, replacement: "마지막 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /오늘([가-힣]{2,})/g, replacement: "오늘 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /내일([가-힣]{2,})/g, replacement: "내일 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /어제([가-힣]{2,})/g, replacement: "어제 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /내년([가-힣]{2,})/g, replacement: "내년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    { pattern: /작년([가-힣]{2,})/g, replacement: "작년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 층수 + 장소명 (7층 사무실, 3층 회의실 등)
+    { pattern: /([0-9]+층)(사무실|회의실|휴게실|복도)([가-힣])/g, replacement: "$1 $2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 수사 + 단위명사 (두 줄)
+    { pattern: /두줄/g, replacement: "두 줄", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 조사 "로/으로" + 동사 "들어갈"
+    { pattern: /(로|으로)(들어갈)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - "정도로" 뒤 (정도로 길어질)
+    { pattern: /정도로([가-힣])/g, replacement: "정도로 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 일반적인 동사/명사 앞 띄어쓰기
+    // 주의: 외래어(크리에이터 등)에 잘못 적용되지 않도록 제한적으로 적용
+    // { pattern: /([가-힣]{2,})(시작|종료|완료|중지|재개|변경|수정|삭제|추가|생성|등록|확인|조회|검색|저장|업로드|다운로드|열기|닫기|보기|보내기|받기|전송|수신|발송|접수|처리|승인|거부|반려|취소|해제|설정|해제|초기화|복구|백업|복원|이동|복사|붙여넣기|잠금|잠금해제|공유|다운로드|인쇄|출력|보관|삭제|복원|복구|수정|편집|저장|불러오기|내보내기|가져오기|연결|연결해제|접속|접속해제|로그인|로그아웃|가입|탈퇴|신청|취소|결제|환불|교환|반품|배송|수령|확인|리뷰|평가|추천|신고|차단|해제|차단해제|팔로우|언팔로우|구독|구독해제|알림|알림해제|공지|이벤트|쿠폰|적립|사용|적용|해제|적용해제|변경|변경해제|수정|수정해제|삭제|삭제해제|추가|추가해제|생성|생성해제|등록|등록해제|확인|확인해제|조회|조회해제|검색|검색해제|저장|저장해제|업로드|업로드해제|다운로드|다운로드해제)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // 띄어쓰기 - 수사 + 단위명사
+    // 주의: "2026년", "6000억원" 등은 일반적으로 붙여쓰기도 허용되므로 주석 처리
+    // { pattern: /([0-9]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+    // { pattern: /([일이삼사오육칠팔구십백천만억조]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+];
+// ===============================
+// 문장 레벨 변환 규칙 (문맥 기반 자연스러운 표현)
+// ===============================
+const REWRITE_RULES = [
+    // 격식 높임말을 친근하게 바꾸는 패턴들 (더 구체적인 패턴을 먼저 적용)
+    // ~하시거나 → ~하거나
+    {
+        pattern: /하시거나/g,
+        replacement: "하거나",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시려고 → ~하려고
+    {
+        pattern: /하시려고/g,
+        replacement: "하려고",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시려면 → ~하려면
+    {
+        pattern: /하시려면/g,
+        replacement: "하려면",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시려는 → ~하려는
+    {
+        pattern: /하시려는/g,
+        replacement: "하려는",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시다가 → ~하다가
+    {
+        pattern: /하시다가/g,
+        replacement: "하다가",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시던 → ~하던
+    {
+        pattern: /하시던/g,
+        replacement: "하던",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하셨더라도 → ~하더라도
+    {
+        pattern: /하셨더라도/g,
+        replacement: "하더라도",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시고 → ~하고
+    {
+        pattern: /하시고/g,
+        replacement: "하고",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시지만 → ~하지만
+    {
+        pattern: /하시지만/g,
+        replacement: "하지만",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시는지 → ~하는지
+    {
+        pattern: /하시는지/g,
+        replacement: "하는지",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시는가 → ~하는가
+    {
+        pattern: /하시는가/g,
+        replacement: "하는가",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시게 → ~하게
+    {
+        pattern: /하시게/g,
+        replacement: "하게",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // ~하시기 → ~하기
+    {
+        pattern: /하시기/g,
+        replacement: "하기",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // 격식 높임말을 친근하게: ~하시는 → ~하는 (일반 패턴)
+    {
+        pattern: /하시는/g,
+        replacement: "하는",
+        reason: "격식을 줄여 더 친근하게 해요.",
+        tags: ["tone"],
+    },
+    // 구조 변환: ~하시면 ~됩니다 → ~하면 ~돼요
+    {
+        pattern: /(.+?)하시면\s+(.+?)됩니다/g,
+        replacement: "$1하면 $2돼요",
+        reason: "조건 표현을 더 자연스럽고 간결하게 바꿔요.",
+        tags: ["shorten", "tone"],
+    },
+    // ~할 수 있습니다 → ~할 수 있어요
+    {
+        pattern: /할 수 있습니다/g,
+        replacement: "할 수 있어요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~가능합니다 → ~가능해요
+    {
+        pattern: /가능합니다/g,
+        replacement: "가능해요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시겠습니까? → ~할까요?
+    {
+        pattern: /하시겠습니까\?/g,
+        replacement: "할까요?",
+        reason: "질문 표현을 더 자연스럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시기 바랍니다 → ~해주세요
+    {
+        pattern: /하시기 바랍니다/g,
+        replacement: "해주세요",
+        reason: "딱딱한 요청을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하십시오 → ~해주세요 (이미 UX_PATTERNS에 있지만 문장 레벨에서도 처리)
+    {
+        pattern: /하십시오/g,
+        replacement: "해주세요",
+        reason: "과한 격식을 줄여 자연스럽게 해요.",
+        tags: ["tone"],
+    },
+    // ~입니까? → ~인가요? / ~예요?
+    {
+        pattern: /([가-힣]+)입니까\?/g,
+        replacement: (match, p1) => {
+            const lastChar = p1[p1.length - 1];
+            return hasJongseong(lastChar) ? `${p1}인가요?` : `${p1}예요?`;
+        },
+        reason: "질문 표현을 더 자연스럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~되어야 합니다 → ~되어야 해요
+    {
+        pattern: /되어야 합니다/g,
+        replacement: "되어야 해요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~해야 합니다 → ~해야 해요
+    {
+        pattern: /해야 합니다/g,
+        replacement: "해야 해요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하지 않으면 안 됩니다 → ~해야 해요
+    {
+        pattern: /하지 않으면 안 됩니다/g,
+        replacement: "해야 해요",
+        reason: "복잡한 표현을 간결하게 바꿔요.",
+        tags: ["shorten", "tone"],
+    },
+    // ~하지 않으면 안 돼요 → ~해야 해요
+    {
+        pattern: /하지 않으면 안 돼요/g,
+        replacement: "해야 해요",
+        reason: "복잡한 표현을 간결하게 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~할 수 없습니다 → ~할 수 없어요
+    {
+        pattern: /할 수 없습니다/g,
+        replacement: "할 수 없어요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하지 마십시오 → ~하지 마세요
+    {
+        pattern: /하지 마십시오/g,
+        replacement: "하지 마세요",
+        reason: "딱딱한 금지 표현을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하도록 하십시오 → ~하세요
+    {
+        pattern: /하도록 하십시오/g,
+        replacement: "하세요",
+        reason: "복잡한 표현을 간결하게 바꿔요.",
+        tags: ["shorten", "tone"],
+    },
+    // ~하시는 것이 좋습니다 → ~하는 게 좋아요
+    {
+        pattern: /하시는 것이 좋습니다/g,
+        replacement: "하는 게 좋아요",
+        reason: "격식을 줄이고 조언을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하는 것이 좋습니다 → ~하는 게 좋아요
+    {
+        pattern: /하는 것이 좋습니다/g,
+        replacement: "하는 게 좋아요",
+        reason: "딱딱한 조언을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하는 것이 좋아요 → ~하는 게 좋아요
+    {
+        pattern: /하는 것이 좋아요/g,
+        replacement: "하는 게 좋아요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하는 것이 → ~하는 게
+    {
+        pattern: /하는 것이/g,
+        replacement: "하는 게",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하는 것을 → ~하는 걸
+    {
+        pattern: /하는 것을/g,
+        replacement: "하는 걸",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하는 것으로 → ~하는 걸로
+    {
+        pattern: /하는 것으로/g,
+        replacement: "하는 걸로",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하는 것도 → ~하는 것도 (변경 없음, 예시용)
+    // ~하는 것만 → ~하는 것만 (변경 없음, 예시용)
+    // 더 많은 자연스러운 표현 패턴
+    // ~해주시기 바랍니다 → ~해주세요
+    {
+        pattern: /해주시기 바랍니다/g,
+        replacement: "해주세요",
+        reason: "딱딱한 요청을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~해주시기 바라요 → ~해주세요
+    {
+        pattern: /해주시기 바라요/g,
+        replacement: "해주세요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시기 바라요 → ~해주세요
+    {
+        pattern: /하시기 바라요/g,
+        replacement: "해주세요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~해주시면 됩니다 → ~해주시면 돼요
+    {
+        pattern: /해주시면 됩니다/g,
+        replacement: "해주시면 돼요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시면 됩니다 → ~하면 돼요
+    {
+        pattern: /하시면 됩니다/g,
+        replacement: "하면 돼요",
+        reason: "격식을 줄이고 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하실 수 있습니다 → ~하실 수 있어요
+    {
+        pattern: /하실 수 있습니다/g,
+        replacement: "하실 수 있어요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하실 수 없습니다 → ~하실 수 없어요
+    {
+        pattern: /하실 수 없습니다/g,
+        replacement: "하실 수 없어요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시는 것이 좋겠습니다 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하시는 것이 좋겠습니다/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "격식을 줄이고 조언을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하는 것이 좋겠습니다 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하는 것이 좋겠습니다/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "딱딱한 조언을 부드럽게 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시는 것이 좋겠어요 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하시는 것이 좋겠어요/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "격식을 줄이고 자연스럽게 바꿔요.",
+        tags: ["shorten", "tone"],
+    },
+    // ~하는 것이 좋겠어요 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하는 것이 좋겠어요/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하시는 것이 좋을 것 같습니다 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하시는 것이 좋을 것 같습니다/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "격식을 줄이고 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하는 것이 좋을 것 같습니다 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하는 것이 좋을 것 같습니다/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "딱딱한 표현을 해요체로 바꿔요.",
+        tags: ["tone"],
+    },
+    // ~하시는 것이 좋을 것 같아요 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하시는 것이 좋을 것 같아요/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "격식을 줄이고 자연스럽게 바꿔요.",
+        tags: ["shorten", "tone"],
+    },
+    // ~하는 것이 좋을 것 같아요 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하는 것이 좋을 것 같아요/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하시는 것이 좋겠어요 → ~하시는 게 좋을 것 같아요
+    {
+        pattern: /하시는 것이 좋겠어요/g,
+        replacement: "하시는 게 좋을 것 같아요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+    // ~하는 것이 좋겠어요 → ~하는 게 좋을 것 같아요
+    {
+        pattern: /하는 것이 좋겠어요/g,
+        replacement: "하는 게 좋을 것 같아요",
+        reason: "자연스러운 표현으로 바꿔요.",
+        tags: ["shorten"],
+    },
+];
+// ===============================
+// 핵심 변환 함수들
+// ===============================
+function replaceImnidaWithYeyo(text) {
+    if (!text.includes("입니다"))
+        return text;
+    let t = text;
+    const regex = /\s*입니다/g;
+    const matches = [];
+    let m;
+    while ((m = regex.exec(t)) !== null) {
+        matches.push({ index: m.index, length: m[0].length });
+    }
+    for (let i = matches.length - 1; i >= 0; i--) {
+        const { index, length } = matches[i];
+        let replacement = "이에요";
+        if (index > 0) {
+            // "방법 입니다"처럼 공백이 있으면 앞 단어의 마지막 글자 확인 (받침 있으면 이에요, 없으면 예요)
+            let j = index - 1;
+            while (j >= 0 && /\s/.test(t[j]))
+                j--;
+            const prev = j >= 0 ? t[j] : "";
+            replacement = /[가-힣]/.test(prev) && hasJongseong(prev) ? "이에요" : "예요";
+        }
+        t = t.slice(0, index) + replacement + t.slice(index + length);
+    }
+    return t;
+}
+function applyPatternDB(text) {
+    let t = text;
+    const tags = new Set();
+    const reasons = [];
+    // "입니다"는 별도 처리
+    const beforeImnida = t;
+    t = replaceImnidaWithYeyo(t);
+    if (t !== beforeImnida) {
+        tags.add("tone");
+        reasons.push("'입니다'를 해요체로 바꿔요.");
+    }
+    for (const p of UX_PATTERNS) {
+        if (!t.includes(p.pattern))
+            continue;
+        const next = t.replace(new RegExp(escapeRegex(p.pattern), "g"), p.replacement);
+        if (next !== t) {
+            t = next;
+            if (p.tag)
+                tags.add(p.tag);
+            reasons.push(p.description);
+        }
+    }
+    // "가능 해요" 등 UX_PATTERNS "합니다"→"해요" 적용 시 생긴 띄어쓰기 보정 (가능해요, 불가능해요 등)
+    const spacingFix = /(불가능|가능|필요|불필요) (해요)/g;
+    if (spacingFix.test(t)) {
+        spacingFix.lastIndex = 0;
+        t = t.replace(spacingFix, "$1$2");
+        tags.add("spacing");
+        if (!reasons.includes("띄어쓰기를 자연스럽게 해요."))
+            reasons.push("띄어쓰기를 자연스럽게 해요.");
+    }
+    return { text: t, tags: Array.from(tags), reasons };
+}
+function applyRules(text, rules) {
+    let t = text;
+    const tags = new Set();
+    const reasons = [];
+    for (const r of rules) {
+        if (!r.pattern.test(t)) {
+            // RegExp가 global이면 test 이후 lastIndex가 변할 수 있어 reset
+            r.pattern.lastIndex = 0;
+            continue;
+        }
+        r.pattern.lastIndex = 0;
+        const next = typeof r.replacement === 'function'
+            ? t.replace(r.pattern, r.replacement)
+            : t.replace(r.pattern, r.replacement);
+        if (next !== t) {
+            t = next;
+            r.tags.forEach((tg) => tags.add(tg));
+            reasons.push(r.reason);
+        }
+    }
+    return { text: t, tags: Array.from(tags), reasons };
+}
+function buildSuggestion(before, after, reasonParts, tags) {
+    if (before === after)
+        return null;
+    // reason 중복 제거 + 너무 길면 줄이기
+    const uniq = Array.from(new Set(reasonParts)).slice(0, 3);
+    const reason = uniq.length ? uniq.join(" - ") : "더 자연스럽게 다듬어요.";
+    // tags 중복 제거
+    const t = Array.from(new Set(tags));
+    return { before, after, reason, tags: t };
+}
+/**
+ * 마침표 추가 규칙 적용 (별도 함수로 분리)
+ */
+const ENDS_WITH_PUNCTUATION = /[.!?．！？]\s*$/;
+function applyPeriodRule(text, originalText) {
+    let t = text;
+    const reasons = [];
+    // 이미 문장 끝에 마침표/느낌표/물음표가 있으면 마침표 추가 건너뜀 (불필요한 안내 방지)
+    // 현재 텍스트 또는 원본 중 하나라도 마침표가 있으면 reason 추가 안 함
+    if (ENDS_WITH_PUNCTUATION.test(t)) {
+        return { text: t, reasons };
+    }
+    if (originalText != null && ENDS_WITH_PUNCTUATION.test(originalText)) {
+        return { text: t, reasons };
+    }
+    // ~요로 끝나는 문장에 마침표 추가 (이미 마침표가 없을 때만)
+    // 패턴: "해요/돼요/이에요/예요/있어요/주세요/까요" 다음에 공백이 있고 그 다음 한글이 오거나, 문장 끝일 때
+    const periodPattern = /(해요|돼요|이에요|예요|있어요|주세요|까요)(\s+)(?![.,!?])([가-힣])/g;
+    const periodPatternEnd = /(해요|돼요|이에요|예요|있어요|주세요|까요)(?![.,!?])(?=\s*$)/g;
+    const periodPatternComma = /(해요|돼요|이에요|예요|있어요|주세요|까요)(?![.,!?])(?=[,])/g;
+    // 쉼표 앞에 있는 경우: "시작돼요," → "시작돼요.,"
+    if (periodPatternComma.test(t)) {
+        periodPatternComma.lastIndex = 0;
+        const next = t.replace(periodPatternComma, "$1.");
+        if (next !== t) {
+            t = next;
+            reasons.push("문장 끝에 마침표를 추가해요.");
+        }
+    }
+    // 중간에 있는 경우: "돼요  안되" → "돼요.  안되"
+    if (periodPattern.test(t)) {
+        periodPattern.lastIndex = 0;
+        const next = t.replace(periodPattern, "$1.$2$3");
+        if (next !== t) {
+            t = next;
+            if (reasons.length === 0) {
+                reasons.push("문장 끝에 마침표를 추가해요.");
+            }
+        }
+    }
+    // 문장 끝인 경우: "돼요" → "돼요."
+    if (periodPatternEnd.test(t)) {
+        periodPatternEnd.lastIndex = 0;
+        const next = t.replace(periodPatternEnd, "$1.");
+        if (next !== t) {
+            t = next;
+            if (reasons.length === 0) {
+                reasons.push("문장 끝에 마침표를 추가해요.");
+            }
+        }
+    }
+    return { text: t, reasons };
+}
+/**
+ * 새로운 엔진: 텍스트에 대한 제안 생성
+ */
+function suggestFriendlyKorean(text) {
+    const original = text;
+    // 1) 오타/띄어쓰기(가벼운 룰)
+    const typo = applyRules(original, TYPO_RULES);
+    // 2) 구조 변환(문장 레벨)
+    const structural = applyRules(typo.text, REWRITE_RULES);
+    // 3) 패턴 DB(해요체+용어 통일)
+    const pattern = applyPatternDB(structural.text);
+    // 4) 마침표 추가 (패턴 적용 후) - 원본에 마침표가 있으면 reason 추가 안 함
+    const period = applyPeriodRule(pattern.text, original);
+    // 최종 after (문장일 때)
+    const finalAfter = period.text;
+    // reason/tags 합치기
+    const mergedReasons = [...typo.reasons, ...structural.reasons, ...pattern.reasons, ...period.reasons];
+    const mergedTags = [...typo.tags, ...structural.tags, ...pattern.tags];
+    const suggestions = [];
+    const mainSuggestion = buildSuggestion(original, finalAfter, mergedReasons, mergedTags);
+    if (mainSuggestion)
+        suggestions.push(mainSuggestion);
+    return suggestions;
+}
+/**
+ * 기존 호환성 유지: 친근한 톤으로 변환하는 메인 함수
+ * 새로운 엔진을 사용하되 기존 인터페이스 유지
+ * 모든 변경점을 순차적으로 적용하여 최종 결과 반환
+ */
+function toFriendlyKoreanUX(text) {
+    const sugg = suggestFriendlyKorean(text);
+    if (sugg.length === 0) {
+        return text;
+    }
+    const mainSuggestion = sugg[0];
+    return mainSuggestion ? mainSuggestion.after : text;
+}
+// 자식을 가질 수 있는 노드 타입 (최적화를 위해 미리 정의)
+const CONTAINER_NODE_TYPES = new Set([
+    "FRAME", "GROUP", "COMPONENT", "INSTANCE", "SECTION", "PAGE"
+]);
+// 선택된 노드 내부의 모든 텍스트 노드를 재귀적으로 찾기 (최적화 버전 - 비동기)
+async function findAllTextNodes(node, maxNodes = 10000, onProgress) {
+    const textNodes = [];
+    const stack = [node]; // 스택 기반 반복 방식으로 재귀 최적화
+    let processedCount = 0;
+    const CHUNK_SIZE = 100; // 100개씩 처리 후 yield (성능 최적화)
+    let lastProgressUpdateTime = Date.now();
+    const PROGRESS_UPDATE_TIME_INTERVAL = 50; // 50ms마다 시간 기반 업데이트
+    // 스택이 빌 때까지 반복
+    while (stack.length > 0 && textNodes.length < maxNodes) {
+        const current = stack.pop();
+        processedCount++;
+        // 비활성화된 노드는 스킵 (최적화)
+        if ('visible' in current && current.visible === false) {
+            continue;
+        }
+        // 현재 노드가 텍스트 노드인 경우
+        if (current.type === "TEXT") {
+            textNodes.push(current);
+            continue; // 텍스트 노드는 자식이 없으므로 다음으로
+        }
+        // 자식을 가질 수 있는 노드 타입만 처리 (최적화)
+        if (CONTAINER_NODE_TYPES.has(current.type)) {
+            // 자식 노드가 있는 경우 스택에 추가
+            if ('children' in current && current.children) {
+                const children = current.children;
+                // 역순으로 추가하여 순서 유지 (pop이 마지막 요소를 반환하므로)
+                for (let i = children.length - 1; i >= 0; i--) {
+                    stack.push(children[i]);
+                }
+            }
+        }
+        // 진행률 업데이트 (시간 기반만, 성능 최적화)
+        if (onProgress && (processedCount % CHUNK_SIZE === 0)) {
+            const now = Date.now();
+            if ((now - lastProgressUpdateTime) >= PROGRESS_UPDATE_TIME_INTERVAL) {
+                // 단순한 진행률 계산: 처리된 노드 수와 남은 스택 크기 기반
+                const totalEstimated = processedCount + stack.length;
+                const estimatedProgress = totalEstimated > 0
+                    ? Math.min(95, (processedCount / totalEstimated) * 100)
+                    : 95;
+                onProgress(estimatedProgress);
+                lastProgressUpdateTime = now;
+            }
+        }
+        // 일정 개수 처리 후 yield하여 UI 블로킹 방지
+        if (processedCount % CHUNK_SIZE === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+    return textNodes;
+}
+// 캐릭터 레벨 스타일을 저장하는 헬퍼
+function saveRangeStyle(node, pos) {
+    const style = {};
+    try {
+        if (node.getRangeFills) {
+            const v = node.getRangeFills(pos, pos + 1);
+            if (v !== figma.mixed)
+                style.fills = v;
+        }
+        if (node.getRangeFontName) {
+            const v = node.getRangeFontName(pos, pos + 1);
+            if (v !== figma.mixed)
+                style.fontName = v;
+        }
+        if (node.getRangeFontSize) {
+            const v = node.getRangeFontSize(pos, pos + 1);
+            if (v !== figma.mixed)
+                style.fontSize = v;
+        }
+        if (node.getRangeLetterSpacing) {
+            const v = node.getRangeLetterSpacing(pos, pos + 1);
+            if (v !== figma.mixed)
+                style.letterSpacing = v;
+        }
+        if (node.getRangeTextDecoration) {
+            const v = node.getRangeTextDecoration(pos, pos + 1);
+            if (v !== figma.mixed)
+                style.textDecoration = v;
+        }
+    }
+    catch (_a) { }
+    return style;
+}
+// 저장된 스타일을 범위에 복원하는 헬퍼
+function restoreRangeStyle(node, start, end, style) {
+    try {
+        if (style.fills && node.setRangeFills)
+            node.setRangeFills(start, end, style.fills);
+        if (style.fontName && node.setRangeFontName)
+            node.setRangeFontName(start, end, style.fontName);
+        if (style.fontSize && node.setRangeFontSize)
+            node.setRangeFontSize(start, end, style.fontSize);
+        if (style.letterSpacing && node.setRangeLetterSpacing)
+            node.setRangeLetterSpacing(start, end, style.letterSpacing);
+        if (style.textDecoration && node.setRangeTextDecoration)
+            node.setRangeTextDecoration(start, end, style.textDecoration);
+    }
+    catch (_a) { }
+}
+// 노드에 변경 적용하는 헬퍼 함수 (캐릭터 레벨 포매팅 보존)
+function applyChangeToNode(node, previewMap, changedNodeIds, _errors) {
+    const previewItem = previewMap.get(node.id);
+    if (!previewItem)
+        return;
+    if (node.characters !== previewItem.before)
+        return;
+    const before = previewItem.before;
+    const after = previewItem.after;
+    // 변경된 앞/뒤 경계 찾기
+    let start = 0;
+    while (start < before.length && start < after.length && before[start] === after[start]) {
+        start++;
+    }
+    let endBefore = before.length;
+    let endAfter = after.length;
+    while (endBefore > start && endAfter > start && before[endBefore - 1] === after[endAfter - 1]) {
+        endBefore--;
+        endAfter--;
+    }
+    const toInsert = after.slice(start, endAfter);
+    // 삭제 전에 해당 범위의 스타일 저장
+    const savedStyle = endBefore > start ? saveRangeStyle(node, start) : {};
+    // 변경 구간만 교체
+    if (endBefore > start && node.deleteCharacters) {
+        node.deleteCharacters(start, endBefore);
+    }
+    if (toInsert.length > 0 && node.insertCharacters) {
+        node.insertCharacters(start, toInsert, 'BEFORE_CHARACTER');
+        // 저장해둔 스타일 복원
+        restoreRangeStyle(node, start, start + toInsert.length, savedStyle);
+    }
+    changedNodeIds.add(node.id);
+}
+// ===============================
+// 캔버스 어노테이션
+// ===============================
+const ANNOTATION_PREFIX = "__UX_ANN__";
+// 형광펜 하이라이트 노드 이름: ANNOTATION_PREFIX + HL_INFIX + nodeId
+const HL_INFIX = "HL__";
+// 한 노드의 여러 변경을 구분하는 세그먼트 구분자
+const SEG_SEP = "##";
+// 한 세그먼트가 여러 줄에 걸칠 때 줄별 형광펜을 구분하는 구분자 (SEG_SEP과 겹치면 안 됨)
+const LINE_SEP = "~";
+// 추적 키는 노드 "이름"이 아니라 pluginData에 저장한다.
+// (프레임 노드는 캔버스에 이름표가 떠서, 내부용 키가 이름으로 노출되면 지저분하기 때문)
+const PLUGIN_DATA_KEY = 'uxAnnKey';
+// 캔버스에 보일 깔끔한 표시 이름
+const HL_DISPLAY_NAME = 'UX 형광 표시';
+const COMMENT_DISPLAY_NAME = '수정 제안';
+// 어노테이션 노드에 키를 심는다
+function tagAnnotation(node, key) {
+    try {
+        node.setPluginData(PLUGIN_DATA_KEY, key);
+    }
+    catch (_e) { }
+}
+// 노드에서 어노테이션 키를 읽는다 (pluginData 우선, 옛 버전의 이름 기반도 폴백 인식)
+function getAnnNodeKey(node) {
+    try {
+        const k = node.getPluginData(PLUGIN_DATA_KEY);
+        if (k)
+            return k;
+    }
+    catch (_e) { }
+    if (typeof node.name === 'string' && node.name.startsWith(ANNOTATION_PREFIX)) {
+        return node.name.slice(ANNOTATION_PREFIX.length);
+    }
+    return '';
+}
+function isAnnotationNode(node) {
+    return getAnnNodeKey(node) !== '';
+}
+// 키 문자열 파싱 -> { kind, nodeId, seg, key }
+// 키 형식: [HL_INFIX] + nodeId + SEG_SEP + segIndex (+ LINE_SEP + lineIndex)
+function parseAnnKey(key) {
+    if (!key)
+        return null;
+    let rest = key;
+    let kind = 'tooltip';
+    if (rest.startsWith(HL_INFIX)) {
+        kind = 'hl';
+        rest = rest.slice(HL_INFIX.length);
+    }
+    const sep = rest.lastIndexOf(SEG_SEP);
+    const nodeId = sep >= 0 ? rest.slice(0, sep) : rest;
+    const seg = sep >= 0 ? rest.slice(sep + SEG_SEP.length) : '0';
+    return { kind, nodeId, seg, key };
+}
+// 노드 파싱
+function parseAnnNode(node) {
+    return parseAnnKey(getAnnNodeKey(node));
+}
+// 어노테이션이 속한 "세그먼트(코멘트) 식별자" = nodeId##segIndex.
+// 형광펜(HL_INFIX)·줄 접미사(LINE_SEP)를 떼서, 같은 변경의 코멘트와 형광펜이 같은 값을 갖게 한다.
+function annSegId(key) {
+    let rest = key || '';
+    if (rest.startsWith(HL_INFIX))
+        rest = rest.slice(HL_INFIX.length);
+    const li = rest.indexOf(LINE_SEP);
+    if (li >= 0)
+        rest = rest.slice(0, li);
+    return rest;
+}
+// nodeId -> 대상 노드 참조 캐시 (폴링 시 동기적으로 위치 읽기용)
+const annotationNodeCache = new Map();
+// nodeId -> 대상 노드 자신 + 조상 노드 id 집합 (캔버스 선택 매칭용)
+const annotationAncestorIds = new Map();
+// 어노테이션 key(이름에서 PREFIX 뗀 부분) -> 대상 노드 기준 상대 위치 (프레임 이동 시 위치 갱신용)
+// 코멘트/형광펜 모두 이 맵으로 위치를 따라감
+const annotationOffset = new Map();
+// nodeId -> 그 노드의 어노테이션 노드들.
+// 생성/제거/위치추적 모두 이 인덱스를 사용해 페이지 전수 스캔(getAllAnnotations)을 피한다.
+const annotationsByNode = new Map();
+// 방금 만든 어노테이션을 인덱스에 등록
+function registerAnnotation(ann) {
+    const p = parseAnnNode(ann);
+    if (!p)
+        return;
+    let arr = annotationsByNode.get(p.nodeId);
+    if (!arr) {
+        arr = [];
+        annotationsByNode.set(p.nodeId, arr);
+    }
+    arr.push({ ann, key: p.key });
+}
+// 형광펜 색 (노란 형광)
+const HIGHLIGHT_COLOR = { r: 1, g: 0.92, b: 0.2 };
+// 어노테이션 폰트 캐시
+let annotationFontName = null;
+async function ensureAnnotationFont() {
+    if (annotationFontName)
+        return annotationFontName;
+    for (const font of [{ family: "Inter", style: "Medium" }, { family: "Roboto", style: "Medium" }]) {
+        try {
+            await figma.loadFontAsync(font);
+            annotationFontName = font;
+            return font;
+        }
+        catch (_a) { }
+    }
+    return null;
+}
+// 텍스트 노드의 페이지 직속 최상위 부모 프레임 반환
+function getTopLevelParentFrame(nodeId) {
+    const node = figma.getNodeById(nodeId);
+    if (!node)
+        return null;
+    let current = node;
+    while (current.parent && current.parent.type !== 'PAGE') {
+        current = current.parent;
+    }
+    // TEXT가 페이지 직속이면 자식을 가질 수 없으므로 null
+    if (!current || current.type === 'TEXT' || current.type === 'PAGE')
+        return null;
+    return current;
+}
+// 특정 노드의 어노테이션이 하나라도 있는지 검색 (인덱스 사용 — 텍스트 편집마다 호출되므로 전수 스캔 회피)
+function findAnnotation(nodeId) {
+    const arr = annotationsByNode.get(nodeId);
+    if (arr) {
+        for (const { ann } of arr) {
+            if (ann && !ann.removed)
+                return ann;
+        }
+    }
+    return null;
+}
+// 특정 노드의 모든 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
+// 인덱스(annotationsByNode)로 바로 찾으므로 페이지 전수 스캔이 없다.
+function removeAnnotationByNodeId(nodeId) {
+    const arr = annotationsByNode.get(nodeId);
+    if (!arr)
+        return;
+    for (const { ann, key } of arr) {
+        annotationOffset.delete(key);
+        try {
+            ann.remove();
+        }
+        catch (_e) { }
+    }
+    annotationsByNode.delete(nodeId);
+}
+// 모든 어노테이션 노드 수집 (제거/토글용 — pluginData 태그 또는 옛 이름 기반 모두 인식)
+function getAllAnnotations() {
+    const result = [];
+    for (const child of figma.currentPage.children) {
+        if (isAnnotationNode(child)) {
+            result.push(child);
+        }
+        if (child.children) {
+            for (const gc of child.children) {
+                if (isAnnotationNode(gc)) {
+                    result.push(gc);
+                }
+            }
+        }
+    }
+    return result;
+}
+// 선택 상태에 따라 어노테이션 투명도 조절 (노드 단위 — 목록 항목 선택 등에 사용)
+// selectedIds가 비어있으면 전부 불투명, 아니면 선택된 노드만 불투명/나머지는 반투명
+function updateAnnotationOpacity(selectedIds) {
+    const selected = new Set(selectedIds);
+    for (const [nodeId, arr] of annotationsByNode) {
+        const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : 0.35;
+        for (const { ann } of arr) {
+            try {
+                if (ann && !ann.removed)
+                    ann.opacity = op;
+            }
+            catch (_e) { }
+        }
+    }
+}
+// 세그먼트(코멘트) 단위 투명도 조절 — 같은 노드에 여러 코멘트가 있어도 선택한 것만 선명.
+// selectedSegIds가 비어있으면 전부 불투명.
+function updateAnnotationOpacityBySeg(selectedSegIds) {
+    const selected = new Set(selectedSegIds);
+    for (const [, arr] of annotationsByNode) {
+        for (const { ann, key } of arr) {
+            const op = (selected.size === 0 || selected.has(annSegId(key))) ? 1 : 0.35;
+            try {
+                if (ann && !ann.removed)
+                    ann.opacity = op;
+            }
+            catch (_e) { }
+        }
+    }
+}
+// 캔버스 선택에 따라 어노테이션 투명도 조절
+// 선택된 노드 자신 또는 그 하위에 대상 텍스트가 있으면 해당 코멘트를 불투명 처리
+function updateAnnotationOpacityFromCanvas(selection) {
+    // 선택된 노드들의 id 집합
+    const selectedIds = new Set();
+    for (const n of selection) {
+        if (n && n.id)
+            selectedIds.add(n.id);
+    }
+    // 각 어노테이션의 대상 노드가 선택 범위(자신/조상)에 속하는지 판정
+    // (생성 시점에 캐시해 둔 조상 id 집합과 교집합으로 판정 — dynamic-page에서도 안정적)
+    const matched = [];
+    if (selectedIds.size > 0) {
+        for (const nodeId of annotationsByNode.keys()) {
+            const ancestors = annotationAncestorIds.get(nodeId);
+            if (!ancestors)
+                continue;
+            for (const id of selectedIds) {
+                if (ancestors.has(id)) {
+                    matched.push(nodeId);
+                    break;
+                }
+            }
+        }
+    }
+    // 관련된 코멘트가 하나도 없으면 전부 불투명(평상 상태) 유지
+    updateAnnotationOpacity(matched);
+    // 선택된 노드의 코멘트/형광펜을 맨 앞으로 (겹칠 때 가려지지 않도록)
+    bringAnnotationsToFront(matched);
+}
+// 지정한 노드들의 어노테이션을 z-order 맨 앞으로 올린다 (페이지 끝에 다시 붙이면 최상단)
+function bringAnnotationsToFront(nodeIds) {
+    for (const nodeId of nodeIds) {
+        const arr = annotationsByNode.get(nodeId);
+        if (!arr)
+            continue;
+        // 생성 순서(형광펜 → 배경 → 텍스트)대로 다시 붙여 상대 순서 유지 (텍스트가 위)
+        for (const { ann } of arr) {
+            try {
+                if (ann && !ann.removed)
+                    figma.currentPage.appendChild(ann);
+            }
+            catch (_e) { }
+        }
+    }
+}
+// before/after에서 바뀐 구간만 추출 (공통 접두/접미 제거)
+function computeChangedSegment(before, after) {
+    if (before === after)
+        return { beforeSeg: '', afterSeg: after };
+    let start = 0;
+    const minLen = Math.min(before.length, after.length);
+    while (start < minLen && before[start] === after[start])
+        start++;
+    let endB = before.length;
+    let endA = after.length;
+    while (endB > start && endA > start && before[endB - 1] === after[endA - 1]) {
+        endB--;
+        endA--;
+    }
+    return { beforeSeg: before.slice(start, endB), afterSeg: after.slice(start, endA) };
+}
+// 코멘트에 표시할 라벨 생성: 변경이 필요한 부분만 "원래 → 변경" 형태로
+function buildAnnotationLabel(before, after) {
+    const seg = computeChangedSegment(before, after);
+    const clip = (s) => (s.length > 24 ? s.slice(0, 24) + '…' : s);
+    // 깔끔한 diff가 안 나오면(전체 변경 등) 변경 후 전체를 표시
+    if (!seg.beforeSeg && !seg.afterSeg) {
+        return clip(after);
+    }
+    const b = seg.beforeSeg ? clip(seg.beforeSeg) : '(없음)';
+    const a = seg.afterSeg ? clip(seg.afterSeg) : '(삭제)';
+    return b + ' → ' + a;
+}
+// before/after에서 바뀐 글자 구간의 인덱스(before 기준) 반환
+function computeChangedRange(before, after) {
+    let start = 0;
+    const minLen = Math.min(before.length, after.length);
+    while (start < minLen && before[start] === after[start])
+        start++;
+    let endB = before.length;
+    let endA = after.length;
+    while (endB > start && endA > start && before[endB - 1] === after[endA - 1]) {
+        endB--;
+        endA--;
+    }
+    return { start, end: endB };
+}
+// LCS 기반 diff로 "변경 구간"을 모두 추출 (한 텍스트의 여러 변경을 각각 분리)
+// 반환: 각 구간의 before/after 인덱스 범위
+function diffSegments(before, after) {
+    const n = before.length;
+    const m = after.length;
+    if (n === 0 && m === 0)
+        return [];
+    // dp[i][j] = LCS length of before[i:], after[j:]
+    const dp = [];
+    for (let i = 0; i <= n; i++)
+        dp.push(new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            if (before[i] === after[j])
+                dp[i][j] = dp[i + 1][j + 1] + 1;
+            else
+                dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+    // 백트래킹으로 연속된 비-동일 구간을 세그먼트로 묶기
+    const segments = [];
+    let i = 0;
+    let j = 0;
+    let cur = null;
+    const close = () => { if (cur) {
+        segments.push(cur);
+        cur = null;
+    } };
+    while (i < n && j < m) {
+        if (before[i] === after[j]) {
+            close();
+            i++;
+            j++;
+        }
+        else {
+            if (!cur)
+                cur = { bStart: i, bEnd: i, aStart: j, aEnd: j };
+            if (dp[i + 1][j] >= dp[i][j + 1]) {
+                i++;
+                cur.bEnd = i;
+            }
+            else {
+                j++;
+                cur.aEnd = j;
+            }
+        }
+    }
+    while (i < n) {
+        if (!cur)
+            cur = { bStart: i, bEnd: i, aStart: j, aEnd: j };
+        i++;
+        cur.bEnd = i;
+    }
+    while (j < m) {
+        if (!cur)
+            cur = { bStart: i, bEnd: i, aStart: j, aEnd: j };
+        j++;
+        cur.aEnd = j;
+    }
+    close();
+    return segments;
+}
+// 변경 구간 사이의 "공통(안 바뀐) 글자"가 이 이하면 한 덩어리로 합친다.
+// LCS가 중간에 우연히 겹치는 한두 글자(예: "하시겠습니까"→"할까요"의 "까") 때문에
+// 변경이 둘로 쪼개져 표시되는 걸 방지 — 미리보기 목록처럼 하나로 보이게 한다.
+const SEGMENT_MERGE_GAP = 3;
+function mergeCloseSegments(segs, gap) {
+    if (segs.length <= 1)
+        return segs;
+    const merged = [Object.assign({}, segs[0])];
+    for (let i = 1; i < segs.length; i++) {
+        const prev = merged[merged.length - 1];
+        const cur = segs[i];
+        const bGap = cur.bStart - prev.bEnd; // 두 변경 사이 안 바뀐 글자 수 (before 기준)
+        const aGap = cur.aStart - prev.aEnd; // (after 기준)
+        if (Math.min(bGap, aGap) <= gap) {
+            // 사이의 공통 글자까지 포함해 하나로 확장
+            prev.bEnd = cur.bEnd;
+            prev.aEnd = cur.aEnd;
+        }
+        else {
+            merged.push(Object.assign({}, cur));
+        }
+    }
+    return merged;
+}
+// 세그먼트 라벨: "원래 → 변경"
+function buildSegmentLabel(beforeSeg, afterSeg) {
+    const clip = (s) => (s.length > 24 ? s.slice(0, 24) + '…' : s);
+    const b = beforeSeg ? clip(beforeSeg) : '(없음)';
+    const a = afterSeg ? clip(afterSeg) : '(삭제)';
+    return b + ' → ' + a;
+}
+// 노드에 사용된 모든 폰트 로드 (setRangeFills 전 필요)
+async function loadAllNodeFonts(node) {
+    try {
+        const len = node.characters ? node.characters.length : 0;
+        if (len === 0)
+            return;
+        const fonts = node.getRangeAllFontNames(0, len);
+        for (const f of fonts) {
+            try {
+                await figma.loadFontAsync(f);
+            }
+            catch (_e) { }
+        }
+    }
+    catch (_e) { }
+}
+// 변경 구간의 기준 스타일 추출
+function getRangeStyle(node, idx) {
+    const MIXED = figma.mixed;
+    let font = node.fontName;
+    if (font === MIXED) {
+        try {
+            font = node.getRangeFontName(idx, idx + 1);
+        }
+        catch (_e) {
+            font = null;
+        }
+        if (!font || font === MIXED) {
+            try {
+                font = node.getRangeAllFontNames(0, node.characters.length)[0];
+            }
+            catch (_e) {
+                font = null;
+            }
+        }
+    }
+    let size = node.fontSize;
+    if (size === MIXED) {
+        try {
+            size = node.getRangeFontSize(idx, idx + 1);
+        }
+        catch (_e) {
+            size = 16;
+        }
+        if (size === MIXED)
+            size = 16;
+    }
+    let ls = node.letterSpacing;
+    if (ls === MIXED) {
+        try {
+            ls = node.getRangeLetterSpacing(idx, idx + 1);
+        }
+        catch (_e) {
+            ls = null;
+        }
+        if (ls === MIXED)
+            ls = null;
+    }
+    let lineHeight = node.lineHeight;
+    if (lineHeight === MIXED) {
+        try {
+            lineHeight = node.getRangeLineHeight(idx, idx + 1);
+        }
+        catch (_e) {
+            lineHeight = null;
+        }
+        if (lineHeight === MIXED)
+            lineHeight = null;
+    }
+    let textCase = node.textCase;
+    if (textCase === MIXED) {
+        try {
+            textCase = node.getRangeTextCase(idx, idx + 1);
+        }
+        catch (_e) {
+            textCase = null;
+        }
+        if (textCase === MIXED)
+            textCase = null;
+    }
+    return { font, size, ls, lineHeight, textCase };
+}
+async function measureSegments(node, before, segs, absX, absY) {
+    const out = segs.map(() => null);
+    let clone = null;
+    let t = null;
+    try {
+        await loadAllNodeFonts(node);
+        const { font, size, ls, lineHeight, textCase } = getRangeStyle(node, 0);
+        const align = node.textAlignHorizontal;
+        const vAlign = node.textAlignVertical;
+        const origW = node.width;
+        const nodeH = node.height;
+        const len = before.length;
+        // 단일 라인 폭/높이 측정용 임시 노드 (폰트 메트릭 기반)
+        t = figma.createText();
+        if (font)
+            t.fontName = font;
+        t.fontSize = size || 16;
+        if (ls) {
+            try {
+                t.letterSpacing = ls;
+            }
+            catch (_e) { }
+        }
+        if (lineHeight) {
+            try {
+                t.lineHeight = lineHeight;
+            }
+            catch (_e) { }
+        }
+        if (textCase) {
+            try {
+                t.textCase = textCase;
+            }
+            catch (_e) { }
+        }
+        t.textAutoResize = 'WIDTH_AND_HEIGHT';
+        const ANCHOR = " ";
+        t.characters = ANCHOR;
+        const anchorW = t.width;
+        const lineH = t.height || (size || 16) * 1.3;
+        const adv = (s) => {
+            if (!s)
+                return 0;
+            t.characters = s + ANCHOR;
+            return t.width - anchorW;
+        };
+        // 한 줄에 들어가는 텍스트면 클론/줄바꿈 계산을 통째로 건너뛴다 (대부분의 UX 문구가 한 줄 → 큰 속도 이득).
+        const fullW = adv(before);
+        const singleLine = before.indexOf('\n') === -1 && fullW <= origW + 1;
+        let realLineH = lineH;
+        let totalLines = 1;
+        // 줄바꿈 계산용(멀티라인일 때만 채워짐)
+        let linesUpTo = () => 1;
+        let firstK = () => 0;
+        let lineTopOffset = () => 0;
+        if (!singleLine) {
+            // 줄바꿈을 원본과 동일하게 재현하기 위한 클론 (너비 고정)
+            clone = node.clone();
+            figma.currentPage.appendChild(clone);
+            try {
+                clone.effects = [];
+            }
+            catch (_e) { }
+            try {
+                clone.strokes = [];
+            }
+            catch (_e) { }
+            // 잘림/최대 줄 수가 걸려 있으면 자동 높이가 안 먹어 클론 높이가 박스 전체로 측정된다.
+            try {
+                clone.textTruncation = 'DISABLED';
+            }
+            catch (_e) { }
+            try {
+                clone.maxLines = null;
+            }
+            catch (_e) { }
+            try {
+                clone.textAutoResize = 'HEIGHT';
+            }
+            catch (_e) { }
+            try {
+                clone.resize(origW, clone.height);
+            }
+            catch (_e) { }
+            // 줄 높이: 한 줄인 임시 노드 기준. 클론으로 재보되 비정상(>1.8배)이면 버린다.
+            try {
+                clone.characters = '가';
+                const ch = clone.height;
+                if (ch > 0 && ch < lineH * 1.8)
+                    realLineH = ch;
+            }
+            catch (_e) { }
+            linesUpTo = (p) => {
+                if (p <= 0)
+                    return 0;
+                clone.characters = before.slice(0, p);
+                return Math.max(1, Math.round(clone.height / realLineH));
+            };
+            firstK = (L) => {
+                let lo = 0, hi = len;
+                while (lo < hi) {
+                    const mid = (lo + hi) >> 1;
+                    if (linesUpTo(mid) >= L)
+                        hi = mid;
+                    else
+                        lo = mid + 1;
+                }
+                return lo;
+            };
+            // 줄 L의 상단 y 오프셋 = 그 앞의 (L-1)개 줄 높이.
+            // firstK(L)은 'L번째 줄의 첫 글자' 인덱스라, 그 글자를 빼야(=firstK(L)-1) (L-1)줄 높이가 된다.
+            lineTopOffset = (L) => {
+                if (L <= 1)
+                    return 0;
+                const k = Math.max(0, firstK(L) - 1);
+                if (k <= 0)
+                    return 0;
+                clone.characters = before.slice(0, k);
+                return clone.height;
+            };
+            totalLines = Math.max(1, linesUpTo(len));
+        }
+        // 세로 기준점(텍스트 맨 위). 원본 노드는 이미 렌더돼 있어 absoluteRenderBounds를 쓸 수 있다.
+        // null이면 박스 높이 + 세로정렬로 폴백.
+        let textTop = absY;
+        {
+            let extraTop = 0;
+            const textH = totalLines * realLineH;
+            const extra = Math.max(0, nodeH - textH);
+            if (vAlign === 'CENTER')
+                extraTop = extra / 2;
+            else if (vAlign === 'BOTTOM')
+                extraTop = extra;
+            textTop = absY + extraTop;
+            let rb = null;
+            try {
+                rb = node.absoluteRenderBounds;
+            }
+            catch (_e) { }
+            if (rb && typeof rb.y === 'number' && typeof rb.height === 'number') {
+                const inkPerLine = rb.height / Math.max(1, totalLines);
+                const topGap = Math.max(0, (realLineH - inkPerLine) / 2);
+                textTop = rb.y - topGap;
+            }
+        }
+        // 한 줄 [a,e) 안에서 [segStart, segEnd] 구간이 차지하는 박스 (y는 호출자가 전달)
+        const makeBox = (a, e, segStart, segEnd, yTop) => {
+            if (before[a] === '\n')
+                a += 1; // 줄 경계의 \n은 다음 줄 시작 문자이므로 건너뜀
+            const cs = Math.min(Math.max(segStart, a), e);
+            const ce = Math.min(Math.max(segEnd, a), e);
+            const xStartInLine = adv(before.slice(a, cs));
+            const xEndInLine = adv(before.slice(a, ce));
+            const lineW = (a === 0 && e === len) ? fullW : adv(before.slice(a, e));
+            let leftEdge = 0;
+            if (align === 'CENTER')
+                leftEdge = (origW - lineW) / 2;
+            else if (align === 'RIGHT')
+                leftEdge = origW - lineW;
+            return { x: absX + leftEdge + xStartInLine, y: yTop, w: Math.max(1, xEndInLine - xStartInLine), h: realLineH };
+        };
+        for (let i = 0; i < segs.length; i++) {
+            const s = segs[i];
+            const startPos = s.bStart;
+            const endPos = Math.max(s.bEnd, s.bStart);
+            const rects = [];
+            if (singleLine) {
+                // 클론 없이 한 박스로
+                rects.push(makeBox(0, len, startPos, endPos, textTop));
+            }
+            else {
+                const Lstart = startPos < len ? Math.max(1, linesUpTo(startPos + 1)) : totalLines;
+                const Lend = endPos > startPos ? Math.max(1, linesUpTo(endPos)) : Lstart;
+                // 구간이 걸친 각 줄마다 박스를 따로 (멀티라인일 때 프레임 전체를 덮지 않도록)
+                for (let L = Lstart; L <= Lend; L++) {
+                    const a = Math.max(0, firstK(L) - 1);
+                    const e = L < totalLines ? Math.max(0, firstK(L + 1) - 1) : len;
+                    rects.push(makeBox(a, e, startPos, endPos, textTop + lineTopOffset(L)));
+                }
+            }
+            out[i] = { anchor: rects[0], rects };
+        }
+    }
+    catch (e) {
+        console.log('[UX-HL] measureSegments error', e);
+    }
+    finally {
+        if (clone) {
+            try {
+                clone.remove();
+            }
+            catch (_e) { }
+        }
+        if (t) {
+            try {
+                t.remove();
+            }
+            catch (_e) { }
+        }
+    }
+    return out;
+}
+// 형광펜 박스 생성 (key = HL_INFIX + nodeId + SEG_SEP + segIdx)
+// geom은 해당 줄의 영역(높이=lineH). 줄 높이를 넘지 않게 살짝만 여백.
+function createHighlightRect(key, geom, absX, absY) {
+    try {
+        const padX = 1;
+        const boxX = geom.x - padX;
+        const boxY = geom.y;
+        const boxW = Math.max(1, geom.w + padX * 2);
+        const boxH = Math.max(1, geom.h);
+        const hl = figma.createRectangle();
+        hl.name = HL_DISPLAY_NAME;
+        tagAnnotation(hl, key);
+        hl.fills = [{ type: 'SOLID', color: HIGHLIGHT_COLOR }];
+        hl.blendMode = 'MULTIPLY';
+        hl.cornerRadius = 2;
+        figma.currentPage.appendChild(hl);
+        hl.resize(boxW, boxH);
+        hl.x = boxX;
+        hl.y = boxY;
+        if (!annotationsVisible)
+            hl.visible = false;
+        hl.locked = true;
+        annotationOffset.set(key, { dx: boxX - absX, dy: boxY - absY });
+        registerAnnotation(hl);
+    }
+    catch (_e) { }
+}
+// 코멘트 말풍선 생성 (해당 세그먼트 바로 위에 배치)
+// 배경 사각형 + 텍스트를 "그룹"으로 묶는다. 그룹은 프레임과 달리 캔버스에 상시 이름표가 안 뜨고
+// (선택/호버 시에만 잠깐 보임), 클릭 한 번에 통째로 선택돼 앞으로 가져오기 좋다.
+function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) {
+    try {
+        const padX = 10;
+        const padY = 6;
+        // 텍스트 (먼저 만들어 크기를 잰다)
+        const text = figma.createText();
+        text.name = COMMENT_DISPLAY_NAME;
+        text.fontName = fontName;
+        text.characters = label;
+        text.fontSize = 12;
+        text.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+        text.textAutoResize = 'WIDTH_AND_HEIGHT';
+        const tw = text.width;
+        const th = text.height;
+        // 배경 사각형 (둥근 모서리 + 1px 검정 테두리)
+        const bg = figma.createRectangle();
+        bg.name = COMMENT_DISPLAY_NAME;
+        bg.resize(tw + padX * 2, th + padY * 2);
+        bg.cornerRadius = 8;
+        bg.fills = [{ type: 'SOLID', color: { r: 0.2, g: 0.78, b: 0.35 } }];
+        bg.strokes = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
+        bg.strokeWeight = 1;
+        // 배경 → 텍스트 순서로 추가해야 텍스트가 위에 그려진다
+        figma.currentPage.appendChild(bg);
+        figma.currentPage.appendChild(text);
+        const bx = anchorX;
+        const by = anchorY - (th + padY * 2) - 6;
+        bg.x = bx;
+        bg.y = by;
+        text.x = bx + padX;
+        text.y = by + padY;
+        // 배경+텍스트를 하나의 그룹으로 묶기 (클릭 시 통째로 선택)
+        const group = figma.group([bg, text], figma.currentPage);
+        group.name = COMMENT_DISPLAY_NAME;
+        if (!annotationsVisible)
+            group.visible = false;
+        group.locked = false; // 클릭해서 앞으로 가져올 수 있게 잠그지 않음 (끌어도 폴링이 제자리로 되돌림)
+        // 그룹 하나만 추적 (배경/텍스트는 그룹 안에 있어 함께 이동·제거됨)
+        tagAnnotation(group, key);
+        annotationOffset.set(key, { dx: group.x - absX, dy: group.y - absY });
+        registerAnnotation(group);
+    }
+    catch (_e) { }
+}
+async function measureAnnotation(item) {
+    // 기존 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
+    removeAnnotationByNodeId(item.nodeId);
+    let node = null;
+    try {
+        node = await figma.getNodeByIdAsync(item.nodeId);
+    }
+    catch (_e) { }
+    if (!node)
+        return null;
+    annotationNodeCache.set(item.nodeId, node);
+    const ancestors = new Set();
+    let cur = node;
+    while (cur && cur.type !== 'PAGE') {
+        if (cur.id)
+            ancestors.add(cur.id);
+        cur = cur.parent;
+    }
+    annotationAncestorIds.set(item.nodeId, ancestors);
+    const absX = item.x;
+    const absY = item.y;
+    const segs = mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP);
+    if (segs.length === 0)
+        return null;
+    const geoms = await measureSegments(node, item.before, segs, absX, absY);
+    const job = { absX, absY, highlights: [], comments: [] };
+    let idx = 0;
+    for (const s of segs) {
+        const bSeg = item.before.slice(s.bStart, s.bEnd);
+        const aSeg = item.after.slice(s.aStart, s.aEnd);
+        const label = buildSegmentLabel(bSeg, aSeg);
+        const segKey = item.nodeId + SEG_SEP + idx;
+        const measured = geoms[idx];
+        const fallback = { x: absX, y: absY, w: 1, h: 16 };
+        const rects = measured ? measured.rects : [fallback];
+        const anchor = measured ? measured.anchor : fallback;
+        // 변경된 기존 글자가 있을 때만 형광펜 박스 (걸친 줄마다 따로)
+        if (s.bEnd > s.bStart) {
+            rects.forEach((r, li) => {
+                job.highlights.push({ key: HL_INFIX + segKey + LINE_SEP + li, geom: r });
+            });
+        }
+        // 코멘트는 해당 세그먼트(첫 줄) 바로 위에
+        job.comments.push({ key: segKey, label, anchorX: anchor.x, anchorY: anchor.y });
+        idx++;
+    }
+    return job;
+}
+async function createAnnotations(previewData, onProgress) {
+    const fontName = await ensureAnnotationFont();
+    if (!fontName)
+        return;
+    // 1) 측정 단계 (비동기): 위치만 계산하고 화면엔 아무것도 안 그린다
+    const jobs = [];
+    const total = previewData.length;
+    for (let i = 0; i < total; i++) {
+        const job = await measureAnnotation(previewData[i]);
+        if (job)
+            jobs.push(job);
+        if (onProgress && (i + 1 === total || (i + 1) % 5 === 0))
+            onProgress(i + 1, total);
+    }
+    // 2) 생성 단계 (동기): 한 번에 전부 그린다 → 하나씩 뿅뿅이 아니라 한 프레임에 다같이 나타남
+    for (const job of jobs) {
+        for (const h of job.highlights) {
+            createHighlightRect(h.key, h.geom, job.absX, job.absY);
+        }
+        for (const c of job.comments) {
+            createCommentFrame(c.key, c.label, fontName, c.anchorX, c.anchorY, job.absX, job.absY);
+        }
+    }
+    startRepositionPolling();
+}
+function removeAnnotations() {
+    stopRepositionPolling();
+    annotationFontName = null;
+    annotationNodeCache.clear();
+    annotationAncestorIds.clear();
+    annotationOffset.clear();
+    annotationsByNode.clear();
+    for (const ann of getAllAnnotations()) {
+        ann.remove();
+    }
+}
+// APPLY 중인 노드 ID 추적 (documentchange에서 오탐 방지)
+const applyingNodeIds = new Set();
+// 어노테이션 위치 폴링 (프레임 이동 추적)
+let repositionTimer = null;
+function repositionAnnotations() {
+    if (annotationsByNode.size === 0)
+        return;
+    // 인덱스가 이미 노드별로 묶여 있으므로 노드 좌표(absoluteTransform)는 노드당 한 번만 읽는다.
+    for (const [nodeId, arr] of annotationsByNode) {
+        const node = annotationNodeCache.get(nodeId);
+        let pos = null;
+        if (node) {
+            try {
+                if (node.removed) {
+                    annotationNodeCache.delete(nodeId);
+                }
+                else {
+                    const at = node.absoluteTransform;
+                    pos = at ? { x: at[0][2], y: at[1][2] } : { x: node.x || 0, y: node.y || 0 };
+                }
+            }
+            catch (_e) {
+                annotationNodeCache.delete(nodeId);
+            }
+        }
+        // 살아있는 어노테이션만 남기며(제거된 건 정리) 위치 갱신
+        let alive = 0;
+        for (let i = 0; i < arr.length; i++) {
+            const entry = arr[i];
+            if (!entry.ann || entry.ann.removed)
+                continue;
+            arr[alive++] = entry;
+            if (!pos)
+                continue;
+            const off = annotationOffset.get(entry.key);
+            if (!off)
+                continue;
+            const newX = pos.x + off.dx;
+            const newY = pos.y + off.dy;
+            try {
+                if (Math.abs(entry.ann.x - newX) > 0.5 || Math.abs(entry.ann.y - newY) > 0.5) {
+                    entry.ann.x = newX;
+                    entry.ann.y = newY;
+                }
+            }
+            catch (_e) { }
+        }
+        arr.length = alive;
+        if (alive === 0)
+            annotationsByNode.delete(nodeId);
+    }
+}
+function startRepositionPolling() {
+    if (repositionTimer)
+        return;
+    // 페이지 전수 스캔 없이 레지스트리만 확인. 주기도 32ms→250ms로 낮춰 부하를 크게 줄임.
+    repositionTimer = setInterval(() => {
+        if (annotationsByNode.size > 0) {
+            repositionAnnotations();
+        }
+        else {
+            stopRepositionPolling();
+        }
+    }, 250);
+}
+function stopRepositionPolling() {
+    if (repositionTimer !== null) {
+        clearInterval(repositionTimer);
+        repositionTimer = null;
+    }
+}
+// 어노테이션 표시 상태
+let annotationsVisible = true;
+// 어노테이션 토글
+function toggleAnnotations() {
+    annotationsVisible = !annotationsVisible;
+    for (const ann of getAllAnnotations()) {
+        ann.visible = annotationsVisible;
+    }
+    figma.ui.postMessage({ type: 'annotations-visibility', visible: annotationsVisible });
+}
+// 텍스트 노드 외부 변경(Ctrl+Z 등) 감지 → 해당 어노테이션 제거
+try {
+    figma.on('documentchange', (event) => {
+        var _a;
+        if (!event || !event.documentChanges)
+            return;
+        for (const change of event.documentChanges) {
+            if (change.type === 'PROPERTY_CHANGE' &&
+                ((_a = change.node) === null || _a === void 0 ? void 0 : _a.type) === 'TEXT' &&
+                Array.isArray(change.properties) &&
+                change.properties.includes('characters')) {
+                const nodeId = change.node.id;
+                if (applyingNodeIds.has(nodeId))
+                    continue;
+                if (findAnnotation(nodeId)) {
+                    removeAnnotationByNodeId(nodeId);
+                    figma.ui.postMessage({ type: 'remove-changed-items', changedNodeIds: [nodeId] });
+                }
+            }
+        }
+    });
+}
+catch (_e) {
+    // documentchange 미지원 환경에서는 무시
+}
+// 플러그인 닫힐 때 어노테이션 자동 제거
+figma.on('close', () => {
+    removeAnnotations();
+});
+// PREVIEW에서 찾은 노드들을 캐시 (FOCUS_NODE에서 사용)
+const previewNodeCache = new Map();
+// 텍스트 수정 전에 폰트 로드(필수)
+async function loadFontsForTextNode(textNode) {
+    // 단일 폰트면 그대로 로드
+    if (textNode.fontName !== figma.mixed) {
+        await figma.loadFontAsync(textNode.fontName);
+        return;
+    }
+    // mixed 폰트면: 글자 단위로 폰트 수집 후 로드
+    const fonts = new Map();
+    const len = textNode.characters.length;
+    for (let i = 0; i < len; i++) {
+        const fn = textNode.getRangeFontName(i, i + 1);
+        if (fn !== figma.mixed) {
+            const key = fn.family + "::" + fn.style;
+            fonts.set(key, fn);
+        }
+    }
+    // 수집한 폰트들을 모두 로드
+    await Promise.all(Array.from(fonts.values()).map(f => figma.loadFontAsync(f)));
+}
+// 메시지 수신: UI 버튼 클릭 → 실행
+figma.ui.onmessage = async (msg) => {
+    var _a;
+    // 미리보기 모드
+    if (msg.type === "PREVIEW") {
+        // 로딩 표시
+        figma.ui.postMessage({
+            type: 'show-loading'
+        });
+        const selection = figma.currentPage.selection;
+        if (!selection || selection.length === 0) {
+            // 로딩 숨기기
+            figma.ui.postMessage({
+                type: 'hide-loading'
+            });
+            return;
+        }
+        // 진행률 업데이트 (노드 찾기 시작)
+        figma.ui.postMessage({
+            type: 'update-progress',
+            progress: 5,
+            status: '텍스트 노드 찾는 중...'
+        });
+        // 선택된 노드 내부의 모든 텍스트 노드 찾기 (비동기로 처리하여 UI 블로킹 방지)
+        const textNodes = [];
+        const totalSelectionNodes = selection.length;
+        // 각 선택된 노드에 대해 진행률 업데이트하면서 찾기
+        for (let i = 0; i < selection.length; i++) {
+            const node = selection[i];
+            const nodeIndex = i; // 클로저 문제 방지
+            // 진행률 업데이트 콜백 함수
+            const progressCallback = (nodeProgress) => {
+                // 전체 진행률 계산: 5% ~ 25% 범위
+                const baseProgress = 5 + (nodeIndex / totalSelectionNodes) * 20;
+                const nodeProgressRatio = nodeProgress / 100;
+                const currentProgress = baseProgress + (nodeProgressRatio * (20 / totalSelectionNodes));
+                figma.ui.postMessage({
+                    type: 'update-progress',
+                    progress: Math.min(currentProgress, 25),
+                    status: `텍스트 노드 찾는 중... (${nodeIndex + 1}/${totalSelectionNodes})`
+                });
+            };
+            // 노드 찾기 시작 시 진행률 업데이트
+            const startProgress = 5 + (nodeIndex / totalSelectionNodes) * 20;
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: Math.min(startProgress, 25),
+                status: `텍스트 노드 찾는 중... (${nodeIndex + 1}/${totalSelectionNodes})`
+            });
+            const foundNodes = await findAllTextNodes(node, 10000, progressCallback);
+            textNodes.push(...foundNodes);
+            // 진행률 업데이트 (5% ~ 25%)
+            const progress = 5 + ((i + 1) / totalSelectionNodes) * 20;
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: Math.min(progress, 25),
+                status: `텍스트 노드 찾는 중... (${i + 1}/${totalSelectionNodes})`
+            });
+        }
+        // 진행률 업데이트 (노드 찾기 완료)
+        figma.ui.postMessage({
+            type: 'update-progress',
+            progress: 30,
+            status: '텍스트 변환 중...'
+        });
+        if (textNodes.length === 0) {
+            // 로딩 숨기기
+            figma.ui.postMessage({
+                type: 'hide-loading'
+            });
+            // 변경점이 없음을 UI에 알림
+            figma.ui.postMessage({
+                type: 'preview-result',
+                data: []
+            });
+            // 토스트 알림 표시
+            figma.ui.postMessage({
+                type: 'show-toast',
+                message: '수정이 필요한 항목이 없습니다.'
+            });
+            return;
+        }
+        // 캐시 초기화
+        previewNodeCache.clear();
+        const previewData = [];
+        const nodesToSelect = [];
+        const CHUNK_SIZE = 50; // 50개씩 처리 후 yield
+        let lastProgressUpdateTime = Date.now();
+        const PROGRESS_UPDATE_TIME_INTERVAL = 100; // 100ms마다 시간 기반 업데이트
+        // 텍스트 변환 처리 (청크 단위로 나누어 처리하여 UI 블로킹 방지)
+        const totalTextNodes = textNodes.length;
+        for (let i = 0; i < textNodes.length; i++) {
+            const node = textNodes[i];
+            const before = node.characters;
+            // 패턴이 있는지 빠르게 확인 후 변환
+            const suggestions = suggestFriendlyKorean(before);
+            const preferredSuggestion = (_a = suggestions.find((s) => s.tags.includes("button"))) !== null && _a !== void 0 ? _a : suggestions[0];
+            const after = preferredSuggestion ? preferredSuggestion.after : before;
+            const reason = preferredSuggestion ? preferredSuggestion.reason : "";
+            if (before !== after) {
+                // 노드를 캐시에 저장 (FOCUS_NODE에서 사용)
+                previewNodeCache.set(node.id, node);
+                // 노드의 위치 정보 저장 (y 좌표 우선, 그 다음 x 좌표)
+                // absoluteTransform이 있으면 사용, 없으면 node.x/y 사용
+                let x = 0;
+                let y = 0;
+                try {
+                    const absoluteTransform = node.absoluteTransform;
+                    if (absoluteTransform) {
+                        x = absoluteTransform[0][2];
+                        y = absoluteTransform[1][2];
+                    }
+                    else {
+                        x = node.x || 0;
+                        y = node.y || 0;
+                    }
+                }
+                catch (e) {
+                    // 위치 정보 가져오기 실패 시 기본값 사용
+                    x = 0;
+                    y = 0;
+                }
+                previewData.push({
+                    nodeId: node.id,
+                    nodeName: node.name,
+                    before: before,
+                    after: after,
+                    reason: reason,
+                    y: y,
+                    x: x
+                });
+                nodesToSelect.push(node);
+            }
+            // 진행률 업데이트 (30% ~ 90%) - 처리량 기반 또는 시간 기반
+            const now = Date.now();
+            const progress = 30 + (i + 1) / totalTextNodes * 60;
+            const shouldUpdateProgress = (i + 1) % 10 === 0 ||
+                i === textNodes.length - 1 ||
+                (now - lastProgressUpdateTime) >= PROGRESS_UPDATE_TIME_INTERVAL;
+            if (shouldUpdateProgress) {
+                figma.ui.postMessage({
+                    type: 'update-progress',
+                    progress: Math.min(progress, 90),
+                    status: `텍스트 변환 중... (${i + 1}/${totalTextNodes})`
+                });
+                lastProgressUpdateTime = now;
+            }
+            // 일정 개수 처리 후 yield하여 UI 블로킹 방지
+            if ((i + 1) % CHUNK_SIZE === 0) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        }
+        // 진행률 업데이트 (정렬 및 완료)
+        figma.ui.postMessage({
+            type: 'update-progress',
+            progress: 95,
+            status: '정렬 중...'
+        });
+        // 위치 기준으로 정렬 (위에서 아래, 왼쪽에서 오른쪽)
+        previewData.sort((a, b) => {
+            // 먼저 y 좌표로 정렬 (위에서 아래)
+            if (Math.abs(a.y - b.y) > 1) {
+                return a.y - b.y;
+            }
+            // y 좌표가 비슷하면 x 좌표로 정렬 (왼쪽에서 오른쪽)
+            return a.x - b.x;
+        });
+        // 변경점이 있는 텍스트 노드들을 자동으로 선택
+        if (nodesToSelect.length > 0) {
+            figma.currentPage.selection = nodesToSelect;
+            figma.viewport.scrollAndZoomIntoView(nodesToSelect);
+        }
+        // 새 결과를 먼저 누적 방식으로 UI에 전송 (어노테이션 생성 실패와 무관하게 검토 결과 표시)
+        figma.ui.postMessage({
+            type: 'preview-add',
+            data: previewData
+        });
+        // 캔버스에 어노테이션 생성 (누적) — 이 작업도 로딩에 포함시킨다 (끝나기 전엔 로딩 유지)
+        figma.ui.postMessage({
+            type: 'update-progress',
+            progress: 96,
+            status: '표시 생성 중...'
+        });
+        try {
+            await createAnnotations(previewData, (done, total) => {
+                // 96% → 99% 사이를 생성 진행도로 채움
+                const p = total > 0 ? 96 + Math.floor((done / total) * 3) : 99;
+                figma.ui.postMessage({
+                    type: 'update-progress',
+                    progress: p,
+                    status: `표시 생성 중... (${done}/${total})`
+                });
+            });
+        }
+        catch (annErr) {
+            console.error('어노테이션 생성 실패:', annErr);
+        }
+        // 모든 생성까지 끝난 뒤에야 완료 + 로딩 숨김
+        figma.ui.postMessage({
+            type: 'update-progress',
+            progress: 100,
+            status: '완료!'
+        });
+        figma.ui.postMessage({
+            type: 'hide-loading'
+        });
+        // 새로 검토한 영역에서 수정 항목이 없으면 토스트
+        if (previewData.length === 0) {
+            figma.ui.postMessage({
+                type: 'show-toast',
+                message: '선택한 영역에 수정이 필요한 항목이 없어요.'
+            });
+        }
+        return;
+    }
+    // 실제 변경 적용 모드
+    if (msg.type === "APPLY") {
+        try {
+            const previewData = msg.data;
+            if (!previewData || previewData.length === 0) {
+                // 로딩 숨기기
+                figma.ui.postMessage({
+                    type: 'hide-loading'
+                });
+                return;
+            }
+            // 전송된 previewData에 있는 노드 ID만 처리 (선택된 항목만)
+            const targetNodeIds = new Set();
+            for (const item of previewData) {
+                targetNodeIds.add(item.nodeId);
+            }
+            // 미리보기 데이터를 맵으로 변환 (nodeId를 키로)
+            const previewMap = new Map();
+            for (const item of previewData) {
+                previewMap.set(item.nodeId, { before: item.before, after: item.after });
+            }
+            const changedNodeIds = new Set();
+            // 진행률 업데이트 (노드 찾기 시작)
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: 10,
+                status: '변경할 노드 찾는 중...'
+            });
+            // 변경할 노드들 수집 - getNodeById 우선 사용, 실패 시에만 제한적 스캔
+            const nodesToChange = [];
+            const failedNodeIds = [];
+            // 먼저 getNodeByIdAsync로 시도 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
+            const totalTargetNodes = targetNodeIds.size;
+            let processedCount = 0;
+            for (const nodeId of targetNodeIds) {
+                try {
+                    const nodeById = await figma.getNodeByIdAsync(nodeId);
+                    if (nodeById && nodeById.type === "TEXT") {
+                        nodesToChange.push(nodeById);
+                    }
+                    else {
+                        // 노드가 TEXT 타입이 아니거나 null인 경우
+                        failedNodeIds.push(nodeId);
+                    }
+                }
+                catch (e) {
+                    // getNodeById 실패 시 나중에 스캔으로 찾기 시도
+                    failedNodeIds.push(nodeId);
+                }
+                processedCount++;
+                // 진행률 업데이트 (10% ~ 30%)
+                if (processedCount % 10 === 0 || processedCount === totalTargetNodes) {
+                    const progress = 10 + (processedCount / totalTargetNodes) * 20;
+                    figma.ui.postMessage({
+                        type: 'update-progress',
+                        progress: Math.min(progress, 30),
+                        status: `변경할 노드 찾는 중... (${processedCount}/${totalTargetNodes})`
+                    });
+                }
+            }
+            // getNodeById로 찾지 못한 노드들만 제한적으로 스캔 (필요한 경우에만)
+            // 하지만 전체 페이지가 아닌 현재 선택된 영역만 스캔하여 성능 최적화
+            if (failedNodeIds.length > 0) {
+                // 현재 선택된 노드들에서만 스캔 (전체 페이지 스캔 대신)
+                const selection = figma.currentPage.selection;
+                const scannedNodes = new Map();
+                // 선택된 노드들 내부의 텍스트 노드만 스캔
+                for (const selectedNode of selection) {
+                    const foundNodes = await findAllTextNodes(selectedNode);
+                    for (const node of foundNodes) {
+                        scannedNodes.set(node.id, node);
+                    }
+                }
+                // 실패한 노드 ID들만 스캔된 노드에서 찾기
+                for (const nodeId of failedNodeIds) {
+                    const node = scannedNodes.get(nodeId);
+                    if (node) {
+                        nodesToChange.push(node);
+                    }
+                }
+            }
+            // 모든 노드의 폰트를 먼저 수집하여 병렬로 로드
+            const fontsToLoad = new Map();
+            for (const node of nodesToChange) {
+                if (node.fontName !== figma.mixed) {
+                    const font = node.fontName;
+                    const key = font.family + "::" + font.style;
+                    fontsToLoad.set(key, font);
+                }
+                else {
+                    // mixed 폰트: 글자 단위로 모든 폰트 수집
+                    try {
+                        const len = node.characters.length;
+                        for (let i = 0; i < len; i++) {
+                            const fn = node.getRangeFontName(i, i + 1);
+                            if (fn !== figma.mixed) {
+                                const font = fn;
+                                const key = font.family + "::" + font.style;
+                                fontsToLoad.set(key, font);
+                            }
+                        }
+                    }
+                    catch (_e) {
+                        // 폰트 정보 가져오기 실패 시 무시하고 계속 진행
+                    }
+                }
+            }
+            // 진행률 업데이트 (폰트 로딩 시작)
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: 40,
+                status: `폰트 로딩 중... (${fontsToLoad.size}개)`
+            });
+            // 모든 폰트를 병렬로 로드
+            if (fontsToLoad.size > 0) {
+                await Promise.all(Array.from(fontsToLoad.values()).map(f => figma.loadFontAsync(f)));
+            }
+            // 진행률 업데이트 (폰트 로딩 완료)
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: 60,
+                status: '텍스트 변경 적용 중...'
+            });
+            // 각 노드에 변경 적용 (폰트는 이미 로드됨)
+            const totalNodesToChange = nodesToChange.length;
+            let lastProgressUpdateTime = Date.now();
+            const PROGRESS_UPDATE_TIME_INTERVAL = 100; // 100ms마다 시간 기반 업데이트
+            for (let i = 0; i < nodesToChange.length; i++) {
+                const node = nodesToChange[i];
+                applyingNodeIds.add(node.id);
+                try {
+                    applyChangeToNode(node, previewMap, changedNodeIds, []);
+                }
+                catch (_e) {
+                    // 개별 노드 변경 실패 시 계속 진행
+                }
+                finally {
+                    applyingNodeIds.delete(node.id);
+                }
+                // 진행률 업데이트 (60% ~ 95%) - 처리량 기반 또는 시간 기반
+                const now = Date.now();
+                const progress = 60 + ((i + 1) / totalNodesToChange) * 35;
+                const shouldUpdateProgress = (i + 1) % 5 === 0 ||
+                    i === nodesToChange.length - 1 ||
+                    (now - lastProgressUpdateTime) >= PROGRESS_UPDATE_TIME_INTERVAL;
+                if (shouldUpdateProgress) {
+                    figma.ui.postMessage({
+                        type: 'update-progress',
+                        progress: Math.min(progress, 95),
+                        status: `텍스트 변경 적용 중... (${i + 1}/${totalNodesToChange})`
+                    });
+                    lastProgressUpdateTime = now;
+                }
+            }
+            // 진행률 업데이트 (완료)
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: 100,
+                status: '완료!'
+            });
+            // 로딩 숨기기
+            figma.ui.postMessage({
+                type: 'hide-loading'
+            });
+            // 변경 완료된 노드의 어노테이션(코멘트 + 형광펜) 제거
+            for (const nodeId of changedNodeIds) {
+                removeAnnotationByNodeId(nodeId);
+            }
+            // 변경된 항목 ID를 UI에 전송하여 UI에서 필터링하도록 함
+            if (changedNodeIds.size > 0) {
+                // 토스트 알림 표시 (UI에 전송)
+                const message = changedNodeIds.size === 1
+                    ? '변경이 완료되었어요.'
+                    : `${changedNodeIds.size}건이 변경 완료되었어요.`;
+                figma.ui.postMessage({
+                    type: 'show-toast',
+                    message: message
+                });
+                figma.ui.postMessage({
+                    type: 'remove-changed-items',
+                    changedNodeIds: Array.from(changedNodeIds)
+                });
+            }
+        }
+        catch (e) {
+            // 에러 발생 시에도 로딩 숨기기
+            figma.ui.postMessage({
+                type: 'hide-loading'
+            });
+        }
+        return;
+    }
+    // 플러그인 창 크기 조절
+    if (msg.type === "RESIZE_UI") {
+        const w = Math.max(300, Math.min(800, msg.width || 360));
+        const h = Math.max(400, Math.min(1200, msg.height || 780));
+        figma.ui.resize(w, h);
+        return;
+    }
+    // 어노테이션 전체 삭제
+    if (msg.type === "CLEAR_ANNOTATIONS") {
+        removeAnnotations();
+        annotationsVisible = true;
+        figma.ui.postMessage({ type: 'annotations-cleared' });
+        return;
+    }
+    // 어노테이션 숨기기/보이기 토글
+    if (msg.type === "TOGGLE_ANNOTATIONS") {
+        toggleAnnotations();
+        return;
+    }
+    // 취소: 어노테이션 제거
+    if (msg.type === "CANCEL") {
+        removeAnnotations();
+        return;
+    }
+    // 노드로 포커스 이동 및 스트로크 추가
+    if (msg.type === "FOCUS_NODE") {
+        try {
+            const nodeId = msg.nodeId;
+            if (!nodeId) {
+                return;
+            }
+            // 1. 먼저 캐시에서 찾기 (PREVIEW에서 찾은 노드)
+            let node = previewNodeCache.get(nodeId) || null;
+            // 2. 캐시에 없으면 getNodeByIdAsync로 찾기 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
+            if (!node) {
+                try {
+                    const nodeById = await figma.getNodeByIdAsync(nodeId);
+                    if (nodeById && nodeById.type === "TEXT") {
+                        node = nodeById;
+                    }
+                }
+                catch (e) {
+                    // 조회 실패 시 무시
+                }
+            }
+            // 3. 노드를 찾았으면 선택 및 뷰포트 이동
+            if (node && node.type === "TEXT" && !node.removed) {
+                // 해당 노드 선택
+                figma.currentPage.selection = [node];
+                // 뷰포트 이동 및 확대
+                figma.viewport.scrollAndZoomIntoView([node]);
+                // 해당 코멘트를 맨 앞으로 (selectionchange에 의존하지 않고 직접 호출)
+                bringAnnotationsToFront([nodeId]);
+            }
+        }
+        catch (e) {
+            console.error("[FOCUS] 노드 포커스 오류:", e);
+        }
+        return;
+    }
+    // 선택된 노드들을 Figma에서도 선택
+    if (msg.type === "SELECT_NODES") {
+        try {
+            const nodeIds = msg.nodeIds || [];
+            // 선택 상태에 따라 코멘트 투명도 갱신 (선택=불투명, 미선택=반투명)
+            updateAnnotationOpacity(nodeIds);
+            // 선택된 코멘트를 맨 앞으로 (겹칠 때 가려지지 않도록)
+            bringAnnotationsToFront(nodeIds);
+            if (nodeIds.length === 0) {
+                // 선택 해제
+                figma.currentPage.selection = [];
+                return;
+            }
+            // 캐시에서 노드 찾기
+            const nodesToSelect = [];
+            for (const nodeId of nodeIds) {
+                // 1. 캐시에서 찾기
+                let node = previewNodeCache.get(nodeId) || null;
+                // 2. 캐시에 없으면 getNodeByIdAsync로 찾기 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
+                if (!node) {
+                    try {
+                        const nodeById = await figma.getNodeByIdAsync(nodeId);
+                        if (nodeById && nodeById.type === "TEXT") {
+                            node = nodeById;
+                        }
+                    }
+                    catch (e) {
+                        // 무시
+                    }
+                }
+                if (node && !node.removed) {
+                    nodesToSelect.push(node);
+                }
+            }
+            // 선택된 노드들을 Figma에서 선택
+            if (nodesToSelect.length > 0) {
+                figma.currentPage.selection = nodesToSelect;
+                // 뷰포트 이동 (첫 번째 노드로)
+                figma.viewport.scrollAndZoomIntoView([nodesToSelect[0]]);
+            }
+        }
+        catch (e) {
+            console.error("[SELECT_NODES] 오류:", e);
+        }
+        return;
+    }
+};

@@ -613,6 +613,27 @@
         if (event.data.pluginMessage.type === 'selection-changed') {
           updatePreviewButtonState(event.data.pluginMessage.hasSelection);
         }
+
+        // 캔버스에서 노드/코멘트를 선택하면 검토 목록에서도 같은 항목을 선택 표시
+        if (event.data.pluginMessage.type === 'canvas-selection') {
+          const ids = event.data.pluginMessage.nodeIds || [];
+          selectedNodeIds = new Set(ids);
+          let firstEl = null;
+          document.querySelectorAll('.preview-item').forEach(el => {
+            if (selectedNodeIds.has(el.dataset.nodeId)) {
+              el.classList.add('selected');
+              if (!firstEl) firstEl = el;
+            } else {
+              el.classList.remove('selected');
+            }
+          });
+          const selectAllCheckbox = document.getElementById('selectAll');
+          if (selectAllCheckbox) selectAllCheckbox.checked = false;
+          // 선택된 첫 항목을 목록에서 보이게 스크롤
+          if (firstEl && firstEl.scrollIntoView) {
+            firstEl.scrollIntoView({ block: 'nearest' });
+          }
+        }
         
         if (event.data.pluginMessage.type === 'show-toast') {
           showToast(event.data.pluginMessage.message);
@@ -806,7 +827,7 @@
           // Header div 생성
           const header = document.createElement('div');
           header.className = 'preview-item-header';
-          header.textContent = `${index + 1}. ${item.nodeName || '텍스트 ' + (index + 1)}`;
+          header.textContent = `${index + 1}.`;
           
           // Preview item div 생성
           const div = document.createElement('div');
