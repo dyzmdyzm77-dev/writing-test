@@ -360,6 +360,15 @@ function protectCompounds(s: string): string {
   return t;
 }
 
+// 네이버는 교정문에서 앞뒤 공백/줄바꿈을 잘라서 돌려준다.
+// 그대로 두면 "출입정보 " → "출입정보"처럼 눈에 안 보이는(똑같아 보이는) 제안이 생기므로
+// 원문의 앞뒤 공백을 교정문에 그대로 복원한다.
+function restoreEdgeWhitespace(original: string, corrected: string): string {
+  const lead = (original.match(/^\s*/) || [''])[0];
+  const trail = (original.match(/\s*$/) || [''])[0];
+  return lead + corrected.trim() + trail;
+}
+
 // ===============================
 // '~해 주세요' 띄어쓰기 통일 (모든 변환이 끝난 뒤 마지막에 적용)
 // 기준은 '해' 앞 단어의 품사:
@@ -1125,7 +1134,8 @@ async function naverSpellCheck(text: string): Promise<SpellResult> {
   }
   if (r === null) return { text, reasons: [], checked: false };
   // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 — 되돌려서 원문과 같아지면 제안 자체가 사라진다
-  const corrected = r.errata > 0 ? protectCompounds(r.corrected) : r.corrected;
+  // 앞뒤 공백도 원문대로 복원 (네이버가 잘라내면 똑같아 보이는 제안이 생김)
+  const corrected = restoreEdgeWhitespace(text, r.errata > 0 ? protectCompounds(r.corrected) : r.corrected);
   let reasons: string[] = [];
   if (corrected !== text && r.errata > 0) {
     // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
@@ -1279,8 +1289,8 @@ async function naverSpellCheckAll(
     }
     for (let i = 0; i < texts.length; i++) {
       const t = texts[i];
-      // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 (단건 검사와 동일)
-      const corrected = lines[i].corrected !== t ? protectCompounds(lines[i].corrected) : lines[i].corrected;
+      // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 (단건 검사와 동일) + 앞뒤 공백 복원
+      const corrected = restoreEdgeWhitespace(t, lines[i].corrected !== t ? protectCompounds(lines[i].corrected) : lines[i].corrected);
       const reasons = corrected !== t
         ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기를 바로잡아요.'])
         : [];
