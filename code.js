@@ -2595,51 +2595,68 @@ function toggleAnnotations() {
     }
     figma.ui.postMessage({ type: 'annotations-visibility', visible: annotationsVisible });
 }
-// documentchange 감지:
+// 노드 변경 감지:
 // ① 텍스트 외부 변경(Ctrl+Z 등) → 해당 어노테이션 제거
 // ② 프레임/노드 이동·리사이즈 → 영향받는 어노테이션 위치 갱신 (폴링 대체)
+// 주의: documentAccess가 dynamic-page일 때 figma.on('documentchange')는
+//       loadAllPagesAsync() 없이는 등록이 실패한다 (이전 코드에선 try/catch에 조용히
+//       먹혀 한 번도 동작하지 않았음). 페이지 단위 'nodechange' 이벤트를 써야 한다.
 const GEOMETRY_PROPS = new Set(['x', 'y', 'width', 'height', 'parent', 'rotation']);
-try {
-    figma.on('documentchange', (event) => {
-        var _a;
-        if (!event || !event.documentChanges)
-            return;
-        const moved = new Set();
-        for (const change of event.documentChanges) {
-            if (change.type !== 'PROPERTY_CHANGE')
-                continue;
-            const props = Array.isArray(change.properties) ? change.properties : [];
-            // ② 기하 변경 → 이 노드를 조상으로 둔 추적 텍스트들만 골라 위치 갱신 예약
-            if (ancestorToTracked.size > 0 && props.some((p) => GEOMETRY_PROPS.has(p))) {
-                const tracked = ancestorToTracked.get(change.id);
-                if (tracked) {
-                    for (const t of tracked)
-                        moved.add(t);
-                }
-                // 코멘트/형광펜 자체를 끌었으면 제자리로 되돌리기 위해 갱신 예약
-                const byAnn = annIdToTracked.get(change.id);
-                if (byAnn)
-                    moved.add(byAnn);
+function handleNodeChanges(changes) {
+    var _a;
+    const moved = new Set();
+    for (const change of changes) {
+        if (!change || change.type !== 'PROPERTY_CHANGE')
+            continue;
+        const props = Array.isArray(change.properties) ? change.properties : [];
+        // ② 기하 변경 → 이 노드를 조상으로 둔 추적 텍스트들만 골라 위치 갱신 예약
+        if (ancestorToTracked.size > 0 && props.some((p) => GEOMETRY_PROPS.has(p))) {
+            const tracked = ancestorToTracked.get(change.id);
+            if (tracked) {
+                for (const t of tracked)
+                    moved.add(t);
             }
-            // ① 텍스트 내용 변경 → 어노테이션 제거
-            if (((_a = change.node) === null || _a === void 0 ? void 0 : _a.type) === 'TEXT' &&
-                props.includes('characters')) {
-                const nodeId = change.node.id;
-                if (applyingNodeIds.has(nodeId))
-                    continue;
-                if (findAnnotation(nodeId)) {
-                    removeAnnotationByNodeId(nodeId);
-                    figma.ui.postMessage({ type: 'remove-changed-items', changedNodeIds: [nodeId] });
-                }
+            // 코멘트/형광펜 자체를 끌었으면 제자리로 되돌리기 위해 갱신 예약
+            const byAnn = annIdToTracked.get(change.id);
+            if (byAnn)
+                moved.add(byAnn);
+        }
+        // ① 텍스트 내용 변경 → 어노테이션 제거
+        if (((_a = change.node) === null || _a === void 0 ? void 0 : _a.type) === 'TEXT' &&
+            props.includes('characters')) {
+            const nodeId = change.node.id;
+            if (applyingNodeIds.has(nodeId))
+                continue;
+            if (findAnnotation(nodeId)) {
+                removeAnnotationByNodeId(nodeId);
+                figma.ui.postMessage({ type: 'remove-changed-items', changedNodeIds: [nodeId] });
             }
         }
-        if (moved.size > 0)
-            scheduleReposition(moved);
-    });
+    }
+    if (moved.size > 0)
+        scheduleReposition(moved);
 }
-catch (_e) {
-    // documentchange 미지원 환경에서는 무시
+// 페이지별 nodechange 구독 (중복 구독 방지). 페이지를 옮기면 새 페이지도 구독한다.
+const nodeChangeSubscribedPages = new Set();
+function subscribeNodeChange(page) {
+    if (!page || !page.id || nodeChangeSubscribedPages.has(page.id))
+        return;
+    try {
+        page.on('nodechange', (event) => {
+            if (event && event.nodeChanges)
+                handleNodeChanges(event.nodeChanges);
+        });
+        nodeChangeSubscribedPages.add(page.id);
+    }
+    catch (e) {
+        console.log('[UX-ANN] nodechange 구독 실패', e);
+    }
 }
+subscribeNodeChange(figma.currentPage);
+try {
+    figma.on('currentpagechange', () => subscribeNodeChange(figma.currentPage));
+}
+catch (_e) { }
 // 플러그인 닫힐 때 어노테이션 자동 제거
 figma.on('close', () => {
     removeAnnotations();
