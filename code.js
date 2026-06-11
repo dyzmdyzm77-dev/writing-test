@@ -252,6 +252,40 @@ const TERM_RULES = [
     { pattern: /시도하세요/g, replacement: "시도해 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
 ];
 // ===============================
+// 도메인 합성어 보호 (용어집 표기 우선)
+// 네이버 맞춤법은 합성어를 표준대로 띄어 쓴다 ("고객인증번호"→"고객 인증번호",
+// "출입정보"→"출입 정보"). 그대로 두면 ① 공백만 다른 무의미한 제안이 생기고
+// ② 띄어쓰기가 바뀐 탓에 TERM_RULES가 매칭되지 않는다.
+// → 네이버 교정 직후와 변환 파이프라인 맨 앞에서 용어집 표기(붙여쓰기)로 되돌린다.
+// 새 합성어가 "X → X 같이 보이는 제안"으로 나타나면 이 목록에 추가할 것.
+// ===============================
+const COMPOUND_PROTECT_RULES = [
+    // 긴 단어 먼저 (고객인증번호가 인증번호보다 앞에 와야 함)
+    { pattern: /고객 ?인증 ?번호/g, replacement: "고객인증번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /휴대 ?전화 ?번호/g, replacement: "휴대전화번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /휴대 ?전화/g, replacement: "휴대전화", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /사용자 ?번호/g, replacement: "사용자번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /인증 ?번호/g, replacement: "인증번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /출입 ?정보/g, replacement: "출입정보", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /권한 ?설정/g, replacement: "권한설정", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /자격 ?선택/g, replacement: "자격선택", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /메뉴 ?진입/g, replacement: "메뉴진입", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /부팅 ?중/g, replacement: "부팅중", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /방범 ?구역/g, replacement: "방범구역", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /경비 ?구역/g, replacement: "경비구역", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /배경 ?화면/g, replacement: "배경화면", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+    { pattern: /상단 ?정보/g, replacement: "상단정보", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
+];
+// 합성어 보호만 조용히 적용 (네이버 교정 직후에 사용 — 사유 없이 텍스트만 복원)
+function protectCompounds(s) {
+    let t = s;
+    for (const r of COMPOUND_PROTECT_RULES) {
+        r.pattern.lastIndex = 0;
+        t = t.replace(r.pattern, r.replacement);
+    }
+    return t;
+}
+// ===============================
 // '~해 주세요' 띄어쓰기 통일 (모든 변환이 끝난 뒤 마지막에 적용)
 // 기준은 '해' 앞 단어의 품사:
 // - '하다'가 붙는 동작 명사면 '해'를 명사에 붙인다:
@@ -1013,14 +1047,16 @@ async function naverSpellCheck(text) {
     }
     if (r === null)
         return { text, reasons: [], checked: false };
+    // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 — 되돌려서 원문과 같아지면 제안 자체가 사라진다
+    const corrected = r.errata > 0 ? protectCompounds(r.corrected) : r.corrected;
     let reasons = [];
-    if (r.corrected !== text && r.errata > 0) {
+    if (corrected !== text && r.errata > 0) {
         // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
         reasons = r.types.length
             ? r.types.map(naverReasonSentence)
             : ['맞춤법·띄어쓰기를 바로잡아요.'];
     }
-    return { text: r.corrected, reasons, checked: true };
+    return { text: corrected, reasons, checked: true };
 }
 // 여러 문구를 \n으로 이어 한 번에 검사하고 줄 단위로 분해해 돌려준다.
 // 네이버는 줄바꿈을 <br>로 보존하므로 줄별 교정문/유형을 복원할 수 있다 (실서버 확인됨).
@@ -1173,7 +1209,8 @@ async function naverSpellCheckAll(uniqueTexts, onProgress) {
         }
         for (let i = 0; i < texts.length; i++) {
             const t = texts[i];
-            const corrected = lines[i].corrected;
+            // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 (단건 검사와 동일)
+            const corrected = lines[i].corrected !== t ? protectCompounds(lines[i].corrected) : lines[i].corrected;
             const reasons = corrected !== t
                 ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기를 바로잡아요.'])
                 : [];
@@ -1196,8 +1233,10 @@ async function naverSpellCheckAll(uniqueTexts, onProgress) {
  */
 function suggestFriendlyKorean(text, naverChecked = false) {
     const original = text;
-    // 0) 용어 통일 + 권장 문구 (사내 용어집 — 톤 변환 전에 먼저 적용해야 패턴이 맞는다)
-    const term = applyRules(original, TERM_RULES);
+    // 0) 합성어 보호 → 용어 통일 + 권장 문구 (사내 용어집 — 톤 변환 전에 먼저 적용해야 패턴이 맞는다)
+    //    합성어 보호가 먼저 돌아야 띄어 쓰인 변형("고객 인증번호")도 TERM_RULES에 걸린다
+    const protect = applyRules(original, COMPOUND_PROTECT_RULES);
+    const term = applyRules(protect.text, TERM_RULES);
     // 1) 오타/띄어쓰기(가벼운 룰)
     let typo = applyRules(term.text, TYPO_RULES);
     // 1-1) 부사 띄어쓰기 — 네이버 검사가 안 된 텍스트에만 폴백으로 적용 (오탐 위험 규칙)
@@ -1222,8 +1261,8 @@ function suggestFriendlyKorean(text, naverChecked = false) {
     // 최종 after (문장일 때)
     const finalAfter = period.text;
     // reason/tags 합치기
-    const mergedReasons = [...term.reasons, ...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...hae.reasons, ...period.reasons];
-    const mergedTags = [...term.tags, ...typo.tags, ...structural.tags, ...pattern.tags, ...hae.tags];
+    const mergedReasons = [...protect.reasons, ...term.reasons, ...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...hae.reasons, ...period.reasons];
+    const mergedTags = [...protect.tags, ...term.tags, ...typo.tags, ...structural.tags, ...pattern.tags, ...hae.tags];
     const suggestions = [];
     const mainSuggestion = buildSuggestion(original, finalAfter, mergedReasons, mergedTags);
     if (mainSuggestion)
