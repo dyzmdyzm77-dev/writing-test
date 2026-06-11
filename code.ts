@@ -326,6 +326,16 @@ const TERM_RULES: FixRule[] = [
 ];
 
 // ===============================
+// '~해 주세요' 띄어쓰기 통일 (모든 변환이 끝난 뒤 마지막에 적용)
+// - '해' 앞에 단어가 붙어 있으면(복합동사) 띄운다: "문의해주세요" → "문의해 주세요"
+// - '해' 앞이 띄어져 있으면(단독 사용) 붙인다:   "확인 해 주세요" → "확인 해주세요"
+// ===============================
+const HAEJUSEYO_RULES: FixRule[] = [
+  { pattern: /([가-힣])해주세요/g, replacement: "$1해 주세요", reason: "'~해 주세요' 띄어쓰기를 통일해요.", tags: ["spacing"] },
+  { pattern: /(^|\s)해 주세요/g, replacement: "$1해주세요", reason: "'해주세요' 띄어쓰기를 통일해요.", tags: ["spacing"] },
+];
+
+// ===============================
 // 문장 레벨 변환 규칙 (문맥 기반 자연스러운 표현)
 // ===============================
 const REWRITE_RULES: FixRule[] = [
@@ -459,6 +469,13 @@ const REWRITE_RULES: FixRule[] = [
   // ~하시기 바랍니다 → ~해주세요
   {
     pattern: /하시기 바랍니다/g,
+    replacement: "해주세요",
+    reason: "딱딱한 요청을 부드럽게 바꿔요.",
+    tags: ["tone"],
+  },
+  // ~하기 바랍니다 → ~해주세요 (위 규칙보다 앞의 '하시기→하기' 변환을 거친 경우 잡기)
+  {
+    pattern: /하기 바랍니다/g,
     replacement: "해주세요",
     reason: "딱딱한 요청을 부드럽게 바꿔요.",
     tags: ["tone"],
@@ -687,6 +704,22 @@ const REWRITE_RULES: FixRule[] = [
     reason: "자연스러운 표현으로 바꿔요.",
     tags: ["shorten"],
   },
+
+  // --- 해요체 통일 (일반 규칙 — 구체 패턴들이 먼저 처리된 뒤 남은 것을 잡는다) ---
+  // ~았/었/했/겠습니다 → ~았/었/했/겠어요 (앞 글자 받침이 ㅆ일 때만)
+  {
+    pattern: /([가-힣])습니다/g,
+    replacement: (m: string, p1: string) => (jongseongCode(p1) === 20 ? p1 + "어요" : m),
+    reason: "딱딱한 표현을 해요체로 바꿔요.",
+    tags: ["tone"],
+  },
+  { pattern: /아닙니다/g, replacement: "아니에요", reason: "딱딱한 표현을 해요체로 바꿔요.", tags: ["tone"] },
+  { pattern: /없습니다/g, replacement: "없어요", reason: "딱딱한 표현을 해요체로 바꿔요.", tags: ["tone"] },
+  { pattern: /같습니다/g, replacement: "같아요", reason: "딱딱한 표현을 해요체로 바꿔요.", tags: ["tone"] },
+  { pattern: /좋습니다/g, replacement: "좋아요", reason: "딱딱한 표현을 해요체로 바꿔요.", tags: ["tone"] },
+  // ~옵니다/갑니다 → ~와요/가요 (가져옵니다, 들어갑니다 등)
+  { pattern: /([가-힣])옵니다/g, replacement: "$1와요", reason: "딱딱한 표현을 해요체로 바꿔요.", tags: ["tone"] },
+  { pattern: /([가-힣])갑니다/g, replacement: "$1가요", reason: "딱딱한 표현을 해요체로 바꿔요.", tags: ["tone"] },
 ];
 
 // ===============================
@@ -811,9 +844,10 @@ function applyPeriodRule(text: string, originalText?: string): { text: string; r
   }
   
   // ~요로 끝나는 문장에 마침표 추가 (이미 마침표가 없을 때만)
-  // 패턴: "해요/돼요/이에요/예요/있어요/주세요/까요" 다음에 공백이 있고 그 다음 한글이 오거나, 문장 끝일 때
-  const periodPattern = /(해요|돼요|이에요|예요|있어요|주세요|까요)(\s+)(?![.,!?])([가-힣])/g;
-  const periodPatternEnd = /(해요|돼요|이에요|예요|있어요|주세요|까요)(?![.,!?])(?=\s*$)/g;
+  // 해요체 종결어미 전반을 커버한다 (어요=했어요/있어요, 아요=같아요, 에요=아니에요/이에요,
+  // 세요=주세요/하세요, 와요/가요/네요/까요 등). '필요', '중요' 같은 명사는 안 걸린다.
+  const periodPattern = /(해요|돼요|에요|예요|어요|아요|와요|가요|네요|세요|까요)(\s+)(?![.,!?])([가-힣])/g;
+  const periodPatternEnd = /(해요|돼요|에요|예요|어요|아요|와요|가요|네요|세요|까요)(?![.,!?])(?=\s*$)/g;
 
   // 중간에 있는 경우: "돼요  안되" → "돼요.  안되"
   if (periodPattern.test(t)) {
@@ -1098,15 +1132,18 @@ function suggestFriendlyKorean(text: string, naverChecked = false): Suggestion[]
   // 4) 패턴 DB(해요체+용어 통일)
   const pattern = applyPatternDB(structural.text);
 
+  // 4-1) '~해 주세요' 띄어쓰기 통일 (모든 톤 변환 결과에 일괄 적용)
+  const hae = applyRules(pattern.text, HAEJUSEYO_RULES);
+
   // 5) 마침표 추가 (패턴 적용 후) - 원본에 마침표가 있으면 reason 추가 안 함
-  const period = applyPeriodRule(pattern.text, original);
+  const period = applyPeriodRule(hae.text, original);
 
   // 최종 after (문장일 때)
   const finalAfter = period.text;
 
   // reason/tags 합치기
-  const mergedReasons = [...term.reasons, ...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...period.reasons];
-  const mergedTags = [...term.tags, ...typo.tags, ...structural.tags, ...pattern.tags];
+  const mergedReasons = [...term.reasons, ...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...hae.reasons, ...period.reasons];
+  const mergedTags = [...term.tags, ...typo.tags, ...structural.tags, ...pattern.tags, ...hae.tags];
 
   const suggestions: Suggestion[] = [];
 
