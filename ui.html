@@ -806,17 +806,14 @@
             .replace(/'/g, '&#39;');
         }
 
-        // 공백/문장부호만 바뀐 변경(띄어쓰기, 마침표 추가 등)은 색칠할 글자가 작아 잘 안 보인다.
-        // 이런 변경 구간은 양옆 단어(인접 공통 부분의 비공백)까지 흡수해 단어 단위로 색칠한다.
-        // 예: "주세요" → "주세요." 면 "주세요" 단어까지 함께 색칠.
+        // 변경 구간을 단어 단위로 색칠한다.
+        // "방범구역"→"경비구역"이 "방범/경비"만 색칠되거나, 마침표만 바뀌어 색칠이 안 보이는 일이
+        // 없도록 양옆 공통 부분의 인접 단어(공백 전까지)를 흡수해 단어 전체를 강조한다.
         function mergeWhitespaceChangeParts(parts) {
-          // 글자(한글/영문/숫자)가 없으면 = 공백·문장부호뿐인 사소한 변경
-          const hasWord = (s) => /[0-9A-Za-z가-힣]/.test(s);
           const out = [];
           for (let idx = 0; idx < parts.length; idx++) {
             const p = parts[idx];
-            const isWsChange = p.changed && !hasWord(p.before) && !hasWord(p.after);
-            if (!isWsChange) { out.push(p); continue; }
+            if (!p.changed) { out.push(p); continue; }
             let prefix = '';
             const prev = out[out.length - 1];
             if (prev && !prev.changed) {

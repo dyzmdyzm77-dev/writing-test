@@ -226,7 +226,6 @@ const TERM_RULES = [
     { pattern: /패스워드/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // "암호화"는 다른 뜻이므로 예외
     { pattern: /암호(?!화)/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /상단정보/g, replacement: "상단 날짜/시간", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // "사용자 배경화면"을 먼저 치환해야 "사용자 사용자 이미지"가 안 된다
     { pattern: /사용자 ?배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
@@ -1731,15 +1730,11 @@ function mergeCloseSegments(segs, gap, before, after) {
     return merged;
 }
 function isSpaceChar(c) { return c === ' ' || c === '\t' || c === '\n'; }
-// 공백/문장부호만 추가·삭제된 변경(띄어쓰기, 마침표 추가 등)은 변경 글자가 작아 "(없음) → ."처럼 의미 없게 보인다.
-// 이런 경우 양옆의 안 바뀐 글자를 공백 만나기 전까지 끌어와 단어 단위로 넓힌다. → "주세요 → 주세요."
-function expandSpacingSegment(s, before, after) {
-    const hasWord = (str) => /[0-9A-Za-z가-힣]/.test(str);
-    const bSeg = before.slice(s.bStart, s.bEnd);
-    const aSeg = after.slice(s.aStart, s.aEnd);
-    // 한쪽이라도 글자(한글/영문/숫자)가 있으면 일반 치환 → 그대로 둔다 (공백·문장부호뿐일 때만 넓힘)
-    if (hasWord(bSeg) || hasWord(aSeg))
-        return s;
+// 변경 구간을 단어 경계까지 넓힌다.
+// "방범구역"→"경비구역"이 "방범 → 경비"로 조각나거나, "업그레이드"→"업데이트"가
+// "그레이드 → 데이트"로 보이지 않게, 양옆의 안 바뀐 글자를 공백/줄바꿈 전까지 포함해
+// 단어 전체를 표시한다. (마침표만 바뀐 "(없음) → ." 표시 문제도 함께 해결)
+function expandSegmentToWord(s, before, after) {
     let { bStart, bEnd, aStart, aEnd } = s;
     while (bStart > 0 && aStart > 0 && before[bStart - 1] === after[aStart - 1] && !isSpaceChar(before[bStart - 1])) {
         bStart--;
@@ -1750,6 +1745,26 @@ function expandSpacingSegment(s, before, after) {
         aEnd++;
     }
     return { bStart, bEnd, aStart, aEnd };
+}
+// 단어 경계로 넓힌 뒤 겹치거나 맞닿은 구간을 하나로 합친다.
+// 예: "고객인증번호"→"사용자번호(고객인증번호)"는 앞뒤 삽입 2개가 같은 단어로 넓혀져 겹친다.
+function mergeOverlappingSegments(segs) {
+    if (segs.length <= 1)
+        return segs;
+    const sorted = segs.slice().sort((a, b) => (a.bStart - b.bStart) || (a.aStart - b.aStart));
+    const out = [Object.assign({}, sorted[0])];
+    for (let i = 1; i < sorted.length; i++) {
+        const prev = out[out.length - 1];
+        const cur = sorted[i];
+        if (cur.bStart <= prev.bEnd && cur.aStart <= prev.aEnd) {
+            prev.bEnd = Math.max(prev.bEnd, cur.bEnd);
+            prev.aEnd = Math.max(prev.aEnd, cur.aEnd);
+        }
+        else {
+            out.push(Object.assign({}, cur));
+        }
+    }
+    return out;
 }
 // 세그먼트 라벨: "원래 → 변경"
 function buildSegmentLabel(beforeSeg, afterSeg) {
@@ -2163,8 +2178,8 @@ async function measureAnnotation(item, scratch) {
     annotationAncestorIds.set(item.nodeId, ancestors);
     const absX = item.x;
     const absY = item.y;
-    const segs = mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP, item.before, item.after)
-        .map((s) => expandSpacingSegment(s, item.before, item.after));
+    const segs = mergeOverlappingSegments(mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP, item.before, item.after)
+        .map((s) => expandSegmentToWord(s, item.before, item.after)));
     if (segs.length === 0)
         return null;
     const geoms = await measureSegments(node, item.before, segs, absX, absY, scratch);
