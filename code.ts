@@ -1711,13 +1711,21 @@ const annotationNodeCache = new Map<string, any>();
 // nodeId -> 대상 노드 자신 + 조상 노드 id 집합 (캔버스 선택 매칭용)
 const annotationAncestorIds = new Map<string, Set<string>>();
 
+// 조상 노드 id -> 그 아래에 있는 추적 대상 텍스트 nodeId 집합 (documentchange에서 역방향 조회용)
+// 프레임 하나가 움직이면 이 인덱스로 영향받는 텍스트만 골라 위치를 갱신한다.
+const ancestorToTracked = new Map<string, Set<string>>();
+
+// 어노테이션 노드 id -> 대상 텍스트 nodeId (코멘트를 손으로 끌면 제자리로 되돌리기 위한 역추적)
+const annIdToTracked = new Map<string, string>();
+
 // 어노테이션 key(이름에서 PREFIX 뗀 부분) -> 대상 노드 기준 상대 위치 (프레임 이동 시 위치 갱신용)
 // 코멘트/형광펜 모두 이 맵으로 위치를 따라감
 const annotationOffset = new Map<string, { dx: number; dy: number }>();
 
 // nodeId -> 그 노드의 어노테이션 노드들.
 // 생성/제거/위치추적 모두 이 인덱스를 사용해 페이지 전수 스캔(getAllAnnotations)을 피한다.
-const annotationsByNode = new Map<string, Array<{ ann: any; key: string }>>();
+// op: 마지막으로 쓴 투명도 (같은 값이면 다시 쓰지 않아 수천 개일 때 브리지 호출을 줄인다)
+const annotationsByNode = new Map<string, Array<{ ann: any; key: string; op?: number }>>();
 
 // 방금 만든 어노테이션을 인덱스에 등록
 function registerAnnotation(ann: any): void {
@@ -1725,7 +1733,8 @@ function registerAnnotation(ann: any): void {
   if (!p) return;
   let arr = annotationsByNode.get(p.nodeId);
   if (!arr) { arr = []; annotationsByNode.set(p.nodeId, arr); }
-  arr.push({ ann, key: p.key });
+  arr.push({ ann, key: p.key, op: 1 }); // 생성 시 불투명(1)
+  try { if (ann.id) annIdToTracked.set(ann.id, p.nodeId); } catch (_e) {}
 }
 
 // 형광펜 색 (노란 형광)
@@ -1760,10 +1769,23 @@ function findAnnotation(nodeId: string): any | null {
 // 특정 노드의 모든 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
 // 인덱스(annotationsByNode)로 바로 찾으므로 페이지 전수 스캔이 없다.
 function removeAnnotationByNodeId(nodeId: string): void {
+  // 역방향 인덱스 정리
+  const ancestors = annotationAncestorIds.get(nodeId);
+  if (ancestors) {
+    for (const aid of ancestors) {
+      const set = ancestorToTracked.get(aid);
+      if (set) {
+        set.delete(nodeId);
+        if (set.size === 0) ancestorToTracked.delete(aid);
+      }
+    }
+    annotationAncestorIds.delete(nodeId);
+  }
   const arr = annotationsByNode.get(nodeId);
   if (!arr) return;
   for (const { ann, key } of arr) {
     annotationOffset.delete(key);
+    try { if (ann && ann.id) annIdToTracked.delete(ann.id); } catch (_e) {}
     try { ann.remove(); } catch (_e) {}
   }
   annotationsByNode.delete(nodeId);
@@ -1793,8 +1815,14 @@ function updateAnnotationOpacity(selectedIds: string[]): void {
   const selected = new Set(selectedIds);
   for (const [nodeId, arr] of annotationsByNode) {
     const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : 0.35;
-    for (const { ann } of arr) {
-      try { if (ann && !ann.removed) ann.opacity = op; } catch (_e) {}
+    for (const entry of arr) {
+      if (entry.op === op) continue; // 같은 값이면 브리지 호출 생략 (수천 개일 때 중요)
+      try {
+        if (entry.ann && !entry.ann.removed) {
+          entry.ann.opacity = op;
+          entry.op = op;
+        }
+      } catch (_e) {}
     }
   }
 }
@@ -1804,9 +1832,15 @@ function updateAnnotationOpacity(selectedIds: string[]): void {
 function updateAnnotationOpacityBySeg(selectedSegIds: string[]): void {
   const selected = new Set(selectedSegIds);
   for (const [, arr] of annotationsByNode) {
-    for (const { ann, key } of arr) {
-      const op = (selected.size === 0 || selected.has(annSegId(key))) ? 1 : 0.35;
-      try { if (ann && !ann.removed) ann.opacity = op; } catch (_e) {}
+    for (const entry of arr) {
+      const op = (selected.size === 0 || selected.has(annSegId(entry.key))) ? 1 : 0.35;
+      if (entry.op === op) continue;
+      try {
+        if (entry.ann && !entry.ann.removed) {
+          entry.ann.opacity = op;
+          entry.op = op;
+        }
+      } catch (_e) {}
     }
   }
 }
@@ -2388,6 +2422,12 @@ async function measureAnnotation(item: { nodeId: string; before: string; after: 
     cur = cur.parent;
   }
   annotationAncestorIds.set(item.nodeId, ancestors);
+  // 역방향 인덱스 갱신 (documentchange에서 "움직인 프레임 → 영향받는 텍스트" 조회용)
+  for (const aid of ancestors) {
+    let set = ancestorToTracked.get(aid);
+    if (!set) { set = new Set(); ancestorToTracked.set(aid, set); }
+    set.add(item.nodeId);
+  }
 
   const absX = item.x;
   const absY = item.y;
@@ -2455,15 +2495,16 @@ async function createAnnotations(
       createCommentFrame(c.key, c.label, fontName, c.anchorX, c.anchorY, job.absX, job.absY);
     }
   }
-
-  startRepositionPolling();
+  // 위치 추적은 documentchange 이벤트가 담당 (별도 폴링 없음)
 }
 
 function removeAnnotations(): void {
-  stopRepositionPolling();
+  cancelPendingReposition();
   annotationFontName = null;
   annotationNodeCache.clear();
   annotationAncestorIds.clear();
+  ancestorToTracked.clear();
+  annIdToTracked.clear();
   annotationOffset.clear();
   annotationsByNode.clear();
   for (const ann of getAllAnnotations()) {
@@ -2474,13 +2515,18 @@ function removeAnnotations(): void {
 // APPLY 중인 노드 ID 추적 (documentchange에서 오탐 방지)
 const applyingNodeIds = new Set<string>();
 
-// 어노테이션 위치 폴링 (프레임 이동 추적)
-let repositionTimer: ReturnType<typeof setInterval> | null = null;
+// 어노테이션 위치 추적 — 폴링이 아니라 documentchange 이벤트 기반.
+// (예전 250ms 폴링은 어노테이션이 수천 개면 캔버스가 가만히 있어도 매 틱마다
+//  좌표 읽기/비교 브리지 호출을 쏟아내 100개 화면 검토 시 캔버스 렉의 원인이 됐다.
+//  이제 실제로 노드가 움직였을 때, 영향받는 텍스트의 어노테이션만 갱신한다.)
+let repositionPending: Set<string> | null = null;
+let repositionFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function repositionAnnotations(): void {
-  if (annotationsByNode.size === 0) return;
-  // 인덱스가 이미 노드별로 묶여 있으므로 노드 좌표(absoluteTransform)는 노드당 한 번만 읽는다.
-  for (const [nodeId, arr] of annotationsByNode) {
+// 지정한 대상 노드들의 어노테이션만 위치 갱신
+function repositionAnnotationsFor(nodeIds: string[]): void {
+  for (const nodeId of nodeIds) {
+    const arr = annotationsByNode.get(nodeId);
+    if (!arr) continue;
     const node = annotationNodeCache.get(nodeId);
     let pos: { x: number; y: number } | null = null;
     if (node) {
@@ -2508,6 +2554,8 @@ function repositionAnnotations(): void {
       const newX = pos.x + off.dx;
       const newY = pos.y + off.dy;
       try {
+        // 달라졌을 때만 쓴다 — 우리가 쓴 좌표가 다시 documentchange를 일으켜도
+        // 다음 갱신에서 값이 같아 멈춘다 (이벤트 루프 방지)
         if (Math.abs(entry.ann.x - newX) > 0.5 || Math.abs(entry.ann.y - newY) > 0.5) {
           entry.ann.x = newX;
           entry.ann.y = newY;
@@ -2519,23 +2567,25 @@ function repositionAnnotations(): void {
   }
 }
 
-function startRepositionPolling(): void {
-  if (repositionTimer) return;
-  // 페이지 전수 스캔 없이 레지스트리만 확인. 주기도 32ms→250ms로 낮춰 부하를 크게 줄임.
-  repositionTimer = setInterval(() => {
-    if (annotationsByNode.size > 0) {
-      repositionAnnotations();
-    } else {
-      stopRepositionPolling();
-    }
-  }, 250);
+// 움직인 노드들을 모아 100ms에 한 번만 갱신 (드래그 중 이벤트 폭주 대비)
+function scheduleReposition(nodeIds: Set<string>): void {
+  if (!repositionPending) repositionPending = new Set();
+  for (const id of nodeIds) repositionPending.add(id);
+  if (repositionFlushTimer) return;
+  repositionFlushTimer = setTimeout(() => {
+    repositionFlushTimer = null;
+    const ids = repositionPending;
+    repositionPending = null;
+    if (ids && ids.size > 0) repositionAnnotationsFor(Array.from(ids));
+  }, 100);
 }
 
-function stopRepositionPolling(): void {
-  if (repositionTimer !== null) {
-    clearInterval(repositionTimer);
-    repositionTimer = null;
+function cancelPendingReposition(): void {
+  if (repositionFlushTimer !== null) {
+    clearTimeout(repositionFlushTimer);
+    repositionFlushTimer = null;
   }
+  repositionPending = null;
 }
 
 // 어노테이션 표시 상태
@@ -2550,17 +2600,35 @@ function toggleAnnotations(): void {
   figma.ui.postMessage({ type: 'annotations-visibility', visible: annotationsVisible });
 }
 
-// 텍스트 노드 외부 변경(Ctrl+Z 등) 감지 → 해당 어노테이션 제거
+// documentchange 감지:
+// ① 텍스트 외부 변경(Ctrl+Z 등) → 해당 어노테이션 제거
+// ② 프레임/노드 이동·리사이즈 → 영향받는 어노테이션 위치 갱신 (폴링 대체)
+const GEOMETRY_PROPS = new Set(['x', 'y', 'width', 'height', 'parent', 'rotation']);
+
 try {
   (figma as any).on('documentchange', (event: any) => {
     if (!event || !event.documentChanges) return;
 
+    const moved = new Set<string>();
     for (const change of event.documentChanges) {
+      if (change.type !== 'PROPERTY_CHANGE') continue;
+      const props: string[] = Array.isArray(change.properties) ? change.properties : [];
+
+      // ② 기하 변경 → 이 노드를 조상으로 둔 추적 텍스트들만 골라 위치 갱신 예약
+      if (ancestorToTracked.size > 0 && props.some((p) => GEOMETRY_PROPS.has(p))) {
+        const tracked = ancestorToTracked.get(change.id);
+        if (tracked) {
+          for (const t of tracked) moved.add(t);
+        }
+        // 코멘트/형광펜 자체를 끌었으면 제자리로 되돌리기 위해 갱신 예약
+        const byAnn = annIdToTracked.get(change.id);
+        if (byAnn) moved.add(byAnn);
+      }
+
+      // ① 텍스트 내용 변경 → 어노테이션 제거
       if (
-        change.type === 'PROPERTY_CHANGE' &&
         change.node?.type === 'TEXT' &&
-        Array.isArray(change.properties) &&
-        change.properties.includes('characters')
+        props.includes('characters')
       ) {
         const nodeId = change.node.id;
         if (applyingNodeIds.has(nodeId)) continue;
@@ -2571,6 +2639,7 @@ try {
         }
       }
     }
+    if (moved.size > 0) scheduleReposition(moved);
   });
 } catch (_e) {
   // documentchange 미지원 환경에서는 무시
