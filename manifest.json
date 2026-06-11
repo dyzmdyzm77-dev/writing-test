@@ -12,7 +12,8 @@
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
-      "none"
+      "https://m.search.naver.com",
+      "https://*.workers.dev"
     ]
   }
 }

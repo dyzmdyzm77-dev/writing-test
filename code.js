@@ -1,6 +1,11 @@
 // /// <reference types="@figma/plugin-typings" />
 // UI 띄우기
-figma.showUI(__html__, { width: 360, height: 780 });
+const UI_INIT_W = 360;
+const UI_INIT_H = 780;
+figma.showUI(__html__, { width: UI_INIT_W, height: UI_INIT_H });
+// 직전 UI 크기 추적 (리사이즈 시 반대쪽 가장자리 고정 계산용)
+let uiLastW = UI_INIT_W;
+let uiLastH = UI_INIT_H;
 // 선택 상태 변경 감지
 figma.on('selectionchange', () => {
     const selection = figma.currentPage.selection;
@@ -691,6 +696,246 @@ function applyPeriodRule(text, originalText) {
     }
     return { text: t, reasons };
 }
+// ===============================
+// 조사 교정 (받침 기반 — 오프라인). 충돌이 적은 을/를만 처리.
+// (이/가·와/과·(으)로는 효과/종로/국가 같은 진짜 단어와 충돌이 많아 제외)
+// ===============================
+// '을/를'로 끝나지만 실제로는 한 단어라 건드리면 안 되는 흔한 경우
+const PARTICLE_FALSE_POSITIVES = new Set(['마을', '가을', '노을']);
+// 받침 종성 코드 (0 = 받침 없음). -1 = 한글 음절 아님
+function jongseongCode(ch) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0xAC00 && code <= 0xD7A3)
+        return (code - 0xAC00) % 28;
+    return -1;
+}
+// 단어 경계(공백/문장부호/끝) 앞의 을/를을, 앞 글자 받침에 맞게 교정
+function fixParticles(text) {
+    let changed = false;
+    const BOUNDARY = `(?=[\\s.,!?)\\]"'»」』]|$)`;
+    const re = new RegExp(`([가-힣])(을|를)${BOUNDARY}`, 'g');
+    const t = text.replace(re, (m, prev, particle) => {
+        const jong = jongseongCode(prev);
+        if (jong < 0)
+            return m;
+        if (PARTICLE_FALSE_POSITIVES.has(prev + particle))
+            return m; // 흔한 단어는 건너뜀
+        const correct = jong > 0 ? '을' : '를';
+        if (particle !== correct) {
+            changed = true;
+            return prev + correct;
+        }
+        return m;
+    });
+    return { text: t, reasons: changed ? ['조사 을/를을 바로잡아요.'] : [] };
+}
+// ===============================
+// 네이버 맞춤법 검사 (비공식 — py-hanspell 방식: 검색페이지에서 passportKey 추출 후 SpellerProxy 호출)
+// 공식 API 아님 → 네이버가 바꾸면 깨질 수 있음. 실패 시 조용히 건너뜀(로컬 규칙은 그대로 동작).
+// ===============================
+let naverPassportKey = null;
+let naverDiag = ''; // 실패 원인 진단용 (토스트/콘솔로 노출)
+let naverOkCount = 0; // 이번 검토에서 SpellerProxy 정상 응답 건수
+// passportKey 심부름꾼 서버 주소. 검색페이지는 CORS가 막혀 플러그인에서 직접 못 긁으므로
+// Cloudflare Worker(naver-passport-proxy/worker.js)가 서버에서 대신 긁어 CORS 허용해서 돌려준다.
+// ↓ 배포 후 본인 워커 주소로 교체할 것 (manifest.json allowedDomains에도 같은 도메인 추가)
+const NAVER_PROXY_URL = 'https://writingtest.dyzmdyzm77.workers.dev/';
+// 타임아웃 있는 fetch — 한 요청이 멈춰도 그 슬롯이 영원히 막히지 않게 한다.
+// Figma 플러그인 런타임엔 AbortController가 없어 Promise.race로 구현 (느린 fetch는 버려지고 슬롯만 푼다).
+function fetchWithTimeout(url, ms) {
+    return Promise.race([
+        fetch(url),
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error('타임아웃 ' + ms + 'ms')), ms)),
+    ]);
+}
+// 에러 객체에서 사람이 읽을 메시지 추출 ([object Object] 방지)
+function errStr(e) {
+    if (!e)
+        return 'unknown';
+    if (typeof e === 'string')
+        return e;
+    if (e.message)
+        return String(e.message);
+    try {
+        return JSON.stringify(e);
+    }
+    catch (_e) {
+        return String(e);
+    }
+}
+async function getNaverPassportKey(force = false) {
+    if (naverPassportKey && !force)
+        return naverPassportKey;
+    try {
+        const res = await fetchWithTimeout(NAVER_PROXY_URL, 8000);
+        if (!res.ok) {
+            naverDiag = '프록시 HTTP ' + res.status;
+            console.log('[UX-SPELL]', naverDiag);
+            return null;
+        }
+        const data = await res.json();
+        naverPassportKey = (data && typeof data.passportKey === 'string') ? data.passportKey : null;
+        if (!naverPassportKey) {
+            naverDiag = 'passportKey 못 받음: ' + (data && data.error ? data.error : '알 수 없음');
+            console.log('[UX-SPELL]', naverDiag);
+        }
+        else {
+            console.log('[UX-SPELL] passportKey OK:', naverPassportKey.slice(0, 10) + '…');
+        }
+        return naverPassportKey;
+    }
+    catch (e) {
+        naverDiag = '프록시 fetch 실패: ' + errStr(e);
+        console.log('[UX-SPELL] proxy fetch error', e);
+        return null;
+    }
+}
+function decodeEntities(s) {
+    // 네이버 notag_html은 줄바꿈을 <br> 태그로 돌려준다 → 실제 줄바꿈으로 복원
+    return s.replace(/<br\s*\/?>/gi, '\n')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+}
+// 네이버 교정 유형(색깔 클래스) → 한글 라벨. 4종으로 분류된다.
+const NAVER_TYPE_LABEL = {
+    red_text: '맞춤법',
+    green_text: '띄어쓰기',
+    violet_text: '표준어 의심',
+    blue_text: '통계적 교정',
+};
+// 변경점으로 취급하지 않을 교정 유형(클래스). 통계적 교정은 우리 기준과 안 맞아 제외한다.
+const NAVER_EXCLUDED_CLASSES = new Set(['blue_text']);
+// 네이버 교정 유형 라벨 → 로컬 규칙과 같은 문장형 사유
+function naverReasonSentence(typeLabel) {
+    switch (typeLabel) {
+        case '맞춤법': return '맞춤법을 바로잡아요.';
+        case '띄어쓰기': return '띄어쓰기를 바로잡아요.';
+        case '표준어 의심': return '표준어에 맞게 다듬어요.';
+        default: return typeLabel + ' 표현을 바로잡아요.';
+    }
+}
+// result.html에서 교정 유형 라벨을 등장 순서대로(중복 제거) 추출. 제외 유형은 빼고 반환.
+function extractNaverTypes(html) {
+    const types = [];
+    const re = /<em\s+class='([a-z_]+)'>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+        if (NAVER_EXCLUDED_CLASSES.has(m[1]))
+            continue;
+        const label = NAVER_TYPE_LABEL[m[1]];
+        if (label && types.indexOf(label) === -1)
+            types.push(label);
+    }
+    return types;
+}
+// 교정문 재조립: 제외 유형(통계적 교정) 구간은 원문(origin_html) 그대로 되돌리고 나머지는 교정 적용.
+// origin_html의 밑줄 구간과 html의 <em> 구간은 같은 순서로 1:1 대응한다.
+function buildCorrectedExcluding(originHtml, html) {
+    const origins = [];
+    const oRe = /<span class='result_underline'>([\s\S]*?)<\/span>/gi;
+    let om;
+    while ((om = oRe.exec(originHtml)) !== null)
+        origins.push(om[1]);
+    let i = 0;
+    const out = html.replace(/<em\s+class='([a-z_]+)'>([\s\S]*?)<\/em>/gi, (_full, cls, corrected) => {
+        const original = origins[i] !== undefined ? origins[i] : corrected;
+        i++;
+        return NAVER_EXCLUDED_CLASSES.has(cls) ? original : corrected;
+    });
+    return decodeEntities(out);
+}
+// ≤500자 한 덩어리 검사. 반환: {corrected, errata, types} 또는 null(실패/키만료)
+async function naverSpellChunk(text, key) {
+    try {
+        const url = 'https://m.search.naver.com/p/csearch/ocontent/util/SpellerProxy'
+            + '?passportKey=' + encodeURIComponent(key)
+            + '&color_blindness=0&q=' + encodeURIComponent(text);
+        const res = await fetchWithTimeout(url, 8000);
+        if (!res.ok) {
+            naverDiag = 'SpellerProxy HTTP ' + res.status;
+            console.log('[UX-SPELL]', naverDiag);
+            return null;
+        }
+        const raw = await res.text();
+        let data = null;
+        try {
+            data = JSON.parse(raw);
+        }
+        catch (_e) {
+            naverDiag = 'SpellerProxy 응답 JSON 파싱 실패';
+            console.log('[UX-SPELL]', naverDiag, raw.slice(0, 120));
+            return null;
+        }
+        if (!data || !data.message || data.message.error) {
+            naverDiag = 'SpellerProxy 오류: ' + (data && data.message && data.message.error ? data.message.error : '알 수 없음');
+            console.log('[UX-SPELL]', naverDiag);
+            return null;
+        }
+        const result = data.message.result;
+        if (!result || typeof result.notag_html !== 'string')
+            return null;
+        naverOkCount++; // 정상 응답 1건
+        // html + origin_html이 있으면 통계적 교정을 제외하고 재조립, 없으면 notag_html 그대로
+        const corrected = (typeof result.html === 'string' && typeof result.origin_html === 'string')
+            ? buildCorrectedExcluding(result.origin_html, result.html)
+            : decodeEntities(result.notag_html);
+        const types = typeof result.html === 'string' ? extractNaverTypes(result.html) : [];
+        return { corrected, errata: result.errata_count || 0, types };
+    }
+    catch (e) {
+        naverDiag = 'SpellerProxy fetch 실패: ' + errStr(e);
+        console.log('[UX-SPELL] SpellerProxy fetch error', e);
+        return null;
+    }
+}
+// 노드 텍스트 1건 맞춤법 검사. 500자 초과면 건너뜀(로컬 규칙만). 실패 시 원문 유지.
+async function naverSpellCheck(text) {
+    if (!text || !text.trim() || text.length > 500)
+        return { text, reasons: [] };
+    // 한글이 없으면(숫자·영문·기호만) 맞춤법 검사할 게 없으니 네트워크 요청 생략
+    if (!/[가-힣]/.test(text))
+        return { text, reasons: [] };
+    let key = await getNaverPassportKey();
+    if (!key)
+        return { text, reasons: [] };
+    let r = await naverSpellChunk(text, key);
+    if (r === null) {
+        // 키 만료 가능 → 1회 재발급 후 재시도
+        key = await getNaverPassportKey(true);
+        if (key)
+            r = await naverSpellChunk(text, key);
+    }
+    if (r === null)
+        return { text, reasons: [] };
+    let reasons = [];
+    if (r.corrected !== text && r.errata > 0) {
+        // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
+        reasons = r.types.length
+            ? r.types.map(naverReasonSentence)
+            : ['맞춤법·띄어쓰기를 바로잡아요.'];
+    }
+    return { text: r.corrected, reasons };
+}
+// 동시 실행 개수를 제한해 비동기 작업 처리 (네트워크 과다 호출 방지)
+async function mapWithConcurrency(items, limit, fn, onProgress) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    let done = 0;
+    async function worker() {
+        while (nextIndex < items.length) {
+            const i = nextIndex++;
+            results[i] = await fn(items[i], i);
+            done++;
+            if (onProgress)
+                onProgress(done);
+        }
+    }
+    const workers = [];
+    for (let w = 0; w < Math.min(limit, items.length); w++)
+        workers.push(worker());
+    await Promise.all(workers);
+    return results;
+}
 /**
  * 새로운 엔진: 텍스트에 대한 제안 생성
  */
@@ -698,16 +943,18 @@ function suggestFriendlyKorean(text) {
     const original = text;
     // 1) 오타/띄어쓰기(가벼운 룰)
     const typo = applyRules(original, TYPO_RULES);
-    // 2) 구조 변환(문장 레벨)
-    const structural = applyRules(typo.text, REWRITE_RULES);
-    // 3) 패턴 DB(해요체+용어 통일)
+    // 2) 조사 교정 (받침 기반: 을/를)
+    const particle = fixParticles(typo.text);
+    // 3) 구조 변환(문장 레벨)
+    const structural = applyRules(particle.text, REWRITE_RULES);
+    // 4) 패턴 DB(해요체+용어 통일)
     const pattern = applyPatternDB(structural.text);
-    // 4) 마침표 추가 (패턴 적용 후) - 원본에 마침표가 있으면 reason 추가 안 함
+    // 5) 마침표 추가 (패턴 적용 후) - 원본에 마침표가 있으면 reason 추가 안 함
     const period = applyPeriodRule(pattern.text, original);
     // 최종 after (문장일 때)
     const finalAfter = period.text;
     // reason/tags 합치기
-    const mergedReasons = [...typo.reasons, ...structural.reasons, ...pattern.reasons, ...period.reasons];
+    const mergedReasons = [...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...period.reasons];
     const mergedTags = [...typo.tags, ...structural.tags, ...pattern.tags];
     const suggestions = [];
     const mainSuggestion = buildSuggestion(original, finalAfter, mergedReasons, mergedTags);
@@ -1217,7 +1464,7 @@ function diffSegments(before, after) {
 // LCS가 중간에 우연히 겹치는 한두 글자(예: "하시겠습니까"→"할까요"의 "까") 때문에
 // 변경이 둘로 쪼개져 표시되는 걸 방지 — 미리보기 목록처럼 하나로 보이게 한다.
 const SEGMENT_MERGE_GAP = 3;
-function mergeCloseSegments(segs, gap) {
+function mergeCloseSegments(segs, gap, before, after) {
     if (segs.length <= 1)
         return segs;
     const merged = [Object.assign({}, segs[0])];
@@ -1226,7 +1473,10 @@ function mergeCloseSegments(segs, gap) {
         const cur = segs[i];
         const bGap = cur.bStart - prev.bEnd; // 두 변경 사이 안 바뀐 글자 수 (before 기준)
         const aGap = cur.aStart - prev.aEnd; // (after 기준)
-        if (Math.min(bGap, aGap) <= gap) {
+        // 변경 사이에 줄바꿈이 있으면 다른 문장/줄로 보고 합치지 않는다 (빈 줄까지 끌려와 한 코멘트로 뭉치는 것 방지)
+        const crossesLine = before.slice(prev.bEnd, cur.bStart).indexOf('\n') !== -1 ||
+            after.slice(prev.aEnd, cur.aStart).indexOf('\n') !== -1;
+        if (!crossesLine && Math.min(bGap, aGap) <= gap) {
             // 사이의 공통 글자까지 포함해 하나로 확장
             prev.bEnd = cur.bEnd;
             prev.aEnd = cur.aEnd;
@@ -1237,12 +1487,47 @@ function mergeCloseSegments(segs, gap) {
     }
     return merged;
 }
+function isSpaceChar(c) { return c === ' ' || c === '\t' || c === '\n'; }
+// 공백/문장부호만 추가·삭제된 변경(띄어쓰기, 마침표 추가 등)은 변경 글자가 작아 "(없음) → ."처럼 의미 없게 보인다.
+// 이런 경우 양옆의 안 바뀐 글자를 공백 만나기 전까지 끌어와 단어 단위로 넓힌다. → "주세요 → 주세요."
+function expandSpacingSegment(s, before, after) {
+    const hasWord = (str) => /[0-9A-Za-z가-힣]/.test(str);
+    const bSeg = before.slice(s.bStart, s.bEnd);
+    const aSeg = after.slice(s.aStart, s.aEnd);
+    // 한쪽이라도 글자(한글/영문/숫자)가 있으면 일반 치환 → 그대로 둔다 (공백·문장부호뿐일 때만 넓힘)
+    if (hasWord(bSeg) || hasWord(aSeg))
+        return s;
+    let { bStart, bEnd, aStart, aEnd } = s;
+    while (bStart > 0 && aStart > 0 && before[bStart - 1] === after[aStart - 1] && !isSpaceChar(before[bStart - 1])) {
+        bStart--;
+        aStart--;
+    }
+    while (bEnd < before.length && aEnd < after.length && before[bEnd] === after[aEnd] && !isSpaceChar(before[bEnd])) {
+        bEnd++;
+        aEnd++;
+    }
+    return { bStart, bEnd, aStart, aEnd };
+}
 // 세그먼트 라벨: "원래 → 변경"
 function buildSegmentLabel(beforeSeg, afterSeg) {
     const clip = (s) => (s.length > 24 ? s.slice(0, 24) + '…' : s);
     const b = beforeSeg ? clip(beforeSeg) : '(없음)';
     const a = afterSeg ? clip(afterSeg) : '(삭제)';
     return b + ' → ' + a;
+}
+// 이미 로드한 폰트는 다시 await하지 않는다 (로드 자체는 idempotent지만 매번 await하면 누적 비용이 큼)
+const loadedFontKeys = new Set();
+async function loadFontCached(f) {
+    if (!f || !f.family)
+        return;
+    const k = f.family + ' ' + f.style;
+    if (loadedFontKeys.has(k))
+        return;
+    try {
+        await figma.loadFontAsync(f);
+        loadedFontKeys.add(k);
+    }
+    catch (_e) { }
 }
 // 노드에 사용된 모든 폰트 로드 (setRangeFills 전 필요)
 async function loadAllNodeFonts(node) {
@@ -1252,10 +1537,7 @@ async function loadAllNodeFonts(node) {
             return;
         const fonts = node.getRangeAllFontNames(0, len);
         for (const f of fonts) {
-            try {
-                await figma.loadFontAsync(f);
-            }
-            catch (_e) { }
+            await loadFontCached(f);
         }
     }
     catch (_e) { }
@@ -1326,10 +1608,11 @@ function getRangeStyle(node, idx) {
     }
     return { font, size, ls, lineHeight, textCase };
 }
-async function measureSegments(node, before, segs, absX, absY) {
+async function measureSegments(node, before, segs, absX, absY, scratch) {
     const out = segs.map(() => null);
     let clone = null;
-    let t = null;
+    // 임시 측정 노드는 호출자가 만들어 재사용한다 (항목마다 createText/remove하면 매우 느림)
+    const t = scratch;
     try {
         await loadAllNodeFonts(node);
         const { font, size, ls, lineHeight, textCase } = getRangeStyle(node, 0);
@@ -1338,8 +1621,7 @@ async function measureSegments(node, before, segs, absX, absY) {
         const origW = node.width;
         const nodeH = node.height;
         const len = before.length;
-        // 단일 라인 폭/높이 측정용 임시 노드 (폰트 메트릭 기반)
-        t = figma.createText();
+        // 단일 라인 폭/높이 측정 (폰트 메트릭 기반) — 재사용 노드를 이 노드 스타일로 다시 설정
         if (font)
             t.fontName = font;
         t.fontSize = size || 16;
@@ -1519,12 +1801,7 @@ async function measureSegments(node, before, segs, absX, absY) {
             }
             catch (_e) { }
         }
-        if (t) {
-            try {
-                t.remove();
-            }
-            catch (_e) { }
-        }
+        // 재사용 노드(t)는 여기서 지우지 않는다 — 호출자가 마지막에 한 번만 제거
     }
     return out;
 }
@@ -1602,7 +1879,7 @@ function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) 
     }
     catch (_e) { }
 }
-async function measureAnnotation(item) {
+async function measureAnnotation(item, scratch) {
     // 기존 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
     removeAnnotationByNodeId(item.nodeId);
     let node = null;
@@ -1623,10 +1900,11 @@ async function measureAnnotation(item) {
     annotationAncestorIds.set(item.nodeId, ancestors);
     const absX = item.x;
     const absY = item.y;
-    const segs = mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP);
+    const segs = mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP, item.before, item.after)
+        .map((s) => expandSpacingSegment(s, item.before, item.after));
     if (segs.length === 0)
         return null;
-    const geoms = await measureSegments(node, item.before, segs, absX, absY);
+    const geoms = await measureSegments(node, item.before, segs, absX, absY, scratch);
     const job = { absX, absY, highlights: [], comments: [] };
     let idx = 0;
     for (const s of segs) {
@@ -1655,14 +1933,24 @@ async function createAnnotations(previewData, onProgress) {
     if (!fontName)
         return;
     // 1) 측정 단계 (비동기): 위치만 계산하고 화면엔 아무것도 안 그린다
+    // 임시 측정 노드를 하나만 만들어 모든 항목이 재사용 (항목마다 createText/remove 하던 비용 제거)
     const jobs = [];
     const total = previewData.length;
-    for (let i = 0; i < total; i++) {
-        const job = await measureAnnotation(previewData[i]);
-        if (job)
-            jobs.push(job);
-        if (onProgress && (i + 1 === total || (i + 1) % 5 === 0))
-            onProgress(i + 1, total);
+    const scratch = figma.createText();
+    try {
+        for (let i = 0; i < total; i++) {
+            const job = await measureAnnotation(previewData[i], scratch);
+            if (job)
+                jobs.push(job);
+            if (onProgress && (i + 1 === total || (i + 1) % 5 === 0))
+                onProgress(i + 1, total);
+        }
+    }
+    finally {
+        try {
+            scratch.remove();
+        }
+        catch (_e) { }
     }
     // 2) 생성 단계 (동기): 한 번에 전부 그린다 → 하나씩 뿅뿅이 아니라 한 프레임에 다같이 나타남
     for (const job of jobs) {
@@ -1907,16 +2195,46 @@ figma.ui.onmessage = async (msg) => {
         const CHUNK_SIZE = 50; // 50개씩 처리 후 yield
         let lastProgressUpdateTime = Date.now();
         const PROGRESS_UPDATE_TIME_INTERVAL = 100; // 100ms마다 시간 기반 업데이트
-        // 텍스트 변환 처리 (청크 단위로 나누어 처리하여 UI 블로킹 방지)
         const totalTextNodes = textNodes.length;
+        // 0) 네이버 맞춤법 검사 — 동시 5개로 제한해 미리 돌린다. (실패 시 원문 유지 → 로컬 규칙만)
+        naverOkCount = 0;
+        naverDiag = '';
+        figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '맞춤법 검사 중...' });
+        // 같은 문구는 한 번만 검사 (반복되는 버튼·라벨이 많아 중복 제거 효과가 큼)
+        const uniqueTexts = Array.from(new Set(textNodes.map((n) => n.characters)));
+        const totalUnique = uniqueTexts.length;
+        const spellByText = new Map();
+        await mapWithConcurrency(uniqueTexts, 8, async (t) => { spellByText.set(t, await naverSpellCheck(t)); }, (done) => {
+            const p = 30 + (totalUnique > 0 ? (done / totalUnique) * 30 : 0); // 30~60%
+            figma.ui.postMessage({
+                type: 'update-progress',
+                progress: Math.min(p, 60),
+                status: `맞춤법 검사 중... (${done}/${totalUnique})`
+            });
+        });
+        const spellCorrections = textNodes.map((n) => spellByText.get(n.characters) || { text: n.characters, reasons: [] });
+        // 네이버 검사가 한 건도 정상 응답을 못 받았으면 원인과 함께 안내 — 로컬 규칙으로는 계속 진행
+        // (검색페이지는 됐는데 SpellerProxy만 막힌 경우까지 잡힘)
+        if (naverOkCount === 0 && totalTextNodes > 0) {
+            figma.ui.postMessage({
+                type: 'show-toast',
+                message: '네이버 맞춤법 미작동: ' + (naverDiag || '원인 미상') + ' (톤·을/를 검사만 진행)'
+            });
+        }
+        // 텍스트 변환 처리 (청크 단위로 나누어 처리하여 UI 블로킹 방지)
         for (let i = 0; i < textNodes.length; i++) {
             const node = textNodes[i];
             const before = node.characters;
-            // 패턴이 있는지 빠르게 확인 후 변환
-            const suggestions = suggestFriendlyKorean(before);
+            // 맞춤법 교정본 위에 오타/조사/톤/표현 규칙 적용 (suggestFriendlyKorean 안에서 조사 교정도 수행)
+            const spell = spellCorrections[i] || { text: before, reasons: [] };
+            const suggestions = suggestFriendlyKorean(spell.text);
             const preferredSuggestion = (_a = suggestions.find((s) => s.tags.includes("button"))) !== null && _a !== void 0 ? _a : suggestions[0];
-            const after = preferredSuggestion ? preferredSuggestion.after : before;
-            const reason = preferredSuggestion ? preferredSuggestion.reason : "";
+            const after = preferredSuggestion ? preferredSuggestion.after : spell.text;
+            // 사유: 맞춤법(네이버) + 톤/규칙 사유 합치기 (UI는 ' - '로 분리 표시)
+            const reasonParts = spell.reasons.slice();
+            if (preferredSuggestion && preferredSuggestion.reason)
+                reasonParts.push(preferredSuggestion.reason);
+            const reason = reasonParts.join(' - ');
             if (before !== after) {
                 // 노드를 캐시에 저장 (FOCUS_NODE에서 사용)
                 previewNodeCache.set(node.id, node);
@@ -1951,9 +2269,9 @@ figma.ui.onmessage = async (msg) => {
                 });
                 nodesToSelect.push(node);
             }
-            // 진행률 업데이트 (30% ~ 90%) - 처리량 기반 또는 시간 기반
+            // 진행률 업데이트 (60% ~ 90%) - 처리량 기반 (맞춤법 검사가 30~60% 사용)
             const now = Date.now();
-            const progress = 30 + (i + 1) / totalTextNodes * 60;
+            const progress = 60 + (i + 1) / totalTextNodes * 30;
             const shouldUpdateProgress = (i + 1) % 10 === 0 ||
                 i === textNodes.length - 1 ||
                 (now - lastProgressUpdateTime) >= PROGRESS_UPDATE_TIME_INTERVAL;
@@ -2229,7 +2547,36 @@ figma.ui.onmessage = async (msg) => {
     if (msg.type === "RESIZE_UI") {
         const w = Math.max(300, Math.min(800, msg.width || 360));
         const h = Math.max(400, Math.min(1200, msg.height || 780));
-        figma.ui.resize(w, h);
+        // 왼쪽/위쪽으로 늘릴 때는 반대쪽 가장자리를 고정하기 위해 창을 그만큼 이동.
+        // reposition/getPosition은 '캔버스 좌표'를 쓰므로, 창 픽셀 변화량을 zoom으로 나눠 캔버스 단위로 변환한다.
+        if (msg.anchorRight || msg.anchorBottom) {
+            let pos = null;
+            try {
+                pos = figma.ui.getPosition().canvasSpace;
+            }
+            catch (_e) {
+                pos = null;
+            }
+            figma.ui.resize(w, h);
+            if (pos) {
+                const zoom = figma.viewport.zoom || 1;
+                let nx = pos.x;
+                let ny = pos.y;
+                if (msg.anchorRight)
+                    nx = pos.x + (uiLastW - w) / zoom; // 오른쪽 가장자리 고정 → 왼쪽으로 확장
+                if (msg.anchorBottom)
+                    ny = pos.y + (uiLastH - h) / zoom; // 아래 가장자리 고정 → 위로 확장
+                try {
+                    figma.ui.reposition(nx, ny);
+                }
+                catch (_e) { }
+            }
+        }
+        else {
+            figma.ui.resize(w, h);
+        }
+        uiLastW = w;
+        uiLastH = h;
         return;
     }
     // 어노테이션 전체 삭제

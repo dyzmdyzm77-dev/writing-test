@@ -3,10 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <style>
-      body { 
-        width: full;   
+      body {
+        width: full;
         font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        padding: 20px; 
+        padding: 20px;
+        padding-top: 150px; /* 고정 헤더 높이만큼 확보 (JS가 실제 높이로 재조정) */
       }
       button { 
         width: 100%;          
@@ -63,6 +64,20 @@
         cursor: not-allowed;
       }
 
+      .top-fixed {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: #FFFFFF;
+        padding: 20px 20px 12px 20px;
+        border-bottom: 1px solid #e0e0e0;
+        box-sizing: border-box;
+        z-index: 100;
+      }
+      .top-fixed #preview {
+        margin-bottom: 0; /* 고정 헤더 안에서는 하단 여백 제거 */
+      }
       .title-section {
         margin-bottom: 16px;
       }
@@ -84,7 +99,7 @@
         margin-top: 16px;
         border-top: 1px solid #e0e0e0;
         padding-top: 12px;
-        padding-bottom: 80px; /* 플로팅 버튼 공간 확보 */
+        padding-bottom: 100px; /* 하단 고정 버튼(약 72px)에 가리지 않게 여유 확보 */
       }
       .preview-section.active {
         display: block;
@@ -406,11 +421,13 @@
     </style>
   </head>
   <body>
-    <div class="title-section">
-      <div class="title">에스원 UX Writing Checker</div>
-      <div class="hint">텍스트 레이어 또는 Frame을 선택한 뒤 [검토하기] 버튼을 눌러주세요.</div>
+    <div id="topFixed" class="top-fixed">
+      <div class="title-section">
+        <div class="title">에스원 UX Writing Checker</div>
+        <div class="hint">텍스트 레이어 또는 Frame을 선택한 뒤 [검토하기] 버튼을 눌러주세요.</div>
+      </div>
+      <button id="preview" class="button-primary button-full-width">검토하기</button>
     </div>
-    <button id="preview" class="button-primary button-full-width">검토하기</button>
     <div class="rs-handle rs-n"></div>
     <div class="rs-handle rs-s"></div>
     <div class="rs-handle rs-e"></div>
@@ -449,6 +466,15 @@
     <script>
       let previewData = [];
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
+
+      // 고정 헤더 높이만큼 본문 상단 여백을 맞춘다 (창 폭이 바뀌면 안내문 줄바꿈으로 높이가 달라짐)
+      function adjustTopPadding() {
+        const tf = document.getElementById('topFixed');
+        if (tf) document.body.style.paddingTop = tf.offsetHeight + 'px';
+      }
+      adjustTopPadding();
+      window.addEventListener('resize', adjustTopPadding);
+      window.addEventListener('load', adjustTopPadding);
 
       // 버튼 활성/비활성화 함수
       function updatePreviewButtonState(hasSelection) {
@@ -542,8 +568,9 @@
           const el = document.querySelector('.' + cls);
           el.addEventListener('mousedown', (e) => {
             active = { dw, dh };
-            startX = e.clientX;
-            startY = e.clientY;
+            // 화면 기준 좌표 사용: 창을 움직여도 좌표계가 안 바뀌어 피드백 루프(왼쪽으로 빨려듦) 방지
+            startX = e.screenX;
+            startY = e.screenY;
             startW = window.innerWidth;
             startH = window.innerHeight;
             e.preventDefault();
@@ -552,11 +579,18 @@
 
         document.addEventListener('mousemove', (e) => {
           if (!active) return;
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
+          const dx = e.screenX - startX;
+          const dy = e.screenY - startY;
           const w = active.dw !== 0 ? Math.max(300, Math.min(800,  startW + active.dw * dx)) : startW;
           const h = active.dh !== 0 ? Math.max(400, Math.min(1200, startH + active.dh * dy)) : startH;
-          parent.postMessage({ pluginMessage: { type: 'RESIZE_UI', width: Math.round(w), height: Math.round(h) } }, '*');
+          // 왼쪽(dw<0)/위쪽(dh<0) 핸들이면 반대쪽 가장자리를 고정하도록 앵커 표시
+          parent.postMessage({ pluginMessage: {
+            type: 'RESIZE_UI',
+            width: Math.round(w),
+            height: Math.round(h),
+            anchorRight: active.dw < 0,
+            anchorBottom: active.dh < 0
+          } }, '*');
         });
 
         document.addEventListener('mouseup', () => { active = null; });
@@ -675,6 +709,8 @@
         
         if (event.data.pluginMessage.type === 'preview-add') {
           const newItems = event.data.pluginMessage.data;
+          // 누적 전 기존 항목 기록 (새로 추가된 항목을 가려내기 위해)
+          const existingIds = new Set(previewData.map(item => item.nodeId));
           // nodeId 기준으로 중복 제거 후 누적
           const map = new Map(previewData.map(item => [item.nodeId, item]));
           for (const item of newItems) {
@@ -682,6 +718,20 @@
           }
           previewData = Array.from(map.values());
           displayPreview(previewData);
+
+          // 새로 추가된 첫 항목이 고정 헤더 바로 아래에 보이도록 스크롤
+          const firstNew = newItems.find(it => !existingIds.has(it.nodeId)) || newItems[0];
+          if (firstNew) {
+            requestAnimationFrame(() => {
+              const el = document.querySelector('.preview-item[data-node-id="' + firstNew.nodeId + '"]');
+              const tf = document.getElementById('topFixed');
+              if (el) {
+                const headerH = tf ? tf.offsetHeight : 0;
+                const top = el.getBoundingClientRect().top + window.scrollY - headerH - 8;
+                window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+              }
+            });
+          }
         }
         
         if (event.data.pluginMessage.type === 'remove-changed-items') {
@@ -746,6 +796,43 @@
           selectAllCheckbox.checked = selectedNodeIds.size === data.length && data.length > 0;
         }
         
+        // 공백/문장부호만 바뀐 변경(띄어쓰기, 마침표 추가 등)은 색칠할 글자가 작아 잘 안 보인다.
+        // 이런 변경 구간은 양옆 단어(인접 공통 부분의 비공백)까지 흡수해 단어 단위로 색칠한다.
+        // 예: "주세요" → "주세요." 면 "주세요" 단어까지 함께 색칠.
+        function mergeWhitespaceChangeParts(parts) {
+          // 글자(한글/영문/숫자)가 없으면 = 공백·문장부호뿐인 사소한 변경
+          const hasWord = (s) => /[0-9A-Za-z가-힣]/.test(s);
+          const out = [];
+          for (let idx = 0; idx < parts.length; idx++) {
+            const p = parts[idx];
+            const isWsChange = p.changed && !hasWord(p.before) && !hasWord(p.after);
+            if (!isWsChange) { out.push(p); continue; }
+            let prefix = '';
+            const prev = out[out.length - 1];
+            if (prev && !prev.changed) {
+              const m = prev.before.match(/(\S+)$/); // 이전 공통부분의 꼬리 단어
+              if (m) {
+                prefix = m[1];
+                prev.before = prev.before.slice(0, -prefix.length);
+                prev.after = prev.after.slice(0, -prefix.length);
+                if (prev.before === '') out.pop();
+              }
+            }
+            let suffix = '';
+            const next = parts[idx + 1];
+            if (next && !next.changed) {
+              const m = next.before.match(/^(\S+)/); // 다음 공통부분의 머리 단어
+              if (m) {
+                suffix = m[1];
+                next.before = next.before.slice(suffix.length);
+                next.after = next.after.slice(suffix.length);
+              }
+            }
+            out.push({ before: prefix + p.before + suffix, after: prefix + p.after + suffix, changed: true });
+          }
+          return out;
+        }
+
         // 변경된 부분을 찾아서 색상으로 강조하는 함수
         function highlightChanges(before, after) {
           if (before === after) {
@@ -803,16 +890,19 @@
             }
           }
           
+          // 공백만 바뀐 띄어쓰기 변경은 단어 단위로 색 범위를 넓힌다
+          const merged = mergeWhitespaceChangeParts(parts);
+
           // HTML 생성
-          const beforeHtml = parts.map(part => 
-            part.changed 
-              ? `<span class="text-changed-before">${part.before}</span>` 
+          const beforeHtml = merged.map(part =>
+            part.changed
+              ? `<span class="text-changed-before">${part.before}</span>`
               : part.before
           ).join('');
-          
-          const afterHtml = parts.map(part => 
-            part.changed 
-              ? `<span class="text-changed-after">${part.after}</span>` 
+
+          const afterHtml = merged.map(part =>
+            part.changed
+              ? `<span class="text-changed-after">${part.after}</span>`
               : part.after
           ).join('');
           

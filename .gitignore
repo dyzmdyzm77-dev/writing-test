@@ -1,8 +1,14 @@
-# Node
-*.log
-*.log.*
-node_modules
+# Dependencies
+node_modules/
 
+# Build output
+code.js
 out/
 dist/
-code.js
+
+# Logs
+*.log
+*.log.*
+
+# macOS
+.DS_Store
