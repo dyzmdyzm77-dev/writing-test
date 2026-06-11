@@ -197,12 +197,35 @@ const TYPO_RULES: FixRule[] = [
   // { pattern: /([가-힣])(것|수|때|곳|데|줄|지|뿐|만큼|대로|듯이|만|뿐)([가-힣])/g, replacement: "$1$2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   // { pattern: /([가-힣])(있다|없다|주다|보내다|받다|주시다|드리다|보이다|되다|하다)([가-힣])/g, replacement: "$1 $2$3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   
-  // 띄어쓰기 - 일반적인 부사 뒤 띄어쓰기
-  // 일반 단어에 잘못 적용되는 문제로 주석 처리
-  // { pattern: /바로([가-힣])/g, replacement: "바로 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // { pattern: /여기서([가-힣])/g, replacement: "여기서 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // { pattern: /거기서([가-힣])/g, replacement: "거기서 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // { pattern: /저기서([가-힣])/g, replacement: "저기서 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  // (부사 뒤 띄어쓰기 규칙은 오탐이 있어 ADVERB_SPACING_RULES로 분리 —
+  //  네이버 맞춤법 검사가 실패한 텍스트에만 폴백으로 적용한다)
+
+  // 띄어쓰기 - 층수 + 장소명 (7층 사무실, 3층 회의실 등)
+  { pattern: /([0-9]+층)(사무실|회의실|휴게실|복도)([가-힣])/g, replacement: "$1 $2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  // 띄어쓰기 - 수사 + 단위명사 (두 줄)
+  { pattern: /두줄/g, replacement: "두 줄", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  // 띄어쓰기 - 조사 "로/으로" + 동사 "들어갈"
+  { pattern: /(로|으로)(들어갈)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  // 띄어쓰기 - "정도로" 뒤 (정도로 길어질)
+  { pattern: /정도로([가-힣])/g, replacement: "정도로 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  
+  // 띄어쓰기 - 일반적인 동사/명사 앞 띄어쓰기
+  // 주의: 외래어(크리에이터 등)에 잘못 적용되지 않도록 제한적으로 적용
+  // { pattern: /([가-힣]{2,})(시작|종료|완료|중지|재개|변경|수정|삭제|추가|생성|등록|확인|조회|검색|저장|업로드|다운로드|열기|닫기|보기|보내기|받기|전송|수신|발송|접수|처리|승인|거부|반려|취소|해제|설정|해제|초기화|복구|백업|복원|이동|복사|붙여넣기|잠금|잠금해제|공유|다운로드|인쇄|출력|보관|삭제|복원|복구|수정|편집|저장|불러오기|내보내기|가져오기|연결|연결해제|접속|접속해제|로그인|로그아웃|가입|탈퇴|신청|취소|결제|환불|교환|반품|배송|수령|확인|리뷰|평가|추천|신고|차단|해제|차단해제|팔로우|언팔로우|구독|구독해제|알림|알림해제|공지|이벤트|쿠폰|적립|사용|적용|해제|적용해제|변경|변경해제|수정|수정해제|삭제|삭제해제|추가|추가해제|생성|생성해제|등록|등록해제|확인|확인해제|조회|조회해제|검색|검색해제|저장|저장해제|업로드|업로드해제|다운로드|다운로드해제)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  
+  // 띄어쓰기 - 수사 + 단위명사
+  // 주의: "2026년", "6000억원" 등은 일반적으로 붙여쓰기도 허용되므로 주석 처리
+  // { pattern: /([0-9]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+  // { pattern: /([일이삼사오육칠팔구십백천만억조]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+];
+
+// ===============================
+// 부사 뒤 띄어쓰기 규칙 (폴백 전용)
+// 형태소 분석 없는 정규식이라 오탐이 있다 ("다시마"→"다시 마", "함께하는"→"함께 하는" 등).
+// 띄어쓰기는 네이버 맞춤법 검사 결과를 우선하고, 이 규칙들은
+// 네이버 검사가 실패/불가한 텍스트(프록시 장애, 500자 초과 등)에만 적용한다.
+// ===============================
+const ADVERB_SPACING_RULES: FixRule[] = [
   { pattern: /지금([가-힣]{2,})/g, replacement: "지금 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   // "이미" + 다음 단어 (부사) - "이미지"(image)는 예외
   { pattern: /이미(?!지)([가-힣]{2,})/g, replacement: "이미 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
@@ -231,23 +254,6 @@ const TYPO_RULES: FixRule[] = [
   { pattern: /어제([가-힣]{2,})/g, replacement: "어제 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   { pattern: /내년([가-힣]{2,})/g, replacement: "내년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   { pattern: /작년([가-힣]{2,})/g, replacement: "작년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // 띄어쓰기 - 층수 + 장소명 (7층 사무실, 3층 회의실 등)
-  { pattern: /([0-9]+층)(사무실|회의실|휴게실|복도)([가-힣])/g, replacement: "$1 $2 $3", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // 띄어쓰기 - 수사 + 단위명사 (두 줄)
-  { pattern: /두줄/g, replacement: "두 줄", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // 띄어쓰기 - 조사 "로/으로" + 동사 "들어갈"
-  { pattern: /(로|으로)(들어갈)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // 띄어쓰기 - "정도로" 뒤 (정도로 길어질)
-  { pattern: /정도로([가-힣])/g, replacement: "정도로 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  
-  // 띄어쓰기 - 일반적인 동사/명사 앞 띄어쓰기
-  // 주의: 외래어(크리에이터 등)에 잘못 적용되지 않도록 제한적으로 적용
-  // { pattern: /([가-힣]{2,})(시작|종료|완료|중지|재개|변경|수정|삭제|추가|생성|등록|확인|조회|검색|저장|업로드|다운로드|열기|닫기|보기|보내기|받기|전송|수신|발송|접수|처리|승인|거부|반려|취소|해제|설정|해제|초기화|복구|백업|복원|이동|복사|붙여넣기|잠금|잠금해제|공유|다운로드|인쇄|출력|보관|삭제|복원|복구|수정|편집|저장|불러오기|내보내기|가져오기|연결|연결해제|접속|접속해제|로그인|로그아웃|가입|탈퇴|신청|취소|결제|환불|교환|반품|배송|수령|확인|리뷰|평가|추천|신고|차단|해제|차단해제|팔로우|언팔로우|구독|구독해제|알림|알림해제|공지|이벤트|쿠폰|적립|사용|적용|해제|적용해제|변경|변경해제|수정|수정해제|삭제|삭제해제|추가|추가해제|생성|생성해제|등록|등록해제|확인|확인해제|조회|조회해제|검색|검색해제|저장|저장해제|업로드|업로드해제|다운로드|다운로드해제)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  
-  // 띄어쓰기 - 수사 + 단위명사
-  // 주의: "2026년", "6000억원" 등은 일반적으로 붙여쓰기도 허용되므로 주석 처리
-  // { pattern: /([0-9]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
-  // { pattern: /([일이삼사오육칠팔구십백천만억조]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
 ];
 
 // ===============================
@@ -932,12 +938,15 @@ async function naverSpellChunk(text: string, key: string): Promise<{ corrected: 
 }
 
 // 노드 텍스트 1건 맞춤법 검사. 500자 초과면 건너뜀(로컬 규칙만). 실패 시 원문 유지.
-async function naverSpellCheck(text: string): Promise<{ text: string; reasons: string[] }> {
-  if (!text || !text.trim() || text.length > 500) return { text, reasons: [] };
+// checked: 네이버가 이 텍스트를 실제로 검사했는지 여부 (false면 부사 띄어쓰기 폴백 규칙이 적용됨)
+type SpellResult = { text: string; reasons: string[]; checked: boolean };
+
+async function naverSpellCheck(text: string): Promise<SpellResult> {
+  if (!text || !text.trim() || text.length > 500) return { text, reasons: [], checked: false };
   // 한글이 없으면(숫자·영문·기호만) 맞춤법 검사할 게 없으니 네트워크 요청 생략
-  if (!/[가-힣]/.test(text)) return { text, reasons: [] };
+  if (!/[가-힣]/.test(text)) return { text, reasons: [], checked: false };
   let key = await getNaverPassportKey();
-  if (!key) return { text, reasons: [] };
+  if (!key) return { text, reasons: [], checked: false };
 
   let r = await naverSpellChunk(text, key);
   if (r === null) {
@@ -945,7 +954,7 @@ async function naverSpellCheck(text: string): Promise<{ text: string; reasons: s
     key = await getNaverPassportKey(true);
     if (key) r = await naverSpellChunk(text, key);
   }
-  if (r === null) return { text, reasons: [] };
+  if (r === null) return { text, reasons: [], checked: false };
   let reasons: string[] = [];
   if (r.corrected !== text && r.errata > 0) {
     // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
@@ -953,7 +962,7 @@ async function naverSpellCheck(text: string): Promise<{ text: string; reasons: s
       ? r.types.map(naverReasonSentence)
       : ['맞춤법·띄어쓰기를 바로잡아요.'];
   }
-  return { text: r.corrected, reasons };
+  return { text: r.corrected, reasons, checked: true };
 }
 
 // 동시 실행 개수를 제한해 비동기 작업 처리 (네트워크 과다 호출 방지)
@@ -982,12 +991,24 @@ async function mapWithConcurrency<T, R>(
 
 /**
  * 새로운 엔진: 텍스트에 대한 제안 생성
+ * naverChecked: 이 텍스트가 네이버 맞춤법 검사를 통과했으면 true.
+ *               띄어쓰기는 네이버 결과를 우선하므로 부사 띄어쓰기 폴백 규칙을 건너뛴다.
  */
-function suggestFriendlyKorean(text: string): Suggestion[] {
+function suggestFriendlyKorean(text: string, naverChecked = false): Suggestion[] {
   const original = text;
 
   // 1) 오타/띄어쓰기(가벼운 룰)
-  const typo = applyRules(original, TYPO_RULES);
+  let typo = applyRules(original, TYPO_RULES);
+
+  // 1-1) 부사 띄어쓰기 — 네이버 검사가 안 된 텍스트에만 폴백으로 적용 (오탐 위험 규칙)
+  if (!naverChecked) {
+    const adverb = applyRules(typo.text, ADVERB_SPACING_RULES);
+    typo = {
+      text: adverb.text,
+      tags: Array.from(new Set([...typo.tags, ...adverb.tags])),
+      reasons: [...typo.reasons, ...adverb.reasons],
+    };
+  }
 
   // 2) 조사 교정 (받침 기반: 을/를)
   const particle = fixParticles(typo.text);
@@ -1014,22 +1035,6 @@ function suggestFriendlyKorean(text: string): Suggestion[] {
   if (mainSuggestion) suggestions.push(mainSuggestion);
 
   return suggestions;
-}
-
-/**
- * 기존 호환성 유지: 친근한 톤으로 변환하는 메인 함수
- * 새로운 엔진을 사용하되 기존 인터페이스 유지
- * 모든 변경점을 순차적으로 적용하여 최종 결과 반환
- */
-function toFriendlyKoreanUX(text: string): string {
-  const sugg = suggestFriendlyKorean(text);
-  
-  if (sugg.length === 0) {
-    return text;
-  }
-
-  const mainSuggestion = sugg[0];
-  return mainSuggestion ? mainSuggestion.after : text;
 }
 
 // 자식을 가질 수 있는 노드 타입 (최적화를 위해 미리 정의)
@@ -2176,7 +2181,7 @@ figma.ui.onmessage = async (msg: any) => {
     // 같은 문구는 한 번만 검사 (반복되는 버튼·라벨이 많아 중복 제거 효과가 큼)
     const uniqueTexts = Array.from(new Set(textNodes.map((n) => n.characters)));
     const totalUnique = uniqueTexts.length;
-    const spellByText = new Map<string, { text: string; reasons: string[] }>();
+    const spellByText = new Map<string, SpellResult>();
     await mapWithConcurrency(
       uniqueTexts,
       8,
@@ -2190,7 +2195,7 @@ figma.ui.onmessage = async (msg: any) => {
         });
       }
     );
-    const spellCorrections = textNodes.map((n) => spellByText.get(n.characters) || { text: n.characters, reasons: [] });
+    const spellCorrections = textNodes.map((n) => spellByText.get(n.characters) || { text: n.characters, reasons: [], checked: false });
     // 네이버 검사가 한 건도 정상 응답을 못 받았으면 원인과 함께 안내 — 로컬 규칙으로는 계속 진행
     // (검색페이지는 됐는데 SpellerProxy만 막힌 경우까지 잡힘)
     if (naverOkCount === 0 && totalTextNodes > 0) {
@@ -2205,8 +2210,9 @@ figma.ui.onmessage = async (msg: any) => {
       const node = textNodes[i];
       const before = node.characters;
       // 맞춤법 교정본 위에 오타/조사/톤/표현 규칙 적용 (suggestFriendlyKorean 안에서 조사 교정도 수행)
-      const spell = spellCorrections[i] || { text: before, reasons: [] };
-      const suggestions = suggestFriendlyKorean(spell.text);
+      // 네이버 검사를 통과한 텍스트는 띄어쓰기를 네이버 결과에 맡긴다 (부사 폴백 규칙 미적용)
+      const spell = spellCorrections[i] || { text: before, reasons: [], checked: false };
+      const suggestions = suggestFriendlyKorean(spell.text, spell.checked);
       const preferredSuggestion = suggestions.find((s) => s.tags.includes("button")) ?? suggestions[0];
       const after = preferredSuggestion ? preferredSuggestion.after : spell.text;
       // 사유: 맞춤법(네이버) + 톤/규칙 사유 합치기 (UI는 ' - '로 분리 표시)
