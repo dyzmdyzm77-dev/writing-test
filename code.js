@@ -285,28 +285,67 @@ function protectCompounds(s) {
     }
     return t;
 }
+// Figma 텍스트의 줄바꿈은 \n 외에도 U+2028(LINE SEPARATOR), U+2029, \r\n일 수 있다.
+// 줄바꿈/특수 공백을 모두 인식해야 네이버가 잘라낸 것을 정확히 복원할 수 있다.
+const LINE_BREAK_CHARS = /[\n\r\u2028\u2029]/;
+// 줄 안에서 앞뒤에 붙을 수 있는 공백류 (NBSP, zero-width 포함)
+const EDGE_WS_LEAD = /^[ \t\u00A0\u200B\uFEFF]*/;
+const EDGE_WS_TRAIL = /[ \t\u00A0\u200B\uFEFF]*$/;
+// 줄바꿈 문자 종류를 보존하며 줄로 분해 (lines.length === seps.length + 1)
+function splitLinesKeepSeps(s) {
+    const lines = [];
+    const seps = [];
+    let cur = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === '\r') {
+            lines.push(cur);
+            cur = '';
+            if (s[i + 1] === '\n') {
+                seps.push('\r\n');
+                i++;
+            }
+            else {
+                seps.push('\r');
+            }
+        }
+        else if (ch === '\n' || ch === '\u2028' || ch === '\u2029') {
+            lines.push(cur);
+            cur = '';
+            seps.push(ch);
+        }
+        else {
+            cur += ch;
+        }
+    }
+    lines.push(cur);
+    return { lines, seps };
+}
 // 네이버는 교정문에서 앞뒤 공백/줄바꿈을 잘라서 돌려준다.
 // 그대로 두면 "출입정보 " → "출입정보"처럼 눈에 안 보이는(똑같아 보이는) 제안이 생기므로
 // 원문의 앞뒤 공백을 교정문에 그대로 복원한다.
 function restoreEdgeWhitespace(original, corrected) {
-    const lead = (original.match(/^[ \t]*/) || [''])[0];
-    const trail = (original.match(/[ \t]*$/) || [''])[0];
-    return lead + corrected.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '') + trail;
+    const lead = (original.match(EDGE_WS_LEAD) || [''])[0];
+    const trail = (original.match(EDGE_WS_TRAIL) || [''])[0];
+    return lead + corrected.replace(EDGE_WS_LEAD, '').replace(EDGE_WS_TRAIL, '') + trail;
 }
 // 네이버 교정문의 공백 구조를 원문에 맞춘다 (여러 줄 텍스트 대응):
 // - 줄 수가 달라졌으면(줄바꿈 손실/병합) 네이버 교정을 통째로 버리고 원문 유지
 //   → "조회⏎ → 조회" 같은 줄바꿈 제거 제안이 생기지 않는다
-// - 줄 수가 같으면 각 줄의 앞뒤 공백을 원문 그대로 복원
+// - 줄 수가 같으면 원문의 줄바꿈 문자(\n, U+2028 등)를 그대로 쓰고
+//   각 줄의 앞뒤 공백도 원문대로 복원
 function alignWhitespace(original, corrected) {
-    const oLines = original.split('\n');
-    const cLines = corrected.split('\n');
-    if (oLines.length !== cLines.length)
+    const o = splitLinesKeepSeps(original);
+    const cLines = corrected.split('\n'); // 네이버 응답은 \n으로 통일돼 돌아온다
+    if (o.lines.length !== cLines.length)
         return original;
-    const out = [];
-    for (let i = 0; i < oLines.length; i++) {
-        out.push(restoreEdgeWhitespace(oLines[i], cLines[i]));
+    let out = '';
+    for (let i = 0; i < o.lines.length; i++) {
+        out += restoreEdgeWhitespace(o.lines[i], cLines[i]);
+        if (i < o.seps.length)
+            out += o.seps[i];
     }
-    return out.join('\n');
+    return out;
 }
 // ===============================
 // '~해 주세요' 띄어쓰기 통일 (모든 변환이 끝난 뒤 마지막에 적용)
@@ -1061,12 +1100,15 @@ async function naverSpellCheck(text) {
     let key = await getNaverPassportKey();
     if (!key)
         return { text, reasons: [], checked: false };
-    let r = await naverSpellChunk(text, key);
+    // 네이버에는 모든 줄바꿈을 \n으로 통일해 보낸다
+    // (U+2028 등을 그대로 보내면 일반 공백으로 뭉개져 "보이지 않는 차이" 제안이 생긴다)
+    const sendText = text.replace(/\r\n|[\r\u2028\u2029]/g, '\n');
+    let r = await naverSpellChunk(sendText, key);
     if (r === null) {
         // 키 만료 가능 → 1회 재발급 후 재시도
         key = await getNaverPassportKey(true);
         if (key)
-            r = await naverSpellChunk(text, key);
+            r = await naverSpellChunk(sendText, key);
     }
     if (r === null)
         return { text, reasons: [], checked: false };
@@ -1191,9 +1233,10 @@ async function naverSpellCheckAll(uniqueTexts, onProgress) {
     }
     if (toCheck.length === 0)
         return out;
-    // 줄바꿈 포함 텍스트는 단건 검사 (배치 구분자로 \n을 쓰므로 섞으면 줄 복원이 모호해진다)
-    const singles = toCheck.filter((t) => t.indexOf('\n') !== -1);
-    const flats = toCheck.filter((t) => t.indexOf('\n') === -1);
+    // 줄바꿈(\n, \r, U+2028, U+2029) 포함 텍스트는 단건 검사
+    // (배치 구분자로 \n을 쓰므로 섞으면 줄 복원이 모호해진다)
+    const singles = toCheck.filter((t) => LINE_BREAK_CHARS.test(t));
+    const flats = toCheck.filter((t) => !LINE_BREAK_CHARS.test(t));
     // 한 줄짜리 문구들을 450자/30개 한도로 묶는다
     const batches = [];
     let cur = [];
@@ -1779,8 +1822,8 @@ function mergeCloseSegments(segs, gap, before, after) {
         const bGap = cur.bStart - prev.bEnd; // 두 변경 사이 안 바뀐 글자 수 (before 기준)
         const aGap = cur.aStart - prev.aEnd; // (after 기준)
         // 변경 사이에 줄바꿈이 있으면 다른 문장/줄로 보고 합치지 않는다 (빈 줄까지 끌려와 한 코멘트로 뭉치는 것 방지)
-        const crossesLine = before.slice(prev.bEnd, cur.bStart).indexOf('\n') !== -1 ||
-            after.slice(prev.aEnd, cur.aStart).indexOf('\n') !== -1;
+        const crossesLine = LINE_BREAK_CHARS.test(before.slice(prev.bEnd, cur.bStart)) ||
+            LINE_BREAK_CHARS.test(after.slice(prev.aEnd, cur.aStart));
         if (!crossesLine && Math.min(bGap, aGap) <= gap) {
             // 사이의 공통 글자까지 포함해 하나로 확장
             prev.bEnd = cur.bEnd;
@@ -1792,7 +1835,10 @@ function mergeCloseSegments(segs, gap, before, after) {
     }
     return merged;
 }
-function isSpaceChar(c) { return c === ' ' || c === '\t' || c === '\n'; }
+function isSpaceChar(c) {
+    return c === ' ' || c === '\t' || c === '\n' || c === '\r'
+        || c === '\u00A0' || c === '\u2028' || c === '\u2029';
+}
 // 변경 구간을 단어 경계까지 넓힌다.
 // "방범구역"→"경비구역"이 "방범 → 경비"로 조각나거나, "업그레이드"→"업데이트"가
 // "그레이드 → 데이트"로 보이지 않게, 양옆의 안 바뀐 글자를 공백/줄바꿈 전까지 포함해
@@ -1832,7 +1878,7 @@ function mergeOverlappingSegments(segs) {
 // 세그먼트 라벨: "원래 → 변경" (줄바꿈은 ↵로 표시해 차이가 눈에 보이게)
 function buildSegmentLabel(beforeSeg, afterSeg) {
     const clip = (s) => {
-        const t = s.replace(/\n/g, '↵');
+        const t = s.replace(/[\n\r\u2028\u2029]/g, '↵');
         return t.length > 24 ? t.slice(0, 24) + '…' : t;
     };
     const b = beforeSeg ? clip(beforeSeg) : '(없음)';
