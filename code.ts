@@ -122,13 +122,8 @@ const UX_PATTERNS: UXPattern[] = [
   { pattern: "있습니다", replacement: "있어요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
   { pattern: "하시면", replacement: "하면", description: "조건 표현을 더 간결하게 해요.", tag: "shorten" },
   { pattern: "하십시오", replacement: "해주세요", description: "과한 격식을 줄여 자연스럽게 해요.", tag: "tone" },
-  { pattern: "관리자 리스트", replacement: "관리자 목록", description: "표준 용어로 통일해요.", tag: "term" },
-  { pattern: "자격별", replacement: "권한별", description: "표준 용어로 통일해요.", tag: "term" },
-  { pattern: "총 사용자", replacement: "전체 사용자", description: "표준 용어로 통일해요.", tag: "term" },
-  { pattern: "휴대폰번호", replacement: "휴대전화번호", description: "표준 용어로 통일해요.", tag: "term" },
-  { pattern: "휴대폰", replacement: "휴대전화", description: "표준 용어로 통일해요.", tag: "term" },
-  { pattern: "폰번호", replacement: "휴대전화번호", description: "표준 용어로 통일해요.", tag: "term" },
 ];
+// (용어 통일 규칙은 TERM_RULES로 이동 — 톤 변환보다 먼저 적용해야 권장 문구 패턴이 맞는다)
 
 // ===============================
 // 유틸리티 함수
@@ -254,6 +249,78 @@ const ADVERB_SPACING_RULES: FixRule[] = [
   { pattern: /어제([가-힣]{2,})/g, replacement: "어제 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   { pattern: /내년([가-힣]{2,})/g, replacement: "내년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
   { pattern: /작년([가-힣]{2,})/g, replacement: "작년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
+];
+
+// ===============================
+// 용어 통일 + 권장 문구 규칙 (사내 용어집 기반 — 항상 적용)
+// 톤 변환(REWRITE_RULES 등)보다 먼저 적용한다.
+// 먼저 돌지 않으면 "~하십시오" 등이 먼저 변환돼 권장 문구 패턴이 안 맞게 된다.
+// 주의: 치환 결과가 원래 패턴을 다시 포함하는 항목(고객인증번호, 등록 품질 검사 등)은
+//       이미 권장 표기인 텍스트가 이중 치환되지 않도록 가드를 둔다.
+// 자동화에서 뺀 항목: "관리자/담당자"(역할 안내라 치환 불가),
+//                  "일요일"(휴일/공휴일 중 무엇으로 바꿀지 문맥 필요),
+//                  "사용→사용함" 류 긍정형(사용자·사용법 등 오탐 위험; 부정형 미사용→사용 안함만 자동화)
+// ===============================
+const TERM_RULES: FixRule[] = [
+  // --- 용어 통일 ---
+  { pattern: /개인 사용자 조회/g, replacement: "개별 사용자 조회", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /자격 ?선택/g, replacement: "권한설정", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /단순 출입정보/g, replacement: "일반 출입정보", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /개인별 로그 정보/g, replacement: "개인별 사용 이력", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  // 이미 "지문등록 품질 검사"인 텍스트는 건너뜀 (앞 글자 '문' 가드)
+  { pattern: /(^|[^문])등록 품질 검사/g, replacement: "$1지문등록 품질 검사", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /자격별/g, replacement: "권한별", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /관리자 리스트/g, replacement: "관리자 목록", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  // 이미 "사용자번호(고객인증번호)"로 쓴 경우 이중 치환 방지 (여는 괄호 가드)
+  { pattern: /(^|[^(])고객인증번호/g, replacement: "$1사용자번호(고객인증번호)", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /총 사용자/g, replacement: "전체 사용자", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /사용자 DB ?정보/g, replacement: "사용자 데이터 정보", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /미사용/g, replacement: "사용 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /미동의/g, replacement: "동의 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /미표시/g, replacement: "표시 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /미등록/g, replacement: "등록 안됨", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /출입 가능/g, replacement: "출입 허용", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /출입 불가/g, replacement: "출입 제한", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /얼굴\(지문\) ?\+ ?카드 인증/g, replacement: "얼굴(지문)/카드 모두 인증", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /얼굴\(지문\) ?or ?카드 인증/gi, replacement: "얼굴(지문) 또는 카드 인증", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /재부팅/g, replacement: "재시작", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /에러/g, replacement: "오류", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /\b(?:Error|Erorr)\b/g, replacement: "오류", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /테스트/g, replacement: "시험", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /F\/W/g, replacement: "펌웨어", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /업그레이드/g, replacement: "업데이트", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /음성 (설정|조절)/g, replacement: "소리 $1", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /IP ?Address/gi, replacement: "IP 주소", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /이름 출력/g, replacement: "이름 표시", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /패스워드/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  // "암호화"는 다른 뜻이므로 예외
+  { pattern: /암호(?!화)/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /상단정보/g, replacement: "상단 날짜/시간", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  // "사용자 배경화면"을 먼저 치환해야 "사용자 사용자 이미지"가 안 된다
+  { pattern: /사용자 ?배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /콜센터/g, replacement: "고객센터", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /에스원 (기술사원|관리자)/g, replacement: "에스원 담당자", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /문개폐/g, replacement: "문 열림", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /방범구역/g, replacement: "경비구역", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /세콤 시스템/g, replacement: "경비 시스템", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /지문 획득/g, replacement: "지문 스캔", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  // 휴대폰 계열은 긴 패턴부터 (휴대폰번호 → 휴대폰 → 폰번호 순서 중요)
+  { pattern: /휴대폰 ?번호/g, replacement: "휴대전화번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /휴대폰/g, replacement: "휴대전화", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /폰번호/g, replacement: "휴대전화번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
+
+  // --- 권장 문구 (안내 메시지) ---
+  // "얼굴 또는 카드를 입력해 주세요"는 용어집상 그대로 두므로(좌동),
+  // 카드/지문 단독 문구는 노드 전체가 그 문장일 때만 바꾼다 (^…$ 앵커)
+  { pattern: /^카드를 입력해 주세요[.!]?\s*$/g, replacement: "카드를 대주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /^지문을 입력해 주세요[.!]?\s*$/g, replacement: "지문을 대주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /^부팅\s*중[.\s]*잠시만 기다려 주십시오[.!]?\s*$/g, replacement: "기기 부팅중입니다. 잠시만 기다려 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /^관리자가 아닙니다[.!]?\s*$/g, replacement: "관리자만 메뉴진입이 가능합니다", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /^사용자 삭제 실패[.!]?\s*$/g, replacement: "사용자 삭제를 실패하였습니다", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /^컨트롤러 수량 초과 실패[.!]?\s*$/g, replacement: "컨트롤러 수량 초과로 실패하였습니다", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /문의하십시오/g, replacement: "문의해 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /시도하세요/g, replacement: "시도해 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
 ];
 
 // ===============================
@@ -398,6 +465,13 @@ const REWRITE_RULES: FixRule[] = [
   {
     pattern: /하십시오/g,
     replacement: "해주세요",
+    reason: "과한 격식을 줄여 자연스럽게 해요.",
+    tags: ["tone"],
+  },
+  // ~주십시오 → ~주세요 (기다려 주십시오 등)
+  {
+    pattern: /주십시오/g,
+    replacement: "주세요",
     reason: "과한 격식을 줄여 자연스럽게 해요.",
     tags: ["tone"],
   },
@@ -997,8 +1071,11 @@ async function mapWithConcurrency<T, R>(
 function suggestFriendlyKorean(text: string, naverChecked = false): Suggestion[] {
   const original = text;
 
+  // 0) 용어 통일 + 권장 문구 (사내 용어집 — 톤 변환 전에 먼저 적용해야 패턴이 맞는다)
+  const term = applyRules(original, TERM_RULES);
+
   // 1) 오타/띄어쓰기(가벼운 룰)
-  let typo = applyRules(original, TYPO_RULES);
+  let typo = applyRules(term.text, TYPO_RULES);
 
   // 1-1) 부사 띄어쓰기 — 네이버 검사가 안 된 텍스트에만 폴백으로 적용 (오탐 위험 규칙)
   if (!naverChecked) {
@@ -1026,8 +1103,8 @@ function suggestFriendlyKorean(text: string, naverChecked = false): Suggestion[]
   const finalAfter = period.text;
 
   // reason/tags 합치기
-  const mergedReasons = [...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...period.reasons];
-  const mergedTags = [...typo.tags, ...structural.tags, ...pattern.tags];
+  const mergedReasons = [...term.reasons, ...typo.reasons, ...particle.reasons, ...structural.reasons, ...pattern.reasons, ...period.reasons];
+  const mergedTags = [...term.tags, ...typo.tags, ...structural.tags, ...pattern.tags];
 
   const suggestions: Suggestion[] = [];
 
