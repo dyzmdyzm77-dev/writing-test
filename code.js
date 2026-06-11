@@ -289,9 +289,24 @@ function protectCompounds(s) {
 // 그대로 두면 "출입정보 " → "출입정보"처럼 눈에 안 보이는(똑같아 보이는) 제안이 생기므로
 // 원문의 앞뒤 공백을 교정문에 그대로 복원한다.
 function restoreEdgeWhitespace(original, corrected) {
-    const lead = (original.match(/^\s*/) || [''])[0];
-    const trail = (original.match(/\s*$/) || [''])[0];
-    return lead + corrected.trim() + trail;
+    const lead = (original.match(/^[ \t]*/) || [''])[0];
+    const trail = (original.match(/[ \t]*$/) || [''])[0];
+    return lead + corrected.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '') + trail;
+}
+// 네이버 교정문의 공백 구조를 원문에 맞춘다 (여러 줄 텍스트 대응):
+// - 줄 수가 달라졌으면(줄바꿈 손실/병합) 네이버 교정을 통째로 버리고 원문 유지
+//   → "조회⏎ → 조회" 같은 줄바꿈 제거 제안이 생기지 않는다
+// - 줄 수가 같으면 각 줄의 앞뒤 공백을 원문 그대로 복원
+function alignWhitespace(original, corrected) {
+    const oLines = original.split('\n');
+    const cLines = corrected.split('\n');
+    if (oLines.length !== cLines.length)
+        return original;
+    const out = [];
+    for (let i = 0; i < oLines.length; i++) {
+        out.push(restoreEdgeWhitespace(oLines[i], cLines[i]));
+    }
+    return out.join('\n');
 }
 // ===============================
 // '~해 주세요' 띄어쓰기 통일 (모든 변환이 끝난 뒤 마지막에 적용)
@@ -1056,8 +1071,8 @@ async function naverSpellCheck(text) {
     if (r === null)
         return { text, reasons: [], checked: false };
     // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 — 되돌려서 원문과 같아지면 제안 자체가 사라진다
-    // 앞뒤 공백도 원문대로 복원 (네이버가 잘라내면 똑같아 보이는 제안이 생김)
-    const corrected = restoreEdgeWhitespace(text, r.errata > 0 ? protectCompounds(r.corrected) : r.corrected);
+    // 공백 구조(줄바꿈·각 줄 앞뒤 공백)도 원문대로 복원 (네이버가 잘라내면 똑같아 보이는 제안이 생김)
+    const corrected = alignWhitespace(text, r.errata > 0 ? protectCompounds(r.corrected) : r.corrected);
     let reasons = [];
     if (corrected !== text && r.errata > 0) {
         // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
@@ -1218,8 +1233,8 @@ async function naverSpellCheckAll(uniqueTexts, onProgress) {
         }
         for (let i = 0; i < texts.length; i++) {
             const t = texts[i];
-            // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 (단건 검사와 동일) + 앞뒤 공백 복원
-            const corrected = restoreEdgeWhitespace(t, lines[i].corrected !== t ? protectCompounds(lines[i].corrected) : lines[i].corrected);
+            // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 (단건 검사와 동일) + 공백 구조 복원
+            const corrected = alignWhitespace(t, lines[i].corrected !== t ? protectCompounds(lines[i].corrected) : lines[i].corrected);
             const reasons = corrected !== t
                 ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기를 바로잡아요.'])
                 : [];
@@ -1814,9 +1829,12 @@ function mergeOverlappingSegments(segs) {
     }
     return out;
 }
-// 세그먼트 라벨: "원래 → 변경"
+// 세그먼트 라벨: "원래 → 변경" (줄바꿈은 ↵로 표시해 차이가 눈에 보이게)
 function buildSegmentLabel(beforeSeg, afterSeg) {
-    const clip = (s) => (s.length > 24 ? s.slice(0, 24) + '…' : s);
+    const clip = (s) => {
+        const t = s.replace(/\n/g, '↵');
+        return t.length > 24 ? t.slice(0, 24) + '…' : t;
+    };
     const b = beforeSeg ? clip(beforeSeg) : '(없음)';
     const a = afterSeg ? clip(afterSeg) : '(삭제)';
     return b + ' → ' + a;
