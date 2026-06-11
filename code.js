@@ -180,8 +180,97 @@ const ADVERB_SPACING_RULES = [
     { pattern: /내년([가-힣]{2,})/g, replacement: "내년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
     { pattern: /작년([가-힣]{2,})/g, replacement: "작년 $1", reason: "띄어쓰기를 자연스럽게 해요.", tags: ["spacing"] },
 ];
+// ===== GLOSSARY:BEGIN — 자동 생성 영역. 직접 수정하지 말고 glossary.md를 고친 뒤 npm run build =====
+const GLOSSARY_TERMS = [
+    { from: "개인 사용자 조회", to: "개별 사용자 조회" },
+    { from: "자격선택", to: "권한설정" },
+    { from: "단순 출입정보", to: "일반 출입정보" },
+    { from: "개인별 로그 정보", to: "개인별 사용 이력" },
+    { from: "자격별", to: "권한별" },
+    { from: "관리자 리스트", to: "관리자 목록" },
+    { from: "총 사용자", to: "전체 사용자" },
+    { from: "재부팅", to: "재시작" },
+    { from: "에러", to: "오류" },
+    { from: "테스트", to: "시험" },
+    { from: "F/W", to: "펌웨어" },
+    { from: "업그레이드", to: "업데이트" },
+    { from: "이름 출력", to: "이름 표시" },
+    { from: "패스워드", to: "비밀번호" },
+    { from: "콜센터", to: "고객센터" },
+    { from: "문개폐", to: "문 열림" },
+    { from: "방범구역", to: "경비구역" },
+    { from: "세콤 시스템", to: "경비 시스템" },
+    { from: "지문 획득", to: "지문 스캔" },
+];
+const GLOSSARY_COMPOUNDS = [
+    "고객인증번호",
+    "휴대전화번호",
+    "사용자번호",
+    "휴대전화",
+    "인증번호",
+    "출입정보",
+    "권한설정",
+    "자격선택",
+    "메뉴진입",
+    "방범구역",
+    "경비구역",
+    "배경화면",
+    "상단정보",
+    "부팅중",
+];
+const GLOSSARY_ACTION_NOUNS = [
+    "확인",
+    "문의",
+    "저장",
+    "삭제",
+    "등록",
+    "입력",
+    "선택",
+    "설정",
+    "변경",
+    "수정",
+    "추가",
+    "취소",
+    "신청",
+    "동의",
+    "인증",
+    "연결",
+    "해제",
+    "시도",
+    "사용",
+    "적용",
+    "이동",
+    "클릭",
+    "터치",
+    "검색",
+    "조회",
+    "작성",
+    "제출",
+    "첨부",
+    "업로드",
+    "다운로드",
+    "로그인",
+    "로그아웃",
+    "재시작",
+    "시작",
+    "종료",
+    "갱신",
+    "예약",
+    "결제",
+    "가입",
+    "인쇄",
+    "출력",
+    "복사",
+    "백업",
+    "복원",
+    "차단",
+    "허용",
+];
+// ===== GLOSSARY:END =====
 // ===============================
 // 용어 통일 + 권장 문구 규칙 (사내 용어집 기반 — 항상 적용)
+// 단순 "기존 → 권장" 치환은 glossary.md에서 관리한다 (위 자동 생성 영역에 반영됨).
+// 이 배열에는 예외 처리(가드)가 필요한 규칙만 직접 작성한다.
 // 톤 변환(REWRITE_RULES 등)보다 먼저 적용한다.
 // 먼저 돌지 않으면 "~하십시오" 등이 먼저 변환돼 권장 문구 패턴이 안 맞게 된다.
 // 주의: 치환 결과가 원래 패턴을 다시 포함하는 항목(고객인증번호, 등록 품질 검사 등)은
@@ -191,18 +280,18 @@ const ADVERB_SPACING_RULES = [
 //                  "사용→사용함" 류 긍정형(사용자·사용법 등 오탐 위험; 부정형 미사용→사용 안함만 자동화)
 // ===============================
 const TERM_RULES = [
-    // --- 용어 통일 ---
-    { pattern: /개인 사용자 조회/g, replacement: "개별 사용자 조회", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /자격 ?선택/g, replacement: "권한설정", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /단순 출입정보/g, replacement: "일반 출입정보", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /개인별 로그 정보/g, replacement: "개인별 사용 이력", reason: "표준 용어로 통일해요.", tags: ["term"] },
+    // --- 용어 통일 (glossary.md "용어 통일" 표에서 자동 생성) ---
+    ...GLOSSARY_TERMS.map((t) => ({
+        pattern: new RegExp(escapeRegex(t.from), 'g'),
+        replacement: t.to,
+        reason: "표준 용어로 통일해요.",
+        tags: ["term"],
+    })),
+    // --- 예외 처리가 필요한 용어 규칙 (정규식 — 여기서 직접 수정) ---
     // 이미 "지문등록 품질 검사"인 텍스트는 건너뜀 (앞 글자 '문' 가드)
     { pattern: /(^|[^문])등록 품질 검사/g, replacement: "$1지문등록 품질 검사", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /자격별/g, replacement: "권한별", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /관리자 리스트/g, replacement: "관리자 목록", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // 이미 "사용자번호(고객인증번호)"로 쓴 경우 이중 치환 방지 (여는 괄호 가드)
     { pattern: /(^|[^(])고객인증번호/g, replacement: "$1사용자번호(고객인증번호)", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /총 사용자/g, replacement: "전체 사용자", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /사용자 DB ?정보/g, replacement: "사용자 데이터 정보", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // "미사용자/미등록자" 등 사람을 가리키는 합성어는 제외 (라벨 토글 용어만 치환)
     { pattern: /미사용(?!자)/g, replacement: "사용 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
@@ -214,27 +303,15 @@ const TERM_RULES = [
     { pattern: /출입 불가(?!능)/g, replacement: "출입 제한", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /얼굴\(지문\) ?\+ ?카드 인증/g, replacement: "얼굴(지문)/카드 모두 인증", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /얼굴\(지문\) ?or ?카드 인증/gi, replacement: "얼굴(지문) 또는 카드 인증", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /재부팅/g, replacement: "재시작", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /에러/g, replacement: "오류", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /\b(?:Error|Erorr)\b/g, replacement: "오류", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /테스트/g, replacement: "시험", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /F\/W/g, replacement: "펌웨어", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /업그레이드/g, replacement: "업데이트", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /음성 (설정|조절)/g, replacement: "소리 $1", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /IP ?Address/gi, replacement: "IP 주소", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /이름 출력/g, replacement: "이름 표시", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /패스워드/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // "암호화"는 다른 뜻이므로 예외
     { pattern: /암호(?!화)/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // "사용자 배경화면"을 먼저 치환해야 "사용자 사용자 이미지"가 안 된다
     { pattern: /사용자 ?배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /콜센터/g, replacement: "고객센터", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /에스원 (기술사원|관리자)/g, replacement: "에스원 담당자", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /문개폐/g, replacement: "문 열림", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /방범구역/g, replacement: "경비구역", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /세콤 시스템/g, replacement: "경비 시스템", reason: "표준 용어로 통일해요.", tags: ["term"] },
-    { pattern: /지문 획득/g, replacement: "지문 스캔", reason: "표준 용어로 통일해요.", tags: ["term"] },
     // 휴대폰 계열은 긴 패턴부터 (휴대폰번호 → 휴대폰 → 폰번호 순서 중요)
     { pattern: /휴대폰 ?번호/g, replacement: "휴대전화번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
     { pattern: /휴대폰/g, replacement: "휴대전화", reason: "표준 용어로 통일해요.", tags: ["term"] },
@@ -257,25 +334,16 @@ const TERM_RULES = [
 // "출입정보"→"출입 정보"). 그대로 두면 ① 공백만 다른 무의미한 제안이 생기고
 // ② 띄어쓰기가 바뀐 탓에 TERM_RULES가 매칭되지 않는다.
 // → 네이버 교정 직후와 변환 파이프라인 맨 앞에서 용어집 표기(붙여쓰기)로 되돌린다.
-// 새 합성어가 "X → X 같이 보이는 제안"으로 나타나면 이 목록에 추가할 것.
+// 새 합성어가 "X → X 같이 보이는 제안"으로 나타나면 glossary.md "합성어 보호" 목록에 추가할 것.
+// (긴 단어 우선 정렬은 빌드 스크립트가 처리한다)
 // ===============================
-const COMPOUND_PROTECT_RULES = [
-    // 긴 단어 먼저 (고객인증번호가 인증번호보다 앞에 와야 함)
-    { pattern: /고객 ?인증 ?번호/g, replacement: "고객인증번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /휴대 ?전화 ?번호/g, replacement: "휴대전화번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /휴대 ?전화/g, replacement: "휴대전화", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /사용자 ?번호/g, replacement: "사용자번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /인증 ?번호/g, replacement: "인증번호", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /출입 ?정보/g, replacement: "출입정보", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /권한 ?설정/g, replacement: "권한설정", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /자격 ?선택/g, replacement: "자격선택", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /메뉴 ?진입/g, replacement: "메뉴진입", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /부팅 ?중/g, replacement: "부팅중", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /방범 ?구역/g, replacement: "방범구역", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /경비 ?구역/g, replacement: "경비구역", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /배경 ?화면/g, replacement: "배경화면", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-    { pattern: /상단 ?정보/g, replacement: "상단정보", reason: "용어집 표기로 붙여 써요.", tags: ["term"] },
-];
+const COMPOUND_PROTECT_RULES = GLOSSARY_COMPOUNDS.map((w) => ({
+    // 글자 사이 어디에 공백이 끼어도 인식해 용어집 표기로 되돌린다 (예: "출입 정보" → "출입정보")
+    pattern: new RegExp(w.split('').map(escapeRegex).join(' ?'), 'g'),
+    replacement: w,
+    reason: "용어집 표기로 붙여 써요.",
+    tags: ["term"],
+}));
 // 합성어 보호만 조용히 적용 (네이버 교정 직후에 사용 — 사유 없이 텍스트만 복원)
 function protectCompounds(s) {
     let t = s;
@@ -354,9 +422,10 @@ function alignWhitespace(original, corrected) {
 //     "문의해주세요" → "문의해 주세요", "확인 해 주세요" → "확인해 주세요"
 // - 부사 등 그 외 단어면 '해주세요'를 한 덩어리로 붙인다:
 //     "같이 해 주세요" → "같이 해주세요" ("같이해 주세요"는 말이 안 됨)
-// 품사는 정규식으로 구분할 수 없어 동작 명사 목록(ACTION_NOUNS)으로 판별한다.
+// 품사는 정규식으로 구분할 수 없어 동작 명사 목록으로 판별한다.
+// 목록은 glossary.md "동작 명사" 섹션에서 관리한다.
 // ===============================
-const ACTION_NOUNS = '확인|문의|저장|삭제|등록|입력|선택|설정|변경|수정|추가|취소|신청|동의|인증|연결|해제|시도|사용|적용|이동|클릭|터치|검색|조회|작성|제출|첨부|업로드|다운로드|로그인|로그아웃|재시작|시작|종료|갱신|예약|결제|가입|인쇄|출력|복사|백업|복원|차단|허용';
+const ACTION_NOUNS = GLOSSARY_ACTION_NOUNS.join('|');
 const HAEJUSEYO_RULES = [
     // 1) '해' 앞에 단어가 붙어 있으면 '주세요'를 띄움: "문의해주세요" → "문의해 주세요"
     { pattern: /([가-힣])해주세요/g, replacement: "$1해 주세요", reason: "'~해 주세요' 띄어쓰기를 통일해요.", tags: ["spacing"] },
