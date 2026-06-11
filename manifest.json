@@ -13,7 +13,7 @@
   "networkAccess": {
     "allowedDomains": [
       "https://m.search.naver.com",
-      "https://*.workers.dev"
+      "https://writingtest.dyzmdyzm77.workers.dev"
     ]
   }
 }

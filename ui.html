@@ -796,6 +796,16 @@
           selectAllCheckbox.checked = selectedNodeIds.size === data.length && data.length > 0;
         }
         
+        // innerHTML에 넣기 전 HTML 특수문자 이스케이프 (캔버스 텍스트에 <, & 등이 있어도 안전)
+        function escapeHtml(s) {
+          return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
+
         // 공백/문장부호만 바뀐 변경(띄어쓰기, 마침표 추가 등)은 색칠할 글자가 작아 잘 안 보인다.
         // 이런 변경 구간은 양옆 단어(인접 공통 부분의 비공백)까지 흡수해 단어 단위로 색칠한다.
         // 예: "주세요" → "주세요." 면 "주세요" 단어까지 함께 색칠.
@@ -893,17 +903,17 @@
           // 공백만 바뀐 띄어쓰기 변경은 단어 단위로 색 범위를 넓힌다
           const merged = mergeWhitespaceChangeParts(parts);
 
-          // HTML 생성
+          // HTML 생성 (캔버스 텍스트에 <, & 등이 있어도 깨지지 않게 이스케이프)
           const beforeHtml = merged.map(part =>
             part.changed
-              ? `<span class="text-changed-before">${part.before}</span>`
-              : part.before
+              ? `<span class="text-changed-before">${escapeHtml(part.before)}</span>`
+              : escapeHtml(part.before)
           ).join('');
 
           const afterHtml = merged.map(part =>
             part.changed
-              ? `<span class="text-changed-after">${part.after}</span>`
-              : part.after
+              ? `<span class="text-changed-after">${escapeHtml(part.after)}</span>`
+              : escapeHtml(part.after)
           ).join('');
           
           return { beforeHtml, afterHtml };
@@ -936,7 +946,7 @@
           // 변경 이유를 항목별로 나눠서 표시
           const reasonItems = item.reason ? item.reason.split(' - ').map(r => r.trim()).filter(r => r) : [];
           const reasonHtml = reasonItems.length > 0 
-            ? `<div class="preview-reason">${reasonItems.map(r => `<div class="reason-item">• ${r}</div>`).join('')}</div>`
+            ? `<div class="preview-reason">${reasonItems.map(r => `<div class="reason-item">• ${escapeHtml(r)}</div>`).join('')}</div>`
             : '';
           
           div.innerHTML = `

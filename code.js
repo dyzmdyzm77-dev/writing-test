@@ -1,4 +1,4 @@
-// /// <reference types="@figma/plugin-typings" />
+/// <reference types="@figma/plugin-typings" />
 // UI 띄우기
 const UI_INIT_W = 360;
 const UI_INIT_H = 780;
@@ -535,20 +535,6 @@ const REWRITE_RULES = [
         reason: "자연스러운 표현으로 바꿔요.",
         tags: ["shorten"],
     },
-    // ~하시는 것이 좋겠어요 → ~하시는 게 좋을 것 같아요
-    {
-        pattern: /하시는 것이 좋겠어요/g,
-        replacement: "하시는 게 좋을 것 같아요",
-        reason: "자연스러운 표현으로 바꿔요.",
-        tags: ["shorten"],
-    },
-    // ~하는 것이 좋겠어요 → ~하는 게 좋을 것 같아요
-    {
-        pattern: /하는 것이 좋겠어요/g,
-        replacement: "하는 게 좋을 것 같아요",
-        reason: "자연스러운 표현으로 바꿔요.",
-        tags: ["shorten"],
-    },
 ];
 // ===============================
 // 핵심 변환 함수들
@@ -662,16 +648,6 @@ function applyPeriodRule(text, originalText) {
     // 패턴: "해요/돼요/이에요/예요/있어요/주세요/까요" 다음에 공백이 있고 그 다음 한글이 오거나, 문장 끝일 때
     const periodPattern = /(해요|돼요|이에요|예요|있어요|주세요|까요)(\s+)(?![.,!?])([가-힣])/g;
     const periodPatternEnd = /(해요|돼요|이에요|예요|있어요|주세요|까요)(?![.,!?])(?=\s*$)/g;
-    const periodPatternComma = /(해요|돼요|이에요|예요|있어요|주세요|까요)(?![.,!?])(?=[,])/g;
-    // 쉼표 앞에 있는 경우: "시작돼요," → "시작돼요.,"
-    if (periodPatternComma.test(t)) {
-        periodPatternComma.lastIndex = 0;
-        const next = t.replace(periodPatternComma, "$1.");
-        if (next !== t) {
-            t = next;
-            reasons.push("문장 끝에 마침표를 추가해요.");
-        }
-    }
     // 중간에 있는 경우: "돼요  안되" → "돼요.  안되"
     if (periodPattern.test(t)) {
         periodPattern.lastIndex = 0;
@@ -1108,7 +1084,8 @@ function applyChangeToNode(node, previewMap, changedNodeIds, _errors) {
         node.deleteCharacters(start, endBefore);
     }
     if (toInsert.length > 0 && node.insertCharacters) {
-        node.insertCharacters(start, toInsert, 'BEFORE_CHARACTER');
+        // useStyle은 공식 API 기준 'BEFORE' | 'AFTER' (이전의 'BEFORE_CHARACTER'는 잘못된 값)
+        node.insertCharacters(start, toInsert, 'BEFORE');
         // 저장해둔 스타일 복원
         restoreRangeStyle(node, start, start + toInsert.length, savedStyle);
     }
@@ -1222,20 +1199,6 @@ async function ensureAnnotationFont() {
         catch (_a) { }
     }
     return null;
-}
-// 텍스트 노드의 페이지 직속 최상위 부모 프레임 반환
-function getTopLevelParentFrame(nodeId) {
-    const node = figma.getNodeById(nodeId);
-    if (!node)
-        return null;
-    let current = node;
-    while (current.parent && current.parent.type !== 'PAGE') {
-        current = current.parent;
-    }
-    // TEXT가 페이지 직속이면 자식을 가질 수 없으므로 null
-    if (!current || current.type === 'TEXT' || current.type === 'PAGE')
-        return null;
-    return current;
 }
 // 특정 노드의 어노테이션이 하나라도 있는지 검색 (인덱스 사용 — 텍스트 편집마다 호출되므로 전수 스캔 회피)
 function findAnnotation(nodeId) {
@@ -2086,26 +2049,6 @@ figma.on('close', () => {
 });
 // PREVIEW에서 찾은 노드들을 캐시 (FOCUS_NODE에서 사용)
 const previewNodeCache = new Map();
-// 텍스트 수정 전에 폰트 로드(필수)
-async function loadFontsForTextNode(textNode) {
-    // 단일 폰트면 그대로 로드
-    if (textNode.fontName !== figma.mixed) {
-        await figma.loadFontAsync(textNode.fontName);
-        return;
-    }
-    // mixed 폰트면: 글자 단위로 폰트 수집 후 로드
-    const fonts = new Map();
-    const len = textNode.characters.length;
-    for (let i = 0; i < len; i++) {
-        const fn = textNode.getRangeFontName(i, i + 1);
-        if (fn !== figma.mixed) {
-            const key = fn.family + "::" + fn.style;
-            fonts.set(key, fn);
-        }
-    }
-    // 수집한 폰트들을 모두 로드
-    await Promise.all(Array.from(fonts.values()).map(f => figma.loadFontAsync(f)));
-}
 // 메시지 수신: UI 버튼 클릭 → 실행
 figma.ui.onmessage = async (msg) => {
     var _a;
@@ -2196,7 +2139,7 @@ figma.ui.onmessage = async (msg) => {
         let lastProgressUpdateTime = Date.now();
         const PROGRESS_UPDATE_TIME_INTERVAL = 100; // 100ms마다 시간 기반 업데이트
         const totalTextNodes = textNodes.length;
-        // 0) 네이버 맞춤법 검사 — 동시 5개로 제한해 미리 돌린다. (실패 시 원문 유지 → 로컬 규칙만)
+        // 0) 네이버 맞춤법 검사 — 동시 8개로 제한해 미리 돌린다. (실패 시 원문 유지 → 로컬 규칙만)
         naverOkCount = 0;
         naverDiag = '';
         figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '맞춤법 검사 중...' });
@@ -2379,10 +2322,9 @@ figma.ui.onmessage = async (msg) => {
                 progress: 10,
                 status: '변경할 노드 찾는 중...'
             });
-            // 변경할 노드들 수집 - getNodeById 우선 사용, 실패 시에만 제한적 스캔
+            // 변경할 노드들 수집 (dynamic-page에서는 동기 getNodeById가 동작 안 함 → async 사용)
+            // getNodeByIdAsync는 선택 상태와 무관하게 id로 찾으므로, 못 찾으면 노드가 삭제된 것 → 건너뛰고 나중에 알림
             const nodesToChange = [];
-            const failedNodeIds = [];
-            // 먼저 getNodeByIdAsync로 시도 (dynamic-page에서는 동기 getNodeById가 동작 안 함)
             const totalTargetNodes = targetNodeIds.size;
             let processedCount = 0;
             for (const nodeId of targetNodeIds) {
@@ -2391,14 +2333,9 @@ figma.ui.onmessage = async (msg) => {
                     if (nodeById && nodeById.type === "TEXT") {
                         nodesToChange.push(nodeById);
                     }
-                    else {
-                        // 노드가 TEXT 타입이 아니거나 null인 경우
-                        failedNodeIds.push(nodeId);
-                    }
                 }
                 catch (e) {
-                    // getNodeById 실패 시 나중에 스캔으로 찾기 시도
-                    failedNodeIds.push(nodeId);
+                    // 노드 조회 실패 → 적용 불가 항목으로 집계됨
                 }
                 processedCount++;
                 // 진행률 업데이트 (10% ~ 30%)
@@ -2409,27 +2346,6 @@ figma.ui.onmessage = async (msg) => {
                         progress: Math.min(progress, 30),
                         status: `변경할 노드 찾는 중... (${processedCount}/${totalTargetNodes})`
                     });
-                }
-            }
-            // getNodeById로 찾지 못한 노드들만 제한적으로 스캔 (필요한 경우에만)
-            // 하지만 전체 페이지가 아닌 현재 선택된 영역만 스캔하여 성능 최적화
-            if (failedNodeIds.length > 0) {
-                // 현재 선택된 노드들에서만 스캔 (전체 페이지 스캔 대신)
-                const selection = figma.currentPage.selection;
-                const scannedNodes = new Map();
-                // 선택된 노드들 내부의 텍스트 노드만 스캔
-                for (const selectedNode of selection) {
-                    const foundNodes = await findAllTextNodes(selectedNode);
-                    for (const node of foundNodes) {
-                        scannedNodes.set(node.id, node);
-                    }
-                }
-                // 실패한 노드 ID들만 스캔된 노드에서 찾기
-                for (const nodeId of failedNodeIds) {
-                    const node = scannedNodes.get(nodeId);
-                    if (node) {
-                        nodesToChange.push(node);
-                    }
                 }
             }
             // 모든 노드의 폰트를 먼저 수집하여 병렬로 로드
@@ -2519,16 +2435,26 @@ figma.ui.onmessage = async (msg) => {
             for (const nodeId of changedNodeIds) {
                 removeAnnotationByNodeId(nodeId);
             }
-            // 변경된 항목 ID를 UI에 전송하여 UI에서 필터링하도록 함
-            if (changedNodeIds.size > 0) {
-                // 토스트 알림 표시 (UI에 전송)
-                const message = changedNodeIds.size === 1
+            // 적용 결과 알림 — 건너뛴 항목(검토 후 텍스트 변경/노드 삭제)도 숨기지 않고 알려준다
+            const skippedCount = targetNodeIds.size - changedNodeIds.size;
+            let message;
+            if (changedNodeIds.size > 0 && skippedCount === 0) {
+                message = changedNodeIds.size === 1
                     ? '변경이 완료되었어요.'
                     : `${changedNodeIds.size}건이 변경 완료되었어요.`;
-                figma.ui.postMessage({
-                    type: 'show-toast',
-                    message: message
-                });
+            }
+            else if (changedNodeIds.size > 0) {
+                message = `${changedNodeIds.size}건 적용 완료. ${skippedCount}건은 검토 후 텍스트가 바뀌었거나 삭제되어 적용하지 못했어요.`;
+            }
+            else {
+                message = '적용하지 못했어요. 검토 후 텍스트가 바뀌었거나 삭제된 항목이에요. 다시 검토해 주세요.';
+            }
+            figma.ui.postMessage({
+                type: 'show-toast',
+                message: message
+            });
+            // 변경된 항목 ID를 UI에 전송하여 UI에서 필터링하도록 함 (건너뛴 항목은 목록에 남는다)
+            if (changedNodeIds.size > 0) {
                 figma.ui.postMessage({
                     type: 'remove-changed-items',
                     changedNodeIds: Array.from(changedNodeIds)
@@ -2536,9 +2462,13 @@ figma.ui.onmessage = async (msg) => {
             }
         }
         catch (e) {
-            // 에러 발생 시에도 로딩 숨기기
+            // 에러 발생 시에도 로딩 숨기기 + 알림
             figma.ui.postMessage({
                 type: 'hide-loading'
+            });
+            figma.ui.postMessage({
+                type: 'show-toast',
+                message: '적용 중 오류가 발생했어요: ' + errStr(e)
             });
         }
         return;

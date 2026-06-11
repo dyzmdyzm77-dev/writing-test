@@ -5,6 +5,9 @@
     "strict": false,
     "skipLibCheck": true,
     "moduleResolution": "node",
-    "noImplicitAny": false
-  }
+    "noImplicitAny": false,
+    "typeRoots": ["./node_modules/@types", "./node_modules/@figma"],
+    "types": ["plugin-typings"]
+  },
+  "include": ["code.ts"]
 }
