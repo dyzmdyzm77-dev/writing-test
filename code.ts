@@ -948,8 +948,21 @@ function errStr(e: any): string {
   try { return JSON.stringify(e); } catch (_e) { return String(e); }
 }
 
+// 진행 중인 키 요청 공유 — 동시 작업들이 각자 키를 다시 가져오지 않게 한다
+let naverKeyPromise: Promise<string | null> | null = null;
+
 async function getNaverPassportKey(force = false): Promise<string | null> {
   if (naverPassportKey && !force) return naverPassportKey;
+  if (naverKeyPromise && !force) return naverKeyPromise;
+  naverKeyPromise = fetchNaverPassportKey();
+  try {
+    return await naverKeyPromise;
+  } finally {
+    naverKeyPromise = null;
+  }
+}
+
+async function fetchNaverPassportKey(): Promise<string | null> {
   try {
     const res = await fetchWithTimeout(NAVER_PROXY_URL, 8000);
     if (!res.ok) { naverDiag = '프록시 HTTP ' + res.status; console.log('[UX-SPELL]', naverDiag); return null; }
@@ -1086,6 +1099,59 @@ async function naverSpellCheck(text: string): Promise<SpellResult> {
   return { text: r.corrected, reasons, checked: true };
 }
 
+// 여러 문구를 \n으로 이어 한 번에 검사하고 줄 단위로 분해해 돌려준다.
+// 네이버는 줄바꿈을 <br>로 보존하므로 줄별 교정문/유형을 복원할 수 있다 (실서버 확인됨).
+// 줄 수가 안 맞으면 null (호출자가 단건 검사로 폴백).
+async function naverSpellChunkLines(
+  joined: string,
+  key: string,
+  lineCount: number
+): Promise<Array<{ corrected: string; types: string[] }> | null> {
+  try {
+    const url = 'https://m.search.naver.com/p/csearch/ocontent/util/SpellerProxy'
+      + '?passportKey=' + encodeURIComponent(key)
+      + '&color_blindness=0&q=' + encodeURIComponent(joined);
+    const res = await fetchWithTimeout(url, 8000);
+    if (!res.ok) { naverDiag = 'SpellerProxy HTTP ' + res.status; console.log('[UX-SPELL]', naverDiag); return null; }
+    const raw = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch (_e) { naverDiag = 'SpellerProxy 응답 JSON 파싱 실패'; return null; }
+    if (!data || !data.message || data.message.error) {
+      naverDiag = 'SpellerProxy 오류: ' + (data && data.message && data.message.error ? data.message.error : '알 수 없음');
+      return null;
+    }
+    const result = data.message.result;
+    if (!result || typeof result.notag_html !== 'string') return null;
+    naverOkCount++;
+    // html + origin_html이 있으면 줄별로 통계 교정 제외 + 유형 추출
+    if (typeof result.html === 'string' && typeof result.origin_html === 'string') {
+      const hLines = result.html.split(/<br\s*\/?>/i);
+      const oLines = result.origin_html.split(/<br\s*\/?>/i);
+      if (hLines.length === lineCount && oLines.length === lineCount) {
+        const outLines: Array<{ corrected: string; types: string[] }> = [];
+        for (let i = 0; i < lineCount; i++) {
+          outLines.push({
+            corrected: buildCorrectedExcluding(oLines[i], hLines[i]),
+            types: extractNaverTypes(hLines[i]),
+          });
+        }
+        return outLines;
+      }
+    }
+    // 폴백: notag_html을 줄로 분해 (유형 정보는 없음)
+    const plain = decodeEntities(result.notag_html).split('\n');
+    if (plain.length === lineCount) return plain.map((c) => ({ corrected: c, types: [] }));
+    naverDiag = '배치 응답 줄 수 불일치';
+    return null;
+  } catch (e) {
+    naverDiag = 'SpellerProxy fetch 실패: ' + errStr(e);
+    return null;
+  }
+}
+
+// 네이버 검사 결과 캐시 (플러그인 세션 동안 유지) — 재검토 시 같은 문구는 네트워크를 생략한다
+const naverCache = new Map<string, SpellResult>();
+
 // 동시 실행 개수를 제한해 비동기 작업 처리 (네트워크 과다 호출 방지)
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -1108,6 +1174,88 @@ async function mapWithConcurrency<T, R>(
   for (let w = 0; w < Math.min(limit, items.length); w++) workers.push(worker());
   await Promise.all(workers);
   return results;
+}
+
+// 여러 텍스트를 한 번에 검사: 캐시 → 배치(여러 문구를 \n으로 묶어 요청 1개) → 실패 시 단건 폴백.
+// 문구당 요청 1개씩 보내던 방식 대비 요청 수가 1/N로 줄어 검토가 크게 빨라진다.
+async function naverSpellCheckAll(
+  uniqueTexts: string[],
+  onProgress?: (done: number) => void
+): Promise<Map<string, SpellResult>> {
+  const out = new Map<string, SpellResult>();
+  let done = 0;
+  const report = (n: number) => { done += n; if (onProgress) onProgress(done); };
+  const setResult = (t: string, r: SpellResult) => {
+    out.set(t, r);
+    if (r.checked) naverCache.set(t, r); // 성공한 결과만 캐시 (실패는 다음 검토 때 재시도)
+  };
+
+  const toCheck: string[] = [];
+  for (const t of uniqueTexts) {
+    const cached = naverCache.get(t);
+    if (cached) { out.set(t, cached); report(1); continue; }
+    if (!t || !t.trim() || t.length > 500 || !/[가-힣]/.test(t)) {
+      out.set(t, { text: t, reasons: [], checked: false });
+      report(1);
+      continue;
+    }
+    toCheck.push(t);
+  }
+  if (toCheck.length === 0) return out;
+
+  // 줄바꿈 포함 텍스트는 단건 검사 (배치 구분자로 \n을 쓰므로 섞으면 줄 복원이 모호해진다)
+  const singles = toCheck.filter((t) => t.indexOf('\n') !== -1);
+  const flats = toCheck.filter((t) => t.indexOf('\n') === -1);
+
+  // 한 줄짜리 문구들을 450자/30개 한도로 묶는다
+  const batches: string[][] = [];
+  let cur: string[] = [];
+  let curLen = 0;
+  for (const t of flats) {
+    if (cur.length > 0 && (curLen + 1 + t.length > 450 || cur.length >= 30)) {
+      batches.push(cur);
+      cur = [];
+      curLen = 0;
+    }
+    cur.push(t);
+    curLen += t.length + 1;
+  }
+  if (cur.length > 0) batches.push(cur);
+
+  // 배치 1개 처리: 줄 복원이 안 되면 단건 검사로 폴백
+  const runBatch = async (texts: string[]): Promise<void> => {
+    if (texts.length === 1) {
+      setResult(texts[0], await naverSpellCheck(texts[0]));
+      report(1);
+      return;
+    }
+    let key = await getNaverPassportKey();
+    let lines = key ? await naverSpellChunkLines(texts.join('\n'), key, texts.length) : null;
+    if (lines === null && key) {
+      // 키 만료 가능 → 1회 재발급 후 재시도
+      key = await getNaverPassportKey(true);
+      if (key) lines = await naverSpellChunkLines(texts.join('\n'), key, texts.length);
+    }
+    if (lines === null) {
+      for (const t of texts) { setResult(t, await naverSpellCheck(t)); report(1); }
+      return;
+    }
+    for (let i = 0; i < texts.length; i++) {
+      const t = texts[i];
+      const corrected = lines[i].corrected;
+      const reasons = corrected !== t
+        ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기를 바로잡아요.'])
+        : [];
+      setResult(t, { text: corrected, reasons, checked: true });
+    }
+    report(texts.length);
+  };
+
+  const jobs: Array<() => Promise<void>> = [];
+  for (const b of batches) jobs.push(() => runBatch(b));
+  for (const t of singles) jobs.push(async () => { setResult(t, await naverSpellCheck(t)); report(1); });
+  await mapWithConcurrency(jobs, 6, (job) => job());
+  return out;
 }
 
 /**
@@ -1807,27 +1955,45 @@ async function measureSegments(
         if (ch > 0 && ch < lineH * 1.8) realLineH = ch;
       } catch (_e) {}
 
+      // clone.characters 대입은 매번 레이아웃을 다시 계산해 비싸다.
+      // 같은 인덱스를 이진 탐색이 반복 조회하므로 결과를 메모이즈해 대입 횟수를 줄인다.
+      const linesMemo = new Map<number, number>();
       linesUpTo = (p: number): number => {
         if (p <= 0) return 0;
+        const hit = linesMemo.get(p);
+        if (hit !== undefined) return hit;
         clone.characters = before.slice(0, p);
-        return Math.max(1, Math.round(clone.height / realLineH));
+        const v = Math.max(1, Math.round(clone.height / realLineH));
+        linesMemo.set(p, v);
+        return v;
       };
+      const firstKMemo = new Map<number, number>();
       firstK = (L: number): number => {
+        const hit = firstKMemo.get(L);
+        if (hit !== undefined) return hit;
         let lo = 0, hi = len;
         while (lo < hi) {
           const mid = (lo + hi) >> 1;
           if (linesUpTo(mid) >= L) hi = mid; else lo = mid + 1;
         }
+        firstKMemo.set(L, lo);
         return lo;
       };
       // 줄 L의 상단 y 오프셋 = 그 앞의 (L-1)개 줄 높이.
       // firstK(L)은 'L번째 줄의 첫 글자' 인덱스라, 그 글자를 빼야(=firstK(L)-1) (L-1)줄 높이가 된다.
+      const offsetMemo = new Map<number, number>();
       lineTopOffset = (L: number): number => {
         if (L <= 1) return 0;
+        const hit = offsetMemo.get(L);
+        if (hit !== undefined) return hit;
         const k = Math.max(0, firstK(L) - 1);
-        if (k <= 0) return 0;
-        clone.characters = before.slice(0, k);
-        return clone.height;
+        let v = 0;
+        if (k > 0) {
+          clone.characters = before.slice(0, k);
+          v = clone.height;
+        }
+        offsetMemo.set(L, v);
+        return v;
       };
       totalLines = Math.max(1, linesUpTo(len));
     }
@@ -2301,31 +2467,27 @@ figma.ui.onmessage = async (msg: any) => {
 
     const totalTextNodes = textNodes.length;
 
-    // 0) 네이버 맞춤법 검사 — 동시 8개로 제한해 미리 돌린다. (실패 시 원문 유지 → 로컬 규칙만)
+    // 0) 네이버 맞춤법 검사 — 캐시 + 배치(여러 문구를 요청 1개로) 처리. (실패 시 원문 유지 → 로컬 규칙만)
     naverOkCount = 0;
     naverDiag = '';
     figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '맞춤법 검사 중...' });
     // 같은 문구는 한 번만 검사 (반복되는 버튼·라벨이 많아 중복 제거 효과가 큼)
     const uniqueTexts = Array.from(new Set(textNodes.map((n) => n.characters)));
     const totalUnique = uniqueTexts.length;
-    const spellByText = new Map<string, SpellResult>();
-    await mapWithConcurrency(
-      uniqueTexts,
-      8,
-      async (t) => { spellByText.set(t, await naverSpellCheck(t)); },
-      (done) => {
-        const p = 30 + (totalUnique > 0 ? (done / totalUnique) * 30 : 0); // 30~60%
-        figma.ui.postMessage({
-          type: 'update-progress',
-          progress: Math.min(p, 60),
-          status: `맞춤법 검사 중... (${done}/${totalUnique})`
-        });
-      }
-    );
+    const spellByText = await naverSpellCheckAll(uniqueTexts, (done) => {
+      const p = 30 + (totalUnique > 0 ? (done / totalUnique) * 30 : 0); // 30~60%
+      figma.ui.postMessage({
+        type: 'update-progress',
+        progress: Math.min(p, 60),
+        status: `맞춤법 검사 중... (${done}/${totalUnique})`
+      });
+    });
     const spellCorrections = textNodes.map((n) => spellByText.get(n.characters) || { text: n.characters, reasons: [], checked: false });
-    // 네이버 검사가 한 건도 정상 응답을 못 받았으면 원인과 함께 안내 — 로컬 규칙으로는 계속 진행
-    // (검색페이지는 됐는데 SpellerProxy만 막힌 경우까지 잡힘)
-    if (naverOkCount === 0 && totalTextNodes > 0) {
+    // 검사 대상이 있었는데 한 건도 성공 못 했으면 원인과 함께 안내 — 로컬 규칙으로는 계속 진행.
+    // (캐시 히트도 성공으로 친다 — 재검토 때 네트워크 0건이어도 오탐하지 않도록)
+    const spellEligible = uniqueTexts.some((t) => t && t.trim() && t.length <= 500 && /[가-힣]/.test(t));
+    const spellAnyOk = uniqueTexts.some((t) => { const r = spellByText.get(t); return !!(r && r.checked); });
+    if (spellEligible && !spellAnyOk) {
       figma.ui.postMessage({
         type: 'show-toast',
         message: '네이버 맞춤법 미작동: ' + (naverDiag || '원인 미상') + ' (톤·을/를 검사만 진행)'
