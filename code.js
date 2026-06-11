@@ -1924,6 +1924,28 @@ function expandSegmentToWord(s, before, after) {
     }
     return { bStart, bEnd, aStart, aEnd };
 }
+// 단어 확장으로 끌려온 "변경과 무관한 꼬리 조사"는 표시에서 떼어낸다.
+// 예: "고객인증번호를 → 사용자번호(고객인증번호)를"의 '를' — 양쪽 끝의 공통 글자가
+// 조사일 때만 자르므로 실제 변경 내용은 잘리지 않는다. (표시 전용 — 적용 텍스트와 무관)
+const TRAILING_PARTICLES = /(에게서|에서|에게|까지|부터|처럼|보다|으로|이나|라도|마저|조차|[을를이가은는과와도만의에로])$/;
+function shrinkTrailingParticle(s, before, after) {
+    const { bStart, bEnd, aStart, aEnd } = s;
+    // 끝에서부터 양쪽이 같은(=확장으로 끌려온) 글자 수
+    let common = 0;
+    while (common < bEnd - bStart && common < aEnd - aStart &&
+        before[bEnd - 1 - common] === after[aEnd - 1 - common])
+        common++;
+    if (common === 0)
+        return s;
+    const m = before.slice(bEnd - common, bEnd).match(TRAILING_PARTICLES);
+    if (!m)
+        return s;
+    const cut = m[0].length;
+    // 조사를 떼고도 양쪽에 내용이 남을 때만 (세그먼트가 비어버리지 않게)
+    if (cut >= bEnd - bStart || cut >= aEnd - aStart)
+        return s;
+    return { bStart, bEnd: bEnd - cut, aStart, aEnd: aEnd - cut };
+}
 // 단어 경계로 넓힌 뒤 겹치거나 맞닿은 구간을 하나로 합친다.
 // 예: "고객인증번호"→"사용자번호(고객인증번호)"는 앞뒤 삽입 2개가 같은 단어로 넓혀져 겹친다.
 function mergeOverlappingSegments(segs) {
@@ -2360,7 +2382,7 @@ async function measureAnnotation(item, scratch) {
     const absX = item.x;
     const absY = item.y;
     const segs = mergeOverlappingSegments(mergeCloseSegments(diffSegments(item.before, item.after), SEGMENT_MERGE_GAP, item.before, item.after)
-        .map((s) => expandSegmentToWord(s, item.before, item.after)));
+        .map((s) => expandSegmentToWord(s, item.before, item.after))).map((s) => shrinkTrailingParticle(s, item.before, item.after));
     if (segs.length === 0)
         return null;
     const geoms = await measureSegments(node, item.before, segs, absX, absY, scratch);
