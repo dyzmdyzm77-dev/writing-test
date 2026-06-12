@@ -293,9 +293,10 @@
       .preview-item {
         background: #ffffff;
         border: 1px solid transparent; /* 평소엔 박스 없음 — 선택 시 파란 테두리 자리 확보 */
-        border-radius: 10px;
+        border-radius: 0;
         font-size: 14px;
-        padding: 12px;
+        margin: 0 -16px; /* 호버/선택 표시가 카드 좌우 끝까지 차도록 (구분선과 같은 폭) */
+        padding: 12px 15px; /* 보더 1px 포함 콘텐츠 들여쓰기 16px — 타이틀과 정렬 */
       }
       .preview-item:hover {
         background: #F7F7F7;
