@@ -1264,8 +1264,9 @@
           
           // 클릭 시 해당 텍스트 레이어로 이동 및 단일 선택/해제
           div.addEventListener('click', () => {
-            // 클릭한 항목이 이미 선택되어 있으면 해제
-            const deselecting = selectedNodeIds.has(item.nodeId);
+            // 단독으로 선택된 카드를 다시 누르면 해제.
+            // 여러 개 선택(전체 선택 등) 상태에서 하나를 누르면 그것만 단독 선택.
+            const deselecting = selectedNodeIds.has(item.nodeId) && selectedNodeIds.size === 1;
             if (deselecting) {
               selectedNodeIds.delete(item.nodeId);
               div.classList.remove('selected');
