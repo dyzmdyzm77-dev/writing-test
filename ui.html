@@ -525,14 +525,27 @@
     <script>
       let previewData = [];
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
-      // 검토 결과 추가 후 "맨 아래로 스크롤"이 예약된 상태.
+      // 검토 후 스크롤 동작 예약:
+      // - 최초 검토: 목록 맨 위로
+      // - 추가 검토: 새로 추가된 카드 중 가장 위의 것이 화면 중앙에 오도록
       // 이 동안 캔버스 자동 선택의 scrollIntoView는 건너뛰고,
-      // 검토가 완전히 끝나는 hide-loading 시점에 맨 아래로 한 번 더 확정한다.
-      let pendingScrollToBottom = false;
+      // 검토가 완전히 끝나는 hide-loading 시점에 한 번 더 확정한다.
+      let pendingScroll = null; // { mode: 'top' } | { mode: 'center', ids: Set<nodeId> }
 
-      function scrollListToBottom() {
-        // smooth는 뒤이어 오는 스크롤/레이아웃에 끊길 수 있어 즉시 점프로 확정
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
+      function performPendingScroll() {
+        if (!pendingScroll) return;
+        if (pendingScroll.mode === 'top') {
+          window.scrollTo({ top: 0, behavior: 'auto' });
+          return;
+        }
+        // 새 카드 중 화면(DOM) 순서상 가장 위의 것을 중앙으로
+        const items = document.querySelectorAll('.preview-item');
+        for (const el of items) {
+          if (pendingScroll.ids.has(el.dataset.nodeId)) {
+            el.scrollIntoView({ block: 'center', behavior: 'auto' });
+            return;
+          }
+        }
       }
 
       // 고정 헤더 높이만큼 본문 상단 여백을 맞춘다 (창 폭이 바뀌면 안내문 줄바꿈으로 높이가 달라짐)
@@ -757,7 +770,7 @@
         // 캔버스에서 노드/코멘트를 선택하면 검토 목록에서도 같은 항목을 선택 표시
         if (event.data.pluginMessage.type === 'canvas-selection') {
           // 검토 직후의 자동 선택은 무시 — 목록은 미선택 상태로 시작
-          if (pendingScrollToBottom) return;
+          if (pendingScroll) return;
           const ids = event.data.pluginMessage.nodeIds || [];
           selectedNodeIds = new Set(ids);
           let firstEl = null;
@@ -774,7 +787,7 @@
           updateToolbarButtonsState();
           // 선택된 첫 항목이 목록 가운데로 오게 스크롤
           // (검토 직후의 자동 선택은 제외 — 맨 아래 스크롤을 덮어쓰지 않도록)
-          if (firstEl && firstEl.scrollIntoView && !pendingScrollToBottom) {
+          if (firstEl && firstEl.scrollIntoView && !pendingScroll) {
             firstEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
           }
         }
@@ -815,15 +828,15 @@
           if (loadingOverlay) {
             loadingOverlay.classList.remove('active');
           }
-          // 검토가 완전히 끝난 시점에 맨 아래 스크롤 확정
-          if (pendingScrollToBottom) {
+          // 검토가 완전히 끝난 시점에 예약된 스크롤 확정
+          if (pendingScroll) {
             requestAnimationFrame(() => {
-              scrollListToBottom();
+              performPendingScroll();
               // 캔버스 선택 동기화(canvas-selection)가 뒤늦게 도착해
-              // 위쪽 항목으로 가운데 스크롤을 걸 수 있으므로, 억제를 잠시 뒤에 해제
+              // 다른 곳으로 스크롤을 걸 수 있으므로, 억제를 잠시 뒤에 해제
               setTimeout(() => {
-                scrollListToBottom(); // 그 사이 끼어든 스크롤이 있어도 최종적으로 맨 아래 확정
-                pendingScrollToBottom = false;
+                performPendingScroll(); // 그 사이 끼어든 스크롤이 있어도 최종 위치 확정
+                pendingScroll = null;
               }, 800);
             });
           }
@@ -831,6 +844,8 @@
 
         if (event.data.pluginMessage.type === 'preview-add') {
           const newItems = event.data.pluginMessage.data;
+          const wasEmpty = previewData.length === 0;
+          const existingIds = new Set(previewData.map(item => item.nodeId));
           // nodeId 기준으로 중복 제거 후 누적
           const map = new Map(previewData.map(item => [item.nodeId, item]));
           for (const item of newItems) {
@@ -844,11 +859,17 @@
           updateToolbarButtonsState();
           displayPreview(previewData);
 
-          // 새 결과는 목록 맨 아래에 누적되므로 맨 아래로 스크롤.
+          // 최초 검토면 맨 위로, 추가 검토면 새 카드 중 가장 위의 것을 중앙으로.
           // 검토가 끝나는 hide-loading에서 한 번 더 확정한다 (중간 메시지에 밀리지 않게)
           if (newItems.length > 0) {
-            pendingScrollToBottom = true;
-            requestAnimationFrame(scrollListToBottom);
+            if (wasEmpty) {
+              pendingScroll = { mode: 'top' };
+            } else {
+              let freshIds = newItems.filter(it => !existingIds.has(it.nodeId)).map(it => it.nodeId);
+              if (freshIds.length === 0) freshIds = newItems.map(it => it.nodeId); // 같은 영역 재검토면 그 항목들 기준
+              pendingScroll = { mode: 'center', ids: new Set(freshIds) };
+            }
+            requestAnimationFrame(performPendingScroll);
           }
         }
         
