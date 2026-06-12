@@ -206,12 +206,16 @@
       }
       .preview-group-header {
         position: relative;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 700;
         color: #353535;
+        height: 40px; /* 타이틀 영역 높이 */
+        display: flex;
+        align-items: center;
         margin: 0 0 12px;
-        padding-bottom: 12px;
-        word-break: break-all;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis; /* 긴 프레임 이름은 말줄임 */
       }
       /* 타이틀 아래 카드 끝까지 이어지는 가로선 (카드 패딩 16px을 가로지름) */
       .preview-group-header::after {
