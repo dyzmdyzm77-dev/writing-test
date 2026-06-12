@@ -104,12 +104,19 @@
       .preview-section.active {
         display: block;
       }
+      /* 검토 결과 블록 (고정 헤더 안, 검토하기 버튼 아래) — 결과가 있을 때만 표시 */
+      .result-header {
+        display: none;
+        margin-top: 16px;
+      }
+      .result-header.active {
+        display: block;
+      }
       /* 검토 결과 타이틀 아래 줄: 좌측 전체 선택, 우측 코멘트 삭제/숨기기 */
       .preview-toolbar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 40px; /* 툴바와 첫 프레임 그룹 사이 간격 */
       }
       .preview-toolbar-actions {
         display: flex;
@@ -556,6 +563,19 @@
         <div class="hint">텍스트 레이어 또는 Frame을 선택한 뒤 [검토하기] 버튼을 눌러주세요.</div>
       </div>
       <button id="preview" class="button-primary button-full-width">검토하기</button>
+      <div id="resultHeader" class="result-header">
+        <div class="preview-title">검토 결과 : </div>
+        <div class="preview-toolbar">
+          <label class="checkbox-select-all">
+            <input type="checkbox" id="selectAll" />
+            <span>전체 선택</span>
+          </label>
+          <div class="preview-toolbar-actions">
+            <button id="clearAnnotations" class="toggle-annotations-btn" disabled>코멘트 삭제</button>
+            <button id="toggleAnnotations" class="toggle-annotations-btn" disabled>코멘트 숨기기</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="rs-handle rs-n"></div>
     <div class="rs-handle rs-s"></div>
@@ -573,17 +593,6 @@
     </div>
 
     <div id="previewSection" class="preview-section">
-      <div class="preview-title">검토 결과 : </div>
-      <div class="preview-toolbar">
-        <label class="checkbox-select-all">
-          <input type="checkbox" id="selectAll" />
-          <span>전체 선택</span>
-        </label>
-        <div class="preview-toolbar-actions">
-          <button id="clearAnnotations" class="toggle-annotations-btn" disabled>코멘트 삭제</button>
-          <button id="toggleAnnotations" class="toggle-annotations-btn" disabled>코멘트 숨기기</button>
-        </div>
-      </div>
       <div id="previewList"></div>
     </div>
 
@@ -664,6 +673,13 @@
       scrollTopBtn.addEventListener('click', () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
+
+      // 검토 결과 블록(고정 헤더 안) 표시/숨김 — 고정 헤더 높이가 변하므로 본문 패딩 재계산
+      function setResultHeaderVisible(on) {
+        const rh = document.getElementById('resultHeader');
+        if (rh) rh.classList.toggle('active', on);
+        adjustTopPadding();
+      }
 
       // 버튼 활성/비활성화 함수
       function updatePreviewButtonState(hasSelection) {
@@ -814,6 +830,7 @@
           const btnGroupEl = document.querySelector('.button-group');
           if (btnGroupEl) btnGroupEl.classList.remove('active');
           document.getElementById('previewSection').classList.remove('active');
+          setResultHeaderVisible(false);
         }
         displayPreview(previewData);
       };
@@ -997,6 +1014,7 @@
               buttonGroupEl.classList.remove('active');
             }
             document.getElementById('previewSection').classList.remove('active');
+            setResultHeaderVisible(false);
           }
           
           // 리스트 업데이트
@@ -1303,6 +1321,7 @@
         }
 
         previewSection.classList.add('active');
+        setResultHeaderVisible(data.length > 0);
         
         // 플로팅 버튼 그룹 표시
         const btnGroup = document.querySelector('.button-group');
