@@ -51,7 +51,8 @@ figma.on('selectionchange', () => {
                 figma.currentPage.selection = [];
             }
             catch (_e) { }
-            setTimeout(() => {
+            // 빠르게 + 안전망 한 번 더 (클릭 속도에 따라 제스처 종료 시점이 달라서)
+            const clearAnnSelection = () => {
                 try {
                     const sel = figma.currentPage.selection;
                     // 여전히 코멘트만 선택돼 있으면 비운다 (사용자가 그새 다른 걸 선택했으면 건드리지 않음)
@@ -61,7 +62,9 @@ figma.on('selectionchange', () => {
                     }
                 }
                 catch (_e) { }
-            }, 150);
+            };
+            setTimeout(clearAnnSelection, 60);
+            setTimeout(clearAnnSelection, 200);
         }
         else {
             // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
