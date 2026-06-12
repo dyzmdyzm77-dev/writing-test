@@ -337,8 +337,8 @@
         position: fixed;
         right: 20px;
         bottom: 72px; /* 하단 버튼 바 위 */
-        width: 40px;
-        height: 40px;
+        width: 56px !important; /* 전역 button 규칙(width 100%, height 48px !important)에 안 찌그러지게 고정 */
+        height: 56px !important;
         border-radius: 50%;
         border: 1px solid #e5e5e5;
         background: #fff;
@@ -487,7 +487,7 @@
     </div>
 
     <button id="scrollTopBtn" class="scroll-top-btn" title="맨 위로" aria-label="맨 위로">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5" stroke="#4A4A4A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </button>
