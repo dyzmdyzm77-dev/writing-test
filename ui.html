@@ -337,6 +337,35 @@
         margin-bottom: 0;
         flex: 1;
       }
+      /* 맨 위로 플로팅 버튼 — 스크롤 중에만 보임 */
+      .scroll-top-btn {
+        position: fixed;
+        right: 20px;
+        bottom: 72px; /* 하단 버튼 바 위 */
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(45, 45, 45, 0.75);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 1500;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+        padding: 0;
+      }
+      .scroll-top-btn.visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .scroll-top-btn:hover {
+        background: rgba(45, 45, 45, 0.9);
+      }
       .loading-overlay {
         position: fixed;
         top: 0;
@@ -463,6 +492,12 @@
       <button id="cancel" class="button-secondary">취소</button>
     </div>
 
+    <button id="scrollTopBtn" class="scroll-top-btn" title="맨 위로" aria-label="맨 위로">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+
     <script>
       let previewData = [];
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
@@ -475,6 +510,31 @@
       adjustTopPadding();
       window.addEventListener('resize', adjustTopPadding);
       window.addEventListener('load', adjustTopPadding);
+
+      // 맨 위로 플로팅 버튼 — 스크롤 중에만 표시, 멈추면 잠시 후 숨김
+      const scrollTopBtn = document.getElementById('scrollTopBtn');
+      let scrollHideTimer = null;
+      function hideScrollTopBtnLater() {
+        if (scrollHideTimer) clearTimeout(scrollHideTimer);
+        scrollHideTimer = setTimeout(() => scrollTopBtn.classList.remove('visible'), 1500);
+      }
+      window.addEventListener('scroll', () => {
+        if (window.scrollY > 150) {
+          scrollTopBtn.classList.add('visible');
+          hideScrollTopBtnLater();
+        } else {
+          // 맨 위 근처에서는 굳이 안 보여줌
+          scrollTopBtn.classList.remove('visible');
+        }
+      }, { passive: true });
+      // 누르려고 마우스를 올린 동안에는 사라지지 않게
+      scrollTopBtn.addEventListener('mouseenter', () => {
+        if (scrollHideTimer) clearTimeout(scrollHideTimer);
+      });
+      scrollTopBtn.addEventListener('mouseleave', hideScrollTopBtnLater);
+      scrollTopBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
 
       // 버튼 활성/비활성화 함수
       function updatePreviewButtonState(hasSelection) {
