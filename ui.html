@@ -212,7 +212,12 @@
         word-break: break-all;
       }
       .preview-item-wrapper {
-        margin-bottom: 12px; /* 카드 사이 간격 */
+        margin-bottom: 12px;
+      }
+      /* 항목 사이는 박스 대신 가로 구분선 */
+      .preview-item-wrapper:not(:last-child) {
+        border-bottom: 1px solid #E5E5E5;
+        padding-bottom: 12px;
       }
       .preview-item-wrapper:last-child {
         margin-bottom: 0;
@@ -225,16 +230,16 @@
       }
       .preview-item {
         background: #ffffff;
-        border: 1px solid #D9D9D9;
+        border: 1px solid transparent; /* 평소엔 박스 없음 — 선택 시 파란 테두리 자리 확보 */
         border-radius: 10px;
         font-size: 14px;
-        padding: 20px;
+        padding: 12px;
       }
       .preview-item:hover {
         background: #F7F7F7;
       }
       .preview-item.selected {
-        border: 1px solid #1D6CEB; /* 선택 시 테두리 색만 변경, 배경은 흰색 유지 */
+        border-color: #1D6CEB; /* 선택 시에만 파란 테두리 표시 */
       }
       /* 변경 전/제안은 박스 없이 가로 구분선 하나로만 구분 */
       .preview-before-box {
