@@ -208,8 +208,9 @@
         background: #ffffff;
         border: 1px solid #D9D9D9;
         border-radius: 10px;
-        padding: 16px;
+        padding: 16px 16px 0; /* 하단 패딩 제거 — 마지막 행의 호버/선택 배경이 카드 바닥까지 닿게 */
         margin-bottom: 16px; /* 그룹 카드 사이 간격 */
+        overflow: hidden; /* 행 배경이 라운드 모서리에 맞게 잘리도록 */
       }
       .preview-group-header {
         position: relative;
