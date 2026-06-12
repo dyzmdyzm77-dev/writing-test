@@ -726,10 +726,10 @@
           });
           const selectAllCheckbox = document.getElementById('selectAll');
           if (selectAllCheckbox) selectAllCheckbox.checked = false;
-          // 선택된 첫 항목을 목록에서 보이게 스크롤
+          // 선택된 첫 항목이 목록 가운데로 오게 스크롤
           // (검토 직후의 자동 선택은 제외 — 맨 아래 스크롤을 덮어쓰지 않도록)
           if (firstEl && firstEl.scrollIntoView && !pendingScrollToBottom) {
-            firstEl.scrollIntoView({ block: 'nearest' });
+            firstEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
           }
         }
         
@@ -1045,6 +1045,9 @@
               // 클릭한 항목만 선택
               selectedNodeIds.add(item.nodeId);
               div.classList.add('selected');
+
+              // 선택한 항목이 목록 가운데로 오게 스크롤
+              div.scrollIntoView({ block: 'center', behavior: 'smooth' });
             }
             
             // 전체 선택 체크박스 해제 (단일 선택이므로)
