@@ -1626,6 +1626,8 @@ function findAnnotation(nodeId) {
 // 특정 노드의 모든 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
 // 인덱스(annotationsByNode)로 바로 찾으므로 페이지 전수 스캔이 없다.
 function removeAnnotationByNodeId(nodeId) {
+    // 네이티브 어노테이션 정리 (형광펜이 하나도 없는 노드여도 실행되도록 맨 앞에서)
+    clearNativeAnnotation(nodeId);
     // 역방향 인덱스 정리
     const ancestors = annotationAncestorIds.get(nodeId);
     if (ancestors) {
@@ -2364,6 +2366,33 @@ function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) 
     }
     catch (_e) { }
 }
+// 네이티브 어노테이션(코멘트) 상태 — nodeId 기준
+// (코멘트를 씬 노드 대신 Figma 기본 주석으로 달면 클릭해도 크기 배지가 뜨지 않는다)
+const annotatedNodeIds = new Set();
+const nativeAnnotationLabels = new Map(); // 숨기기 토글 복원용
+function setNativeAnnotation(nodeId, labelMarkdown) {
+    const node = annotationNodeCache.get(nodeId);
+    if (!node || node.removed)
+        return;
+    try {
+        node.annotations = [{ labelMarkdown }];
+        annotatedNodeIds.add(nodeId);
+        nativeAnnotationLabels.set(nodeId, labelMarkdown);
+    }
+    catch (e) {
+        console.log('[UX-ANN] 네이티브 어노테이션 설정 실패', e);
+    }
+}
+function clearNativeAnnotation(nodeId) {
+    const node = annotationNodeCache.get(nodeId);
+    try {
+        if (node && !node.removed && annotatedNodeIds.has(nodeId))
+            node.annotations = [];
+    }
+    catch (_e) { }
+    annotatedNodeIds.delete(nodeId);
+    nativeAnnotationLabels.delete(nodeId);
+}
 async function measureAnnotation(item, scratch) {
     // 기존 어노테이션(코멘트 + 형광펜, 모든 세그먼트) 제거
     removeAnnotationByNodeId(item.nodeId);
@@ -2399,7 +2428,7 @@ async function measureAnnotation(item, scratch) {
     if (segs.length === 0)
         return null;
     const geoms = await measureSegments(node, item.before, segs, absX, absY, scratch);
-    const job = { absX, absY, highlights: [], comments: [] };
+    const job = { nodeId: item.nodeId, absX, absY, highlights: [], comments: [] };
     let idx = 0;
     for (const s of segs) {
         const bSeg = item.before.slice(s.bStart, s.bEnd);
@@ -2451,13 +2480,17 @@ async function createAnnotations(previewData, onProgress) {
         for (const h of job.highlights) {
             createHighlightRect(h.key, h.geom, job.absX, job.absY);
         }
-        for (const c of job.comments) {
-            createCommentFrame(c.key, c.label, fontName, c.anchorX, c.anchorY, job.absX, job.absY);
+        // 코멘트는 씬 노드(말풍선) 대신 네이티브 어노테이션으로 — 클릭해도 크기 배지가 안 뜬다
+        if (job.comments.length > 0) {
+            const md = job.comments.map((c) => '- ' + c.label).join('\n');
+            setNativeAnnotation(job.nodeId, md);
         }
     }
     // 위치 추적은 documentchange 이벤트가 담당 (별도 폴링 없음)
 }
 function removeAnnotations() {
+    for (const nodeId of Array.from(annotatedNodeIds))
+        clearNativeAnnotation(nodeId);
     cancelPendingReposition();
     annotationFontName = null;
     annotationNodeCache.clear();
@@ -2559,6 +2592,30 @@ function toggleAnnotations() {
     annotationsVisible = !annotationsVisible;
     for (const ann of getAllAnnotations()) {
         ann.visible = annotationsVisible;
+    }
+    // 네이티브 어노테이션은 visible 속성이 없어 제거/복원으로 토글한다
+    if (annotationsVisible) {
+        for (const [nodeId, md] of nativeAnnotationLabels) {
+            const node = annotationNodeCache.get(nodeId);
+            if (!node || node.removed)
+                continue;
+            try {
+                node.annotations = [{ labelMarkdown: md }];
+                annotatedNodeIds.add(nodeId);
+            }
+            catch (_e) { }
+        }
+    }
+    else {
+        for (const nodeId of Array.from(annotatedNodeIds)) {
+            const node = annotationNodeCache.get(nodeId);
+            try {
+                if (node && !node.removed)
+                    node.annotations = [];
+            }
+            catch (_e) { }
+            annotatedNodeIds.delete(nodeId); // 라벨(nativeAnnotationLabels)은 복원 위해 유지
+        }
     }
     figma.ui.postMessage({ type: 'annotations-visibility', visible: annotationsVisible });
 }
@@ -3144,6 +3201,10 @@ figma.ui.onmessage = async (msg) => {
         const ids = msg.nodeIds || [];
         let anyVisible = false;
         for (const id of ids) {
+            if (annotatedNodeIds.has(id)) {
+                anyVisible = true;
+                break;
+            } // 네이티브 어노테이션이 보이는 상태
             const arr = annotationsByNode.get(id);
             if (!arr)
                 continue;
@@ -3158,14 +3219,34 @@ figma.ui.onmessage = async (msg) => {
         }
         for (const id of ids) {
             const arr = annotationsByNode.get(id);
-            if (!arr)
-                continue;
-            for (const e of arr) {
+            if (arr) {
+                for (const e of arr) {
+                    try {
+                        if (e.ann && !e.ann.removed)
+                            e.ann.visible = !anyVisible;
+                    }
+                    catch (_e) { }
+                }
+            }
+            // 네이티브 어노테이션 토글 (제거/복원)
+            const node = annotationNodeCache.get(id);
+            if (anyVisible) {
                 try {
-                    if (e.ann && !e.ann.removed)
-                        e.ann.visible = !anyVisible;
+                    if (node && !node.removed && annotatedNodeIds.has(id))
+                        node.annotations = [];
                 }
                 catch (_e) { }
+                annotatedNodeIds.delete(id); // 라벨은 복원 위해 유지
+            }
+            else {
+                const md = nativeAnnotationLabels.get(id);
+                if (md && node && !node.removed) {
+                    try {
+                        node.annotations = [{ labelMarkdown: md }];
+                        annotatedNodeIds.add(id);
+                    }
+                    catch (_e) { }
+                }
             }
         }
         return;
