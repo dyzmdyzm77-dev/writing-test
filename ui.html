@@ -243,18 +243,21 @@
       }
       .preview-reason {
         margin-top: 8px;
-        padding: 8px 12px;
-        background: #F5F5F5;
-        border-radius: 4px;
-        font-size: 12px;
-        color: #666;
-        line-height: 1.6;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
       }
       .reason-item {
-        margin-top: 4px;
-      }
-      .reason-item:first-child {
-        margin-top: 0;
+        background: #F5F5F5;
+        border: 1px solid #E5E5E5;
+        border-radius: 999px;
+        height: 16px;
+        line-height: 14px; /* 보더 제외 수직 중앙 */
+        padding: 0 8px;
+        font-size: 10px;
+        color: #666;
+        box-sizing: border-box;
+        white-space: nowrap;
       }
       .preview-label {
         font-weight: 600;
@@ -1041,10 +1044,10 @@
           // 변경된 부분 강조
           const { beforeHtml, afterHtml } = highlightChanges(item.before, item.after);
           
-          // 변경 이유를 항목별로 나눠서 표시
-          const reasonItems = item.reason ? item.reason.split(' - ').map(r => r.trim()).filter(r => r) : [];
+          // 변경 이유를 키워드 칩으로 표시 (네이버/로컬 중복 키워드는 합침)
+          const reasonItems = item.reason ? [...new Set(item.reason.split(' - ').map(r => r.trim()).filter(r => r))] : [];
           const reasonHtml = reasonItems.length > 0 
-            ? `<div class="preview-reason">${reasonItems.map(r => `<div class="reason-item">• ${escapeHtml(r)}</div>`).join('')}</div>`
+            ? `<div class="preview-reason">${reasonItems.map(r => `<span class="reason-item">${escapeHtml(r)}</span>`).join('')}</div>`
             : '';
           
           div.innerHTML = `

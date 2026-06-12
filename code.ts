@@ -117,11 +117,11 @@ interface UXPattern {
 }
 
 const UX_PATTERNS: UXPattern[] = [
-  { pattern: "됩니다", replacement: "돼요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
-  { pattern: "합니다", replacement: "해요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
-  { pattern: "있습니다", replacement: "있어요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
-  { pattern: "하시면", replacement: "하면", description: "표현을 간결하게 다듬어요.", tag: "shorten" },
-  { pattern: "하십시오", replacement: "해주세요", description: "해요체로 톤을 맞춰요.", tag: "tone" },
+  { pattern: "됩니다", replacement: "돼요", description: "해요체", tag: "tone" },
+  { pattern: "합니다", replacement: "해요", description: "해요체", tag: "tone" },
+  { pattern: "있습니다", replacement: "있어요", description: "해요체", tag: "tone" },
+  { pattern: "하시면", replacement: "하면", description: "간결하게", tag: "shorten" },
+  { pattern: "하십시오", replacement: "해주세요", description: "해요체", tag: "tone" },
 ];
 // (용어 통일 규칙은 TERM_RULES로 이동 — 톤 변환보다 먼저 적용해야 권장 문구 패턴이 맞는다)
 
@@ -161,56 +161,56 @@ type FixRule = {
 
 const TYPO_RULES: FixRule[] = [
   // 맞춤법
-  { pattern: /\b되요\b/g, replacement: "돼요", reason: "맞춤법을 바로잡아요.", tags: ["typo", "tone"] },
-  { pattern: /안되(?=[\s.,!?]|$)/g, replacement: "안 돼", reason: "맞춤법을 바로잡아요.", tags: ["typo", "spacing"] },
-  { pattern: /\b몇일\b/g, replacement: "며칠", reason: "맞춤법을 바로잡아요.", tags: ["typo"] },
-  { pattern: /\b웬지\b/g, replacement: "왠지", reason: "맞춤법을 바로잡아요.", tags: ["typo"] },
+  { pattern: /\b되요\b/g, replacement: "돼요", reason: "맞춤법", tags: ["typo", "tone"] },
+  { pattern: /안되(?=[\s.,!?]|$)/g, replacement: "안 돼", reason: "맞춤법", tags: ["typo", "spacing"] },
+  { pattern: /\b몇일\b/g, replacement: "며칠", reason: "맞춤법", tags: ["typo"] },
+  { pattern: /\b웬지\b/g, replacement: "왠지", reason: "맞춤법", tags: ["typo"] },
   
   // 띄어쓰기 - 조사 앞 (명사+조사 다음에 명사/동사가 올 때)
   // 주의: 외래어나 합성어에 잘못 적용되지 않도록 제한적으로 적용
   // 일반 단어에 잘못 적용되는 문제로 주석 처리
-  // { pattern: /([가-힣]{2,})(의)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  // { pattern: /([가-힣]{2,})(을|를)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  // { pattern: /([가-힣]{2,})(이|가)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  // { pattern: /([가-힣]{2,})(은|는)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  // { pattern: /([가-힣]{2,})(와|과)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(의)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(을|를)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(이|가)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(은|는)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(와|과)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
   // "에" 조사는 외래어(크리에이터 등)와 구분하기 위해 제외
-  // { pattern: /([가-힣]{2,})(에|에서|에게|에게서|로|으로|만|도|까지|부터|처럼|같이|보다|커녕)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(에|에서|에게|에게서|로|으로|만|도|까지|부터|처럼|같이|보다|커녕)([가-힣]{2,})/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
   
   // 띄어쓰기 - "-하다" 형용사 + 종결어미 (불가능합니다, 가능해요 등 - 붙여쓰기)
-  { pattern: /(불가능|가능|필요|불필요) (합니다|해요)/g, replacement: "$1$2", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /(불가능|가능|필요|불필요) (합니다|해요)/g, replacement: "$1$2", reason: "띄어쓰기", tags: ["spacing"] },
   // 띄어쓰기 - 보조동사/의존명사
-  { pattern: /할수/g, replacement: "할 수", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /될수/g, replacement: "될 수", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /할수/g, replacement: "할 수", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /될수/g, replacement: "될 수", reason: "띄어쓰기", tags: ["spacing"] },
   // "~할 수 있", "~길어질 수 있" 등: 앞 단어 + 의존명사 "수" + "있" 분리 (할수있, 수있보다 먼저 적용)
-  { pattern: /([가-힣]{1,})(수)(있)/g, replacement: "$1 $2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /수있/g, replacement: "수 있", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /하시는게/g, replacement: "하는 게", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing", "tone"] },
-  { pattern: /하는게/g, replacement: "하는 게", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /([가-힣]{1,})(수)(있)/g, replacement: "$1 $2 $3", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /수있/g, replacement: "수 있", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /하시는게/g, replacement: "하는 게", reason: "띄어쓰기", tags: ["spacing", "tone"] },
+  { pattern: /하는게/g, replacement: "하는 게", reason: "띄어쓰기", tags: ["spacing"] },
   // 일반 단어에 잘못 적용되는 문제로 주석 처리
-  // { pattern: /([가-힣])(것|수|때|곳|데|줄|지|뿐|만큼|대로|듯이|만|뿐)([가-힣])/g, replacement: "$1$2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  // { pattern: /([가-힣])(있다|없다|주다|보내다|받다|주시다|드리다|보이다|되다|하다)([가-힣])/g, replacement: "$1 $2$3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  // { pattern: /([가-힣])(것|수|때|곳|데|줄|지|뿐|만큼|대로|듯이|만|뿐)([가-힣])/g, replacement: "$1$2 $3", reason: "띄어쓰기", tags: ["spacing"] },
+  // { pattern: /([가-힣])(있다|없다|주다|보내다|받다|주시다|드리다|보이다|되다|하다)([가-힣])/g, replacement: "$1 $2$3", reason: "띄어쓰기", tags: ["spacing"] },
   
   // (부사 뒤 띄어쓰기 규칙은 오탐이 있어 ADVERB_SPACING_RULES로 분리 —
   //  네이버 맞춤법 검사가 실패한 텍스트에만 폴백으로 적용한다)
 
   // 띄어쓰기 - 층수 + 장소명 (7층 사무실, 3층 회의실 등)
-  { pattern: /([0-9]+층)(사무실|회의실|휴게실|복도)([가-힣])/g, replacement: "$1 $2 $3", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /([0-9]+층)(사무실|회의실|휴게실|복도)([가-힣])/g, replacement: "$1 $2 $3", reason: "띄어쓰기", tags: ["spacing"] },
   // 띄어쓰기 - 수사 + 단위명사 (두 줄)
-  { pattern: /두줄/g, replacement: "두 줄", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /두줄/g, replacement: "두 줄", reason: "띄어쓰기", tags: ["spacing"] },
   // 띄어쓰기 - 조사 "로/으로" + 동사 "들어갈"
-  { pattern: /(로|으로)(들어갈)/g, replacement: "$1 $2", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /(로|으로)(들어갈)/g, replacement: "$1 $2", reason: "띄어쓰기", tags: ["spacing"] },
   // 띄어쓰기 - "정도로" 뒤 (정도로 길어질)
-  { pattern: /정도로([가-힣])/g, replacement: "정도로 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /정도로([가-힣])/g, replacement: "정도로 $1", reason: "띄어쓰기", tags: ["spacing"] },
   
   // 띄어쓰기 - 일반적인 동사/명사 앞 띄어쓰기
   // 주의: 외래어(크리에이터 등)에 잘못 적용되지 않도록 제한적으로 적용
-  // { pattern: /([가-힣]{2,})(시작|종료|완료|중지|재개|변경|수정|삭제|추가|생성|등록|확인|조회|검색|저장|업로드|다운로드|열기|닫기|보기|보내기|받기|전송|수신|발송|접수|처리|승인|거부|반려|취소|해제|설정|해제|초기화|복구|백업|복원|이동|복사|붙여넣기|잠금|잠금해제|공유|다운로드|인쇄|출력|보관|삭제|복원|복구|수정|편집|저장|불러오기|내보내기|가져오기|연결|연결해제|접속|접속해제|로그인|로그아웃|가입|탈퇴|신청|취소|결제|환불|교환|반품|배송|수령|확인|리뷰|평가|추천|신고|차단|해제|차단해제|팔로우|언팔로우|구독|구독해제|알림|알림해제|공지|이벤트|쿠폰|적립|사용|적용|해제|적용해제|변경|변경해제|수정|수정해제|삭제|삭제해제|추가|추가해제|생성|생성해제|등록|등록해제|확인|확인해제|조회|조회해제|검색|검색해제|저장|저장해제|업로드|업로드해제|다운로드|다운로드해제)/g, replacement: "$1 $2", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  // { pattern: /([가-힣]{2,})(시작|종료|완료|중지|재개|변경|수정|삭제|추가|생성|등록|확인|조회|검색|저장|업로드|다운로드|열기|닫기|보기|보내기|받기|전송|수신|발송|접수|처리|승인|거부|반려|취소|해제|설정|해제|초기화|복구|백업|복원|이동|복사|붙여넣기|잠금|잠금해제|공유|다운로드|인쇄|출력|보관|삭제|복원|복구|수정|편집|저장|불러오기|내보내기|가져오기|연결|연결해제|접속|접속해제|로그인|로그아웃|가입|탈퇴|신청|취소|결제|환불|교환|반품|배송|수령|확인|리뷰|평가|추천|신고|차단|해제|차단해제|팔로우|언팔로우|구독|구독해제|알림|알림해제|공지|이벤트|쿠폰|적립|사용|적용|해제|적용해제|변경|변경해제|수정|수정해제|삭제|삭제해제|추가|추가해제|생성|생성해제|등록|등록해제|확인|확인해제|조회|조회해제|검색|검색해제|저장|저장해제|업로드|업로드해제|다운로드|다운로드해제)/g, replacement: "$1 $2", reason: "띄어쓰기", tags: ["spacing"] },
   
   // 띄어쓰기 - 수사 + 단위명사
   // 주의: "2026년", "6000억원" 등은 일반적으로 붙여쓰기도 허용되므로 주석 처리
-  // { pattern: /([0-9]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  // { pattern: /([일이삼사오육칠팔구십백천만억조]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  // { pattern: /([0-9]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기", tags: ["spacing"] },
+  // { pattern: /([일이삼사오육칠팔구십백천만억조]+)(개|명|장|권|대|마리|벌|자루|개월|년|일|시간|분|초|원|달러|엔|위안|파운드|유로|킬로|그램|리터|미터|센티미터|킬로미터|평|제곱미터|세제곱미터)/g, replacement: "$1 $2", reason: "띄어쓰기", tags: ["spacing"] },
 ];
 
 // ===============================
@@ -220,34 +220,34 @@ const TYPO_RULES: FixRule[] = [
 // 네이버 검사가 실패/불가한 텍스트(프록시 장애, 500자 초과 등)에만 적용한다.
 // ===============================
 const ADVERB_SPACING_RULES: FixRule[] = [
-  { pattern: /지금([가-힣]{2,})/g, replacement: "지금 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /지금([가-힣]{2,})/g, replacement: "지금 $1", reason: "띄어쓰기", tags: ["spacing"] },
   // "이미" + 다음 단어 (부사) - "이미지"(image)는 예외
-  { pattern: /이미(?!지)([가-힣]{2,})/g, replacement: "이미 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /아직([가-힣]{2,})/g, replacement: "아직 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /곧([가-힣]{2,})/g, replacement: "곧 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /다시([가-힣]{2,})/g, replacement: "다시 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /계속([가-힣]{2,})/g, replacement: "계속 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /항상([가-힣]{2,})/g, replacement: "항상 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /이미(?!지)([가-힣]{2,})/g, replacement: "이미 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /아직([가-힣]{2,})/g, replacement: "아직 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /곧([가-힣]{2,})/g, replacement: "곧 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /다시([가-힣]{2,})/g, replacement: "다시 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /계속([가-힣]{2,})/g, replacement: "계속 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /항상([가-힣]{2,})/g, replacement: "항상 $1", reason: "띄어쓰기", tags: ["spacing"] },
   // "보통" + 다음 단어 - "정보통신망" 등 합성어는 예외
-  { pattern: /보통(?!신)([가-힣]{2,})/g, replacement: "보통 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /가끔([가-힣]{2,})/g, replacement: "가끔 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /자주([가-힣]{2,})/g, replacement: "자주 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /때때로([가-힣]{2,})/g, replacement: "때때로 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /빨리([가-힣]{2,})/g, replacement: "빨리 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /천천히([가-힣]{2,})/g, replacement: "천천히 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /갑자기([가-힣]{2,})/g, replacement: "갑자기 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /같이([가-힣]{2,})/g, replacement: "같이 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /함께([가-힣]{2,})/g, replacement: "함께 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /혼자([가-힣]{2,})/g, replacement: "혼자 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /먼저([가-힣]{2,})/g, replacement: "먼저 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /나중에([가-힣]{2,})/g, replacement: "나중에 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /처음([가-힣]{2,})/g, replacement: "처음 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /마지막([가-힣]{2,})/g, replacement: "마지막 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /오늘([가-힣]{2,})/g, replacement: "오늘 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /내일([가-힣]{2,})/g, replacement: "내일 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /어제([가-힣]{2,})/g, replacement: "어제 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /내년([가-힣]{2,})/g, replacement: "내년 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
-  { pattern: /작년([가-힣]{2,})/g, replacement: "작년 $1", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /보통(?!신)([가-힣]{2,})/g, replacement: "보통 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /가끔([가-힣]{2,})/g, replacement: "가끔 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /자주([가-힣]{2,})/g, replacement: "자주 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /때때로([가-힣]{2,})/g, replacement: "때때로 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /빨리([가-힣]{2,})/g, replacement: "빨리 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /천천히([가-힣]{2,})/g, replacement: "천천히 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /갑자기([가-힣]{2,})/g, replacement: "갑자기 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /같이([가-힣]{2,})/g, replacement: "같이 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /함께([가-힣]{2,})/g, replacement: "함께 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /혼자([가-힣]{2,})/g, replacement: "혼자 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /먼저([가-힣]{2,})/g, replacement: "먼저 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /나중에([가-힣]{2,})/g, replacement: "나중에 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /처음([가-힣]{2,})/g, replacement: "처음 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /마지막([가-힣]{2,})/g, replacement: "마지막 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /오늘([가-힣]{2,})/g, replacement: "오늘 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /내일([가-힣]{2,})/g, replacement: "내일 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /어제([가-힣]{2,})/g, replacement: "어제 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /내년([가-힣]{2,})/g, replacement: "내년 $1", reason: "띄어쓰기", tags: ["spacing"] },
+  { pattern: /작년([가-힣]{2,})/g, replacement: "작년 $1", reason: "띄어쓰기", tags: ["spacing"] },
 ];
 
 // ===== GLOSSARY:BEGIN — 자동 생성 영역. 직접 수정하지 말고 glossary.md를 고친 뒤 npm run build =====
@@ -359,51 +359,51 @@ const TERM_RULES: FixRule[] = [
   ...GLOSSARY_TERMS.map((t): FixRule => ({
     pattern: new RegExp(escapeRegex(t.from), 'g'),
     replacement: t.to,
-    reason: "표준 용어로 통일해요.",
+    reason: "용어 통일",
     tags: ["term"],
   })),
 
   // --- 예외 처리가 필요한 용어 규칙 (정규식 — 여기서 직접 수정) ---
   // 이미 "지문등록 품질 검사"인 텍스트는 건너뜀 (앞 글자 '문' 가드)
-  { pattern: /(^|[^문])등록 품질 검사/g, replacement: "$1지문등록 품질 검사", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /(^|[^문])등록 품질 검사/g, replacement: "$1지문등록 품질 검사", reason: "용어 통일", tags: ["term"] },
   // 이미 "사용자번호(고객인증번호)"로 쓴 경우 이중 치환 방지 (여는 괄호 가드)
-  { pattern: /(^|[^(])고객인증번호/g, replacement: "$1사용자번호(고객인증번호)", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /사용자 DB ?정보/g, replacement: "사용자 데이터 정보", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /(^|[^(])고객인증번호/g, replacement: "$1사용자번호(고객인증번호)", reason: "용어 통일", tags: ["term"] },
+  { pattern: /사용자 DB ?정보/g, replacement: "사용자 데이터 정보", reason: "용어 통일", tags: ["term"] },
   // "미사용자/미등록자" 등 사람을 가리키는 합성어는 제외 (라벨 토글 용어만 치환)
-  { pattern: /미사용(?!자)/g, replacement: "사용 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /미동의(?!자)/g, replacement: "동의 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /미표시(?!자)/g, replacement: "표시 안함", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /미등록(?!자)/g, replacement: "등록 안됨", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /미사용(?!자)/g, replacement: "사용 안함", reason: "용어 통일", tags: ["term"] },
+  { pattern: /미동의(?!자)/g, replacement: "동의 안함", reason: "용어 통일", tags: ["term"] },
+  { pattern: /미표시(?!자)/g, replacement: "표시 안함", reason: "용어 통일", tags: ["term"] },
+  { pattern: /미등록(?!자)/g, replacement: "등록 안됨", reason: "용어 통일", tags: ["term"] },
   // "출입 가능성/출입 불가능"의 일부를 잘라먹지 않도록 가드
-  { pattern: /출입 가능(?!성)/g, replacement: "출입 허용", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /출입 불가(?!능)/g, replacement: "출입 제한", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /얼굴\(지문\) ?\+ ?카드 인증/g, replacement: "얼굴(지문)/카드 모두 인증", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /얼굴\(지문\) ?or ?카드 인증/gi, replacement: "얼굴(지문) 또는 카드 인증", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /\b(?:Error|Erorr)\b/g, replacement: "오류", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /음성 (설정|조절)/g, replacement: "소리 $1", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /IP ?Address/gi, replacement: "IP 주소", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /출입 가능(?!성)/g, replacement: "출입 허용", reason: "용어 통일", tags: ["term"] },
+  { pattern: /출입 불가(?!능)/g, replacement: "출입 제한", reason: "용어 통일", tags: ["term"] },
+  { pattern: /얼굴\(지문\) ?\+ ?카드 인증/g, replacement: "얼굴(지문)/카드 모두 인증", reason: "용어 통일", tags: ["term"] },
+  { pattern: /얼굴\(지문\) ?or ?카드 인증/gi, replacement: "얼굴(지문) 또는 카드 인증", reason: "용어 통일", tags: ["term"] },
+  { pattern: /\b(?:Error|Erorr)\b/g, replacement: "오류", reason: "용어 통일", tags: ["term"] },
+  { pattern: /음성 (설정|조절)/g, replacement: "소리 $1", reason: "용어 통일", tags: ["term"] },
+  { pattern: /IP ?Address/gi, replacement: "IP 주소", reason: "용어 통일", tags: ["term"] },
   // "암호화"는 다른 뜻이므로 예외
-  { pattern: /암호(?!화)/g, replacement: "비밀번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /암호(?!화)/g, replacement: "비밀번호", reason: "용어 통일", tags: ["term"] },
   // "사용자 배경화면"을 먼저 치환해야 "사용자 사용자 이미지"가 안 된다
-  { pattern: /사용자 ?배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /배경화면/g, replacement: "사용자 이미지", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /에스원 (기술사원|관리자)/g, replacement: "에스원 담당자", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /사용자 ?배경화면/g, replacement: "사용자 이미지", reason: "용어 통일", tags: ["term"] },
+  { pattern: /배경화면/g, replacement: "사용자 이미지", reason: "용어 통일", tags: ["term"] },
+  { pattern: /에스원 (기술사원|관리자)/g, replacement: "에스원 담당자", reason: "용어 통일", tags: ["term"] },
   // 휴대폰 계열은 긴 패턴부터 (휴대폰번호 → 휴대폰 → 폰번호 순서 중요)
-  { pattern: /휴대폰 ?번호/g, replacement: "휴대전화번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /휴대폰/g, replacement: "휴대전화", reason: "표준 용어로 통일해요.", tags: ["term"] },
-  { pattern: /폰번호/g, replacement: "휴대전화번호", reason: "표준 용어로 통일해요.", tags: ["term"] },
+  { pattern: /휴대폰 ?번호/g, replacement: "휴대전화번호", reason: "용어 통일", tags: ["term"] },
+  { pattern: /휴대폰/g, replacement: "휴대전화", reason: "용어 통일", tags: ["term"] },
+  { pattern: /폰번호/g, replacement: "휴대전화번호", reason: "용어 통일", tags: ["term"] },
 
   // --- 권장 문구 (안내 메시지) ---
   // "얼굴 또는 카드를 입력해 주세요"는 용어집상 그대로 두므로(좌동),
   // 카드/지문 단독 문구는 노드 전체가 그 문장일 때만 바꾼다 (^…$ 앵커)
-  { pattern: /^카드를 입력해 주세요[.!]?\s*$/g, replacement: "카드를 대주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /^지문을 입력해 주세요[.!]?\s*$/g, replacement: "지문을 대주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /^부팅\s*중[.\s]*잠시만 기다려 주십시오[.!]?\s*$/g, replacement: "기기 부팅중입니다. 잠시만 기다려 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /^관리자가 아닙니다[.!]?\s*$/g, replacement: "관리자만 메뉴진입이 가능합니다", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /^사용자 삭제 실패[.!]?\s*$/g, replacement: "사용자 삭제를 실패하였습니다", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /^컨트롤러 수량 초과 실패[.!]?\s*$/g, replacement: "컨트롤러 수량 초과로 실패하였습니다", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /문의하십시오/g, replacement: "문의해 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
-  { pattern: /시도하세요/g, replacement: "시도해 주세요", reason: "권장 문구로 바꿔요.", tags: ["tone"] },
+  { pattern: /^카드를 입력해 주세요[.!]?\s*$/g, replacement: "카드를 대주세요", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /^지문을 입력해 주세요[.!]?\s*$/g, replacement: "지문을 대주세요", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /^부팅\s*중[.\s]*잠시만 기다려 주십시오[.!]?\s*$/g, replacement: "기기 부팅중입니다. 잠시만 기다려 주세요", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /^관리자가 아닙니다[.!]?\s*$/g, replacement: "관리자만 메뉴진입이 가능합니다", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /^사용자 삭제 실패[.!]?\s*$/g, replacement: "사용자 삭제를 실패하였습니다", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /^컨트롤러 수량 초과 실패[.!]?\s*$/g, replacement: "컨트롤러 수량 초과로 실패하였습니다", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /문의하십시오/g, replacement: "문의해 주세요", reason: "권장 문구", tags: ["tone"] },
+  { pattern: /시도하세요/g, replacement: "시도해 주세요", reason: "권장 문구", tags: ["tone"] },
 ];
 
 // ===============================
@@ -419,7 +419,7 @@ const COMPOUND_PROTECT_RULES: FixRule[] = GLOSSARY_COMPOUNDS.map((w): FixRule =>
   // 글자 사이 어디에 공백이 끼어도 인식해 용어집 표기로 되돌린다 (예: "출입 정보" → "출입정보")
   pattern: new RegExp(w.split('').map(escapeRegex).join(' ?'), 'g'),
   replacement: w,
-  reason: "표준 용어로 통일해요.",
+  reason: "용어 통일",
   tags: ["term"],
 }));
 
@@ -514,11 +514,11 @@ const ACTION_NOUNS = GLOSSARY_ACTION_NOUNS.join('|');
 
 const HAEJUSEYO_RULES: FixRule[] = [
   // 1) '해' 앞에 단어가 붙어 있으면 '주세요'를 띄움: "문의해주세요" → "문의해 주세요"
-  { pattern: /([가-힣])해주세요/g, replacement: "$1해 주세요", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /([가-힣])해주세요/g, replacement: "$1해 주세요", reason: "띄어쓰기", tags: ["spacing"] },
   // 2) 동작 명사 + 해 주세요: '해'를 명사에 붙임: "확인 해 주세요" → "확인해 주세요"
-  { pattern: new RegExp('(' + ACTION_NOUNS + ') ?해 ?주세요', 'g'), replacement: "$1해 주세요", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: new RegExp('(' + ACTION_NOUNS + ') ?해 ?주세요', 'g'), replacement: "$1해 주세요", reason: "띄어쓰기", tags: ["spacing"] },
   // 3) 그 외(부사 등) 뒤의 '해 주세요'는 붙임: "같이 해 주세요" → "같이 해주세요"
-  { pattern: /(^|\s)해 주세요/g, replacement: "$1해주세요", reason: "띄어쓰기를 바로잡아요.", tags: ["spacing"] },
+  { pattern: /(^|\s)해 주세요/g, replacement: "$1해주세요", reason: "띄어쓰기", tags: ["spacing"] },
 ];
 
 // ===============================
@@ -530,147 +530,147 @@ const REWRITE_RULES: FixRule[] = [
   {
     pattern: /하시거나/g,
     replacement: "하거나",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시려고 → ~하려고
   {
     pattern: /하시려고/g,
     replacement: "하려고",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시려면 → ~하려면
   {
     pattern: /하시려면/g,
     replacement: "하려면",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시려는 → ~하려는
   {
     pattern: /하시려는/g,
     replacement: "하려는",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시다가 → ~하다가
   {
     pattern: /하시다가/g,
     replacement: "하다가",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시던 → ~하던
   {
     pattern: /하시던/g,
     replacement: "하던",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하셨더라도 → ~하더라도
   {
     pattern: /하셨더라도/g,
     replacement: "하더라도",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시고 → ~하고
   {
     pattern: /하시고/g,
     replacement: "하고",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시지만 → ~하지만
   {
     pattern: /하시지만/g,
     replacement: "하지만",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시는지 → ~하는지
   {
     pattern: /하시는지/g,
     replacement: "하는지",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시는가 → ~하는가
   {
     pattern: /하시는가/g,
     replacement: "하는가",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시게 → ~하게
   {
     pattern: /하시게/g,
     replacement: "하게",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시기 → ~하기
   {
     pattern: /하시기/g,
     replacement: "하기",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // 격식 높임말을 친근하게: ~하시는 → ~하는 (일반 패턴)
   {
     pattern: /하시는/g,
     replacement: "하는",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // 구조 변환: ~하시면 ~됩니다 → ~하면 ~돼요
   {
     pattern: /(.+?)하시면\s+(.+?)됩니다/g,
     replacement: "$1하면 $2돼요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten", "tone"],
   },
   // ~할 수 있습니다 → ~할 수 있어요
   {
     pattern: /할 수 있습니다/g,
     replacement: "할 수 있어요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~가능합니다 → ~가능해요
   {
     pattern: /가능합니다/g,
     replacement: "가능해요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시겠습니까? → ~할까요?
   {
     pattern: /하시겠습니까\?/g,
     replacement: "할까요?",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하기 바랍니다 → ~해주세요 (위 규칙보다 앞의 '하시기→하기' 변환을 거친 경우 잡기)
   {
     pattern: /하기 바랍니다/g,
     replacement: "해주세요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하십시오 → ~해주세요 (이미 UX_PATTERNS에 있지만 문장 레벨에서도 처리)
   {
     pattern: /하십시오/g,
     replacement: "해주세요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~주십시오 → ~주세요 (기다려 주십시오 등)
   {
     pattern: /주십시오/g,
     replacement: "주세요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~입니까? → ~인가요? / ~예요?
@@ -680,91 +680,91 @@ const REWRITE_RULES: FixRule[] = [
       const lastChar = p1[p1.length - 1];
       return hasJongseong(lastChar) ? `${p1}인가요?` : `${p1}예요?`;
     },
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~되어야 합니다 → ~되어야 해요
   {
     pattern: /되어야 합니다/g,
     replacement: "되어야 해요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~해야 합니다 → ~해야 해요
   {
     pattern: /해야 합니다/g,
     replacement: "해야 해요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하지 않으면 안 됩니다 → ~해야 해요
   {
     pattern: /하지 않으면 안 됩니다/g,
     replacement: "해야 해요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten", "tone"],
   },
   // ~하지 않으면 안 돼요 → ~해야 해요
   {
     pattern: /하지 않으면 안 돼요/g,
     replacement: "해야 해요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten"],
   },
   // ~할 수 없습니다 → ~할 수 없어요
   {
     pattern: /할 수 없습니다/g,
     replacement: "할 수 없어요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하지 마십시오 → ~하지 마세요
   {
     pattern: /하지 마십시오/g,
     replacement: "하지 마세요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하도록 하십시오 → ~하세요
   {
     pattern: /하도록 하십시오/g,
     replacement: "하세요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten", "tone"],
   },
   // ~하는 것이 좋습니다 → ~하는 게 좋아요
   {
     pattern: /하는 것이 좋습니다/g,
     replacement: "하는 게 좋아요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하는 것이 좋아요 → ~하는 게 좋아요
   {
     pattern: /하는 것이 좋아요/g,
     replacement: "하는 게 좋아요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten"],
   },
   // ~하는 것이 → ~하는 게
   {
     pattern: /하는 것이/g,
     replacement: "하는 게",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten"],
   },
   // ~하는 것을 → ~하는 걸
   {
     pattern: /하는 것을/g,
     replacement: "하는 걸",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten"],
   },
   // ~하는 것으로 → ~하는 걸로
   {
     pattern: /하는 것으로/g,
     replacement: "하는 걸로",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["shorten"],
   },
   // ~하는 것도 → ~하는 것도 (변경 없음, 예시용)
@@ -775,57 +775,50 @@ const REWRITE_RULES: FixRule[] = [
   {
     pattern: /해주시기 바랍니다/g,
     replacement: "해주세요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~해주시기 바라요 → ~해주세요
   {
     pattern: /해주시기 바라요/g,
     replacement: "해주세요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["tone"],
   },
   // ~하기 바라요 → ~해주세요 (하시기→하기 변환을 거친 형태를 잡는다)
   {
     pattern: /하기 바라요/g,
     replacement: "해주세요",
-    reason: "표현을 간결하게 다듬어요.",
+    reason: "간결하게",
     tags: ["tone"],
   },
   // ~해주시면 됩니다 → ~해주시면 돼요
   {
     pattern: /해주시면 됩니다/g,
     replacement: "해주시면 돼요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하시면 됩니다 → ~하면 돼요
   {
     pattern: /하시면 됩니다/g,
     replacement: "하면 돼요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하실 수 있습니다 → ~하실 수 있어요
   {
     pattern: /하실 수 있습니다/g,
     replacement: "하실 수 있어요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
   // ~하실 수 없습니다 → ~하실 수 없어요
   {
     pattern: /하실 수 없습니다/g,
     replacement: "하실 수 없어요",
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
-  },
-  // ~하는 것이 좋겠어요 → ~하는 게 좋을 것 같아요
-  {
-    pattern: /하는 것이 좋겠어요/g,
-    replacement: "하는 게 좋을 것 같아요",
-    reason: "표현을 간결하게 다듬어요.",
-    tags: ["shorten"],
   },
 
   // --- 해요체 통일 (일반 규칙 — 구체 패턴들이 먼저 처리된 뒤 남은 것을 잡는다) ---
@@ -833,16 +826,16 @@ const REWRITE_RULES: FixRule[] = [
   {
     pattern: /([가-힣])습니다/g,
     replacement: (m: string, p1: string) => (jongseongCode(p1) === 20 ? p1 + "어요" : m),
-    reason: "해요체로 톤을 맞춰요.",
+    reason: "해요체",
     tags: ["tone"],
   },
-  { pattern: /아닙니다/g, replacement: "아니에요", reason: "해요체로 톤을 맞춰요.", tags: ["tone"] },
-  { pattern: /없습니다/g, replacement: "없어요", reason: "해요체로 톤을 맞춰요.", tags: ["tone"] },
-  { pattern: /같습니다/g, replacement: "같아요", reason: "해요체로 톤을 맞춰요.", tags: ["tone"] },
-  { pattern: /좋습니다/g, replacement: "좋아요", reason: "해요체로 톤을 맞춰요.", tags: ["tone"] },
+  { pattern: /아닙니다/g, replacement: "아니에요", reason: "해요체", tags: ["tone"] },
+  { pattern: /없습니다/g, replacement: "없어요", reason: "해요체", tags: ["tone"] },
+  { pattern: /같습니다/g, replacement: "같아요", reason: "해요체", tags: ["tone"] },
+  { pattern: /좋습니다/g, replacement: "좋아요", reason: "해요체", tags: ["tone"] },
   // ~옵니다/갑니다 → ~와요/가요 (가져옵니다, 들어갑니다 등)
-  { pattern: /([가-힣])옵니다/g, replacement: "$1와요", reason: "해요체로 톤을 맞춰요.", tags: ["tone"] },
-  { pattern: /([가-힣])갑니다/g, replacement: "$1가요", reason: "해요체로 톤을 맞춰요.", tags: ["tone"] },
+  { pattern: /([가-힣])옵니다/g, replacement: "$1와요", reason: "해요체", tags: ["tone"] },
+  { pattern: /([가-힣])갑니다/g, replacement: "$1가요", reason: "해요체", tags: ["tone"] },
 ];
 
 // ===============================
@@ -886,7 +879,7 @@ function applyPatternDB(text: string): { text: string; tags: SuggestionTag[]; re
   t = replaceImnidaWithYeyo(t);
   if (t !== beforeImnida) {
     tags.add("tone");
-    reasons.push("해요체로 톤을 맞춰요.");
+    reasons.push("해요체");
   }
 
   for (const p of UX_PATTERNS) {
@@ -905,7 +898,7 @@ function applyPatternDB(text: string): { text: string; tags: SuggestionTag[]; re
     spacingFix.lastIndex = 0;
     t = t.replace(spacingFix, "$1$2");
     tags.add("spacing");
-    if (!reasons.includes("띄어쓰기를 바로잡아요.")) reasons.push("띄어쓰기를 바로잡아요.");
+    if (!reasons.includes("띄어쓰기")) reasons.push("띄어쓰기");
   }
 
   return { text: t, tags: Array.from(tags), reasons };
@@ -941,7 +934,7 @@ function buildSuggestion(before: string, after: string, reasonParts: string[], t
 
   // reason 중복 제거 + 너무 길면 줄이기
   const uniq = Array.from(new Set(reasonParts)).slice(0, 3);
-  const reason = uniq.length ? uniq.join(" - ") : "더 자연스럽게 다듬어요.";
+  const reason = uniq.length ? uniq.join(" - ") : "다듬기";
 
   // tags 중복 제거
   const t = Array.from(new Set(tags));
@@ -979,7 +972,7 @@ function applyPeriodRule(text: string, originalText?: string): { text: string; r
     if (next !== t) {
       t = next;
       if (reasons.length === 0) {
-        reasons.push("문장 끝에 마침표를 추가해요.");
+        reasons.push("마침표");
       }
     }
   }
@@ -991,7 +984,7 @@ function applyPeriodRule(text: string, originalText?: string): { text: string; r
     if (next !== t) {
       t = next;
       if (reasons.length === 0) {
-        reasons.push("문장 끝에 마침표를 추가해요.");
+        reasons.push("마침표");
       }
     }
   }
@@ -1027,7 +1020,7 @@ function fixParticles(text: string): { text: string; reasons: string[] } {
     if (particle !== correct) { changed = true; return prev + correct; }
     return m;
   });
-  return { text: t, reasons: changed ? ['맞춤법을 바로잡아요.'] : [] };
+  return { text: t, reasons: changed ? ['맞춤법'] : [] };
 }
 
 // ===============================
@@ -1115,10 +1108,10 @@ const NAVER_EXCLUDED_CLASSES = new Set<string>(['blue_text']);
 // 네이버 교정 유형 라벨 → 로컬 규칙과 같은 문장형 사유
 function naverReasonSentence(typeLabel: string): string {
   switch (typeLabel) {
-    case '맞춤법': return '맞춤법을 바로잡아요.';
-    case '띄어쓰기': return '띄어쓰기를 바로잡아요.';
-    case '표준어 의심': return '표준어에 맞게 다듬어요.';
-    default: return '맞춤법·띄어쓰기를 바로잡아요.'; // 정의된 4유형 외에는 도달하지 않음
+    case '맞춤법': return '맞춤법';
+    case '띄어쓰기': return '띄어쓰기';
+    case '표준어 의심': return '표준어';
+    default: return '맞춤법·띄어쓰기'; // 정의된 4유형 외에는 도달하지 않음
   }
 }
 
@@ -1214,7 +1207,7 @@ async function naverSpellCheck(text: string): Promise<SpellResult> {
     // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
     reasons = r.types.length
       ? r.types.map(naverReasonSentence)
-      : ['맞춤법·띄어쓰기를 바로잡아요.'];
+      : ['맞춤법·띄어쓰기'];
   }
   return { text: corrected, reasons, checked: true };
 }
@@ -1366,7 +1359,7 @@ async function naverSpellCheckAll(
       // 네이버가 합성어를 띄어 쓰거나 예외 표기를 바꾼 경우 되돌린다 (단건 검사와 동일) + 공백 구조 복원
       const corrected = alignWhitespace(t, lines[i].corrected !== t ? revertKeptSpellings(t, protectCompounds(lines[i].corrected)) : lines[i].corrected);
       const reasons = corrected !== t
-        ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기를 바로잡아요.'])
+        ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기'])
         : [];
       setResult(t, { text: corrected, reasons, checked: true });
     }
