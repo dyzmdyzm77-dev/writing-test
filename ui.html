@@ -992,8 +992,12 @@
               if (m) {
                 suffix = m[1];
                 // 변경과 무관한 꼬리 조사는 끌어오지 않는다 ("고객인증번호를"의 '를' 등)
-                const pm = suffix.match(/(에게서|에서|에게|까지|부터|처럼|보다|으로|이나|라도|마저|조차|[을를이가은는과와도만의에로])$/);
-                if (pm) suffix = suffix.slice(0, suffix.length - pm[0].length);
+                // 단, 변경 내용이 공백·문장부호뿐이면(띄어쓰기 변경) 조사까지 끌어와야 차이가 보인다
+                const coreHasWord = /[0-9A-Za-z가-힣]/.test(p.before) || /[0-9A-Za-z가-힣]/.test(p.after);
+                if (coreHasWord) {
+                  const pm = suffix.match(/(에게서|에서|에게|까지|부터|처럼|보다|으로|이나|라도|마저|조차|[을를이가은는과와도만의에로])$/);
+                  if (pm) suffix = suffix.slice(0, suffix.length - pm[0].length);
+                }
                 if (suffix) {
                   next.before = next.before.slice(suffix.length);
                   next.after = next.after.slice(suffix.length);

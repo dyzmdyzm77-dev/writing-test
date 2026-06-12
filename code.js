@@ -1943,6 +1943,11 @@ function shrinkTrailingParticle(s, before, after) {
     // 조사를 떼고도 양쪽에 내용이 남을 때만 (세그먼트가 비어버리지 않게)
     if (cut >= bEnd - bStart || cut >= aEnd - aStart)
         return s;
+    // 조사를 떼고 남는 차이가 공백뿐이면(따옴표 뒤 띄어쓰기 등) 조사를 남긴다
+    // — 안 그러면 '세금계산서” → 세금계산서”'처럼 차이가 안 보이는 표시가 된다
+    const stripWs = (str) => str.replace(/[\s\u00A0\u200B]/g, '');
+    if (stripWs(before.slice(bStart, bEnd - cut)) === stripWs(after.slice(aStart, aEnd - cut)))
+        return s;
     return { bStart, bEnd: bEnd - cut, aStart, aEnd: aEnd - cut };
 }
 // 단어 경계로 넓힌 뒤 겹치거나 맞닿은 구간을 하나로 합친다.
