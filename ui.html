@@ -709,8 +709,6 @@
         
         if (event.data.pluginMessage.type === 'preview-add') {
           const newItems = event.data.pluginMessage.data;
-          // 누적 전 기존 항목 기록 (새로 추가된 항목을 가려내기 위해)
-          const existingIds = new Set(previewData.map(item => item.nodeId));
           // nodeId 기준으로 중복 제거 후 누적
           const map = new Map(previewData.map(item => [item.nodeId, item]));
           for (const item of newItems) {
@@ -719,17 +717,10 @@
           previewData = Array.from(map.values());
           displayPreview(previewData);
 
-          // 새로 추가된 첫 항목이 고정 헤더 바로 아래에 보이도록 스크롤
-          const firstNew = newItems.find(it => !existingIds.has(it.nodeId)) || newItems[0];
-          if (firstNew) {
+          // 새 결과는 목록 맨 아래에 누적되므로 검토가 끝나면 맨 아래로 스크롤
+          if (newItems.length > 0) {
             requestAnimationFrame(() => {
-              const el = document.querySelector('.preview-item[data-node-id="' + firstNew.nodeId + '"]');
-              const tf = document.getElementById('topFixed');
-              if (el) {
-                const headerH = tf ? tf.offsetHeight : 0;
-                const top = el.getBoundingClientRect().top + window.scrollY - headerH - 8;
-                window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-              }
+              window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
             });
           }
         }
