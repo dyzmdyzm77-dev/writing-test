@@ -109,7 +109,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 40px; /* 툴바와 첫 프레임 그룹 사이 간격 */
       }
       .preview-toolbar-actions {
         display: flex;
@@ -196,19 +196,26 @@
         font-size: 14px;
         color: #353535;
       }
-      /* 최상위 프레임(화면) 단위 섹션 헤더 */
+      /* 최상위 프레임(화면) 단위 그룹 카드: 프레임 타이틀 + 검토 결과를 하나로 묶음 */
+      .preview-group {
+        background: #ffffff;
+        border: 1px solid #D9D9D9;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 16px; /* 그룹 카드 사이 간격 */
+      }
       .preview-group-header {
         font-size: 13px;
         font-weight: 700;
         color: #353535;
-        margin: 40px 0 12px; /* 프레임 묶음 사이 간격 */
+        margin: 0 0 12px;
         word-break: break-all;
-      }
-      .preview-group-header:first-child {
-        margin-top: 40px; /* 툴바(코멘트 삭제/숨기기)와 첫 프레임 타이틀 사이 간격 */
       }
       .preview-item-wrapper {
         margin-bottom: 12px; /* 카드 사이 간격 */
+      }
+      .preview-item-wrapper:last-child {
+        margin-bottom: 0;
       }
       .preview-item-header {
         font-weight: 600;
@@ -1097,12 +1104,14 @@
         }
 
         for (const [, frameGroup] of frameGroups) {
-          // 프레임 이름 섹션 헤더
+          // 프레임 타이틀 + 결과들을 하나의 그룹 카드로
+          const groupEl = document.createElement('div');
+          groupEl.className = 'preview-group';
           if (frameGroup.name) {
             const groupHeader = document.createElement('div');
             groupHeader.className = 'preview-group-header';
             groupHeader.textContent = frameGroup.name;
-            previewList.appendChild(groupHeader);
+            groupEl.appendChild(groupHeader);
           }
 
           frameGroup.items.forEach((item) => {
@@ -1196,8 +1205,10 @@
             }
           });
           
-          previewList.appendChild(wrapper);
+          groupEl.appendChild(wrapper);
           });
+
+          previewList.appendChild(groupEl);
         }
 
         previewSection.classList.add('active');
