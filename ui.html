@@ -476,7 +476,7 @@
         <div class="preview-title">검토 결과 : </div>
         <div style="display:flex; align-items:center; gap:8px;">
           <button id="clearAnnotations" class="toggle-annotations-btn">코멘트 삭제</button>
-          <button id="toggleAnnotations" class="toggle-annotations-btn">캔버스 숨기기</button>
+          <button id="toggleAnnotations" class="toggle-annotations-btn">코멘트 숨기기</button>
           <label class="checkbox-select-all">
             <input type="checkbox" id="selectAll" />
             <span>전체 선택</span>
@@ -704,12 +704,12 @@
       window.addEventListener('message', (event) => {
         if (event.data.pluginMessage.type === 'annotations-visibility') {
           const btn = document.getElementById('toggleAnnotations');
-          if (btn) btn.textContent = event.data.pluginMessage.visible ? '캔버스 숨기기' : '캔버스 보이기';
+          if (btn) btn.textContent = event.data.pluginMessage.visible ? '코멘트 숨기기' : '코멘트 보이기';
         }
 
         if (event.data.pluginMessage.type === 'annotations-cleared') {
           const btn = document.getElementById('toggleAnnotations');
-          if (btn) btn.textContent = '캔버스 숨기기';
+          if (btn) btn.textContent = '코멘트 숨기기';
         }
 
         if (event.data.pluginMessage.type === 'selection-changed') {
