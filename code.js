@@ -2391,6 +2391,10 @@ function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) 
         text.textAutoResize = 'WIDTH_AND_HEIGHT';
         const tw = text.width;
         const th = text.height;
+        // 라벨 텍스트는 잠금 — 빠른 연타(더블클릭)로 텍스트가 선택되거나
+        // 편집 모드로 들어가면 선택 해제가 안 먹어 배지가 남는다.
+        // 클릭은 아래의 배경 사각형이 받아 그룹 선택으로 이어지므로 동작엔 영향 없음
+        text.locked = true;
         // 배경 사각형 (둥근 모서리 + 1px 검정 테두리)
         const bg = figma.createRectangle();
         bg.name = COMMENT_DISPLAY_NAME;
