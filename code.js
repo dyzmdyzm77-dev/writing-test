@@ -2349,6 +2349,23 @@ function createHighlightRect(key, geom, absX, absY) {
     catch (_e) { }
 }
 // 코멘트 말풍선 생성 (해당 세그먼트 바로 위에 배치)
+// 이미 캔버스에 놓인 코멘트들의 영역 — 새 코멘트가 겹치면 위로 쌓기 위한 충돌 목록.
+// createAnnotations 시작 시 살아있는 코멘트들로 다시 채운다.
+const placedCommentRects = [];
+function seedPlacedCommentRects() {
+    placedCommentRects.length = 0;
+    for (const [, arr] of annotationsByNode) {
+        for (const e of arr) {
+            const p = parseAnnKey(e.key);
+            if (p && p.kind === 'tooltip' && e.ann && !e.ann.removed) {
+                try {
+                    placedCommentRects.push({ x: e.ann.x, y: e.ann.y, w: e.ann.width, h: e.ann.height });
+                }
+                catch (_e) { }
+            }
+        }
+    }
+}
 // 배경 사각형 + 텍스트를 "그룹"으로 묶는다. 그룹은 프레임과 달리 캔버스에 상시 이름표가 안 뜨고
 // (선택/호버 시에만 잠깐 보임), 클릭 한 번에 통째로 선택돼 앞으로 가져오기 좋다.
 function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) {
@@ -2376,8 +2393,23 @@ function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) 
         // 배경 → 텍스트 순서로 추가해야 텍스트가 위에 그려진다
         figma.currentPage.appendChild(bg);
         figma.currentPage.appendChild(text);
+        const cw = tw + padX * 2;
+        const ch = th + padY * 2;
         const bx = anchorX;
-        const by = anchorY - (th + padY * 2) - 6;
+        let by = anchorY - ch - 6;
+        // 이미 놓인 코멘트와 겹치면 그 위로 쌓는다 (한 프레임에 수정이 많을 때 겹쳐서 안 보이는 문제 방지)
+        for (let guard = 0; guard < 50; guard++) {
+            let collided = false;
+            for (const r of placedCommentRects) {
+                if (bx < r.x + r.w && bx + cw > r.x && by < r.y + r.h && by + ch > r.y) {
+                    by = r.y - ch - 4; // 겹친 코멘트 바로 위로
+                    collided = true;
+                }
+            }
+            if (!collided)
+                break;
+        }
+        placedCommentRects.push({ x: bx, y: by, w: cw, h: ch });
         bg.x = bx;
         bg.y = by;
         text.x = bx + padX;
@@ -2478,6 +2510,8 @@ async function createAnnotations(previewData, onProgress) {
         catch (_e) { }
     }
     // 2) 생성 단계 (동기): 한 번에 전부 그린다 → 하나씩 뿅뿅이 아니라 한 프레임에 다같이 나타남
+    // 기존 코멘트 위치를 충돌 목록에 채워, 새 코멘트가 겹치면 위로 쌓이게 한다
+    seedPlacedCommentRects();
     for (const job of jobs) {
         for (const h of job.highlights) {
             createHighlightRect(h.key, h.geom, job.absX, job.absY);
