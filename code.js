@@ -12,7 +12,9 @@ let suppressEmptySelectionUntil = 0;
 // 선택 상태 변경 감지
 figma.on('selectionchange', () => {
     const selection = figma.currentPage.selection;
-    const hasSelection = selection && selection.length > 0;
+    // 코멘트/형광펜은 검토 대상 선택으로 치지 않는다
+    // (코멘트 클릭 → 선택 해제 흐름에서 검토하기 버튼이 깜빡이는 것 방지)
+    const hasSelection = !!selection && selection.some((n) => !isAnnotationNode(n));
     // UI에 선택 상태 전송
     figma.ui.postMessage({
         type: 'selection-changed',
