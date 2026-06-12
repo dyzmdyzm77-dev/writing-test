@@ -2802,7 +2802,7 @@ figma.ui.onmessage = async (msg: any) => {
     // 캐시 초기화
     previewNodeCache.clear();
     
-    const previewData: Array<{ nodeId: string; nodeName: string; before: string; after: string; reason: string; y: number; x: number }> = [];
+    const previewData: Array<{ nodeId: string; nodeName: string; before: string; after: string; reason: string; y: number; x: number; frameId: string; frameName: string; frameX: number; frameY: number }> = [];
     const nodesToSelect: TextNode[] = [];
     const CHUNK_SIZE = 50; // 50개씩 처리 후 yield
     let lastProgressUpdateTime = Date.now();
@@ -2875,6 +2875,23 @@ figma.ui.onmessage = async (msg: any) => {
           y = 0;
         }
 
+        // 최상위 프레임(페이지 직속 부모) 정보 — 목록을 화면 단위로 묶어 보여주기 위함
+        let frameId = node.id;
+        let frameName = node.name;
+        let frameX = x;
+        let frameY = y;
+        try {
+          let cur: any = node;
+          while (cur.parent && cur.parent.type !== 'PAGE') cur = cur.parent;
+          if (cur && cur.id) {
+            frameId = cur.id;
+            frameName = cur.name || '';
+            // 페이지 직속 노드라 x/y가 곧 캔버스 좌표
+            if (typeof cur.x === 'number') frameX = cur.x;
+            if (typeof cur.y === 'number') frameY = cur.y;
+          }
+        } catch (_e) {}
+
         previewData.push({
           nodeId: node.id,
           nodeName: node.name,
@@ -2882,7 +2899,11 @@ figma.ui.onmessage = async (msg: any) => {
           after: after,
           reason: reason,
           y: y,
-          x: x
+          x: x,
+          frameId: frameId,
+          frameName: frameName,
+          frameX: frameX,
+          frameY: frameY
         });
         nodesToSelect.push(node);
       }
@@ -2916,13 +2937,13 @@ figma.ui.onmessage = async (msg: any) => {
       status: '정렬 중...'
     });
 
-    // 위치 기준으로 정렬 (위에서 아래, 왼쪽에서 오른쪽)
+    // 위치 기준으로 정렬: 프레임(화면) 단위 먼저 (위→아래, 왼쪽→오른쪽), 같은 프레임 안에서는 텍스트 위치순
     previewData.sort((a, b) => {
-      // 먼저 y 좌표로 정렬 (위에서 아래)
-      if (Math.abs(a.y - b.y) > 1) {
-        return a.y - b.y;
+      if (a.frameId !== b.frameId) {
+        if (Math.abs(a.frameY - b.frameY) > 1) return a.frameY - b.frameY;
+        if (Math.abs(a.frameX - b.frameX) > 1) return a.frameX - b.frameX;
       }
-      // y 좌표가 비슷하면 x 좌표로 정렬 (왼쪽에서 오른쪽)
+      if (Math.abs(a.y - b.y) > 1) return a.y - b.y;
       return a.x - b.x;
     });
 

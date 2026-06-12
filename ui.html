@@ -185,6 +185,19 @@
         font-size: 14px;
         color: #353535;
       }
+      /* 최상위 프레임(화면) 단위 섹션 헤더 */
+      .preview-group-header {
+        font-size: 13px;
+        font-weight: 700;
+        color: #353535;
+        margin: 24px 0 12px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #E0E0E0;
+        word-break: break-all;
+      }
+      .preview-group-header:first-child {
+        margin-top: 0;
+      }
       .preview-item-wrapper {
         margin-bottom: 20px;
       }
@@ -988,7 +1001,26 @@
           return { beforeHtml, afterHtml };
         }
         
-        data.forEach((item, index) => {
+        // 최상위 프레임(화면) 기준으로 묶기 — 등장 순서 유지
+        const frameGroups = new Map(); // frameId -> { name, items }
+        for (const item of data) {
+          const key = item.frameId || '';
+          if (!frameGroups.has(key)) frameGroups.set(key, { name: item.frameName || '', items: [] });
+          frameGroups.get(key).items.push(item);
+        }
+
+        let itemIndex = 0;
+        for (const [, frameGroup] of frameGroups) {
+          // 프레임 이름 섹션 헤더
+          if (frameGroup.name) {
+            const groupHeader = document.createElement('div');
+            groupHeader.className = 'preview-group-header';
+            groupHeader.textContent = frameGroup.name;
+            previewList.appendChild(groupHeader);
+          }
+
+          frameGroup.items.forEach((item) => {
+          const index = itemIndex++;
           // Wrapper div 생성
           const wrapper = document.createElement('div');
           wrapper.className = 'preview-item-wrapper';
@@ -1078,7 +1110,8 @@
           });
           
           previewList.appendChild(wrapper);
-        });
+          });
+        }
 
         previewSection.classList.add('active');
         
