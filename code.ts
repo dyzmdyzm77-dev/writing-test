@@ -32,27 +32,16 @@ figma.showUI(__html__, { width: UI_INIT_W, height: UI_INIT_H });
 let uiLastW = UI_INIT_W;
 let uiLastH = UI_INIT_H;
 
-// 코멘트 클릭 직후 프로그램적으로 선택을 비웠을 때, 그 해제 이벤트가
-// 방금 적용한 흐림/목록 선택을 되돌리지 않도록 잠시 무시하는 가드
-let suppressEmptySelectionUntil = 0;
-
 // 선택 상태 변경 감지
 (figma as any).on('selectionchange', () => {
   const selection = figma.currentPage.selection;
-  // 코멘트/형광펜은 검토 대상 선택으로 치지 않는다
-  // (코멘트 클릭 → 선택 해제 흐름에서 검토하기 버튼이 깜빡이는 것 방지)
-  const hasSelection = !!selection && selection.some((n: any) => !isAnnotationNode(n));
+  const hasSelection = selection && selection.length > 0;
 
   // UI에 선택 상태 전송
   figma.ui.postMessage({
     type: 'selection-changed',
     hasSelection: hasSelection
   });
-
-  // 코멘트 클릭 후 우리가 비운 선택의 해제 이벤트 → 상태 유지를 위해 여기서 종료
-  if (!hasSelection && Date.now() < suppressEmptySelectionUntil) {
-    return;
-  }
 
   // 캔버스에서 코멘트(어노테이션)를 직접 클릭한 경우 → 그것만 선명, 나머지는 흐리게 + 맨 앞으로
   try {
@@ -69,35 +58,9 @@ let suppressEmptySelectionUntil = 0;
       }
     }
     if (annSegIds.length > 0) {
-      // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게 + 선택 해제.
-      // 선택 이벤트는 마우스를 누르는 순간 오고, 제스처/드래그 중의 해제는 Figma가
-      // 되돌릴 수 있다 → 클릭 효과와 해제를 묶어 일정 시간 동안 반복 재시도한다.
-      const applyAndClear = (sel: ReadonlyArray<any>) => {
-        const ids: string[] = [];
-        const segs: string[] = [];
-        for (const n of sel) {
-          const p = parseAnnNode(n);
-          if (p) { ids.push(p.nodeId); segs.push(annSegId(p.key)); }
-        }
-        if (segs.length === 0) return;
-        updateAnnotationOpacityBySeg(segs);
-        bringAnnotationsToFront(ids);
-        suppressEmptySelectionUntil = Date.now() + 1600;
-        try { figma.currentPage.selection = []; } catch (_e) {}
-      };
-      applyAndClear(selection);
-      for (const delay of [60, 200, 500, 900, 1400]) {
-        setTimeout(() => {
-          try {
-            const sel = figma.currentPage.selection;
-            // 여전히 코멘트(또는 그 자식)만 선택돼 있으면 효과 재적용 + 해제
-            // (사용자가 그새 다른 걸 선택했으면 건드리지 않음)
-            if (sel && sel.length > 0 && sel.every((n: any) => isAnnotationNode(n))) {
-              applyAndClear(sel);
-            }
-          } catch (_e) {}
-        }, delay);
-      }
+      // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
+      updateAnnotationOpacityBySeg(annSegIds);
+      bringAnnotationsToFront(annNodeIds);
     } else {
       // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
       updateAnnotationOpacityFromCanvas(selection || []);
@@ -1655,14 +1618,6 @@ function getAnnNodeKey(node: any): string {
   if (typeof node.name === 'string' && node.name.startsWith(ANNOTATION_PREFIX)) {
     return node.name.slice(ANNOTATION_PREFIX.length);
   }
-  // 키는 그룹에만 심으므로, 딥클릭으로 자식(배경/텍스트)이 선택된 경우 부모(그룹)의 키로 인식
-  try {
-    const p = node.parent;
-    if (p && p.getPluginData) {
-      const pk = p.getPluginData(PLUGIN_DATA_KEY);
-      if (pk) return pk;
-    }
-  } catch (_e) {}
   return '';
 }
 
@@ -1811,10 +1766,8 @@ function updateAnnotationOpacity(selectedIds: string[]): void {
   const selected = new Set(selectedIds);
   for (const [nodeId, arr] of annotationsByNode) {
     const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : DIM_OPACITY;
-    // 선명하게 만들 소수 항목은 캐시가 어긋나 있어도 확실히 반영되도록 항상 쓴다
-    const force = op === 1 && selected.size > 0;
     for (const entry of arr) {
-      if (!force && entry.op === op) continue; // 같은 값이면 브리지 호출 생략 (수천 개일 때 중요)
+      if (entry.op === op) continue; // 같은 값이면 브리지 호출 생략 (수천 개일 때 중요)
       try {
         if (entry.ann && !entry.ann.removed) {
           entry.ann.opacity = op;
@@ -1832,9 +1785,7 @@ function updateAnnotationOpacityBySeg(selectedSegIds: string[]): void {
   for (const [, arr] of annotationsByNode) {
     for (const entry of arr) {
       const op = (selected.size === 0 || selected.has(annSegId(entry.key))) ? 1 : DIM_OPACITY;
-      // 선명하게 만들 소수 항목은 캐시가 어긋나 있어도 확실히 반영되도록 항상 쓴다
-      const force = op === 1 && selected.size > 0;
-      if (!force && entry.op === op) continue;
+      if (entry.op === op) continue;
       try {
         if (entry.ann && !entry.ann.removed) {
           entry.ann.opacity = op;
@@ -2382,10 +2333,6 @@ function createCommentFrame(
     text.textAutoResize = 'WIDTH_AND_HEIGHT';
     const tw = text.width;
     const th = text.height;
-    // 라벨 텍스트는 잠금 — 빠른 연타(더블클릭)로 텍스트가 선택되거나
-    // 편집 모드로 들어가면 선택 해제가 안 먹어 배지가 남는다.
-    // 클릭은 아래의 배경 사각형이 받아 그룹 선택으로 이어지므로 동작엔 영향 없음
-    text.locked = true;
 
     // 배경 사각형 (둥근 모서리 + 1px 검정 테두리)
     const bg = figma.createRectangle();
@@ -2411,7 +2358,7 @@ function createCommentFrame(
     const group = figma.group([bg, text], figma.currentPage);
     group.name = COMMENT_DISPLAY_NAME;
     if (!annotationsVisible) group.visible = false;
-    group.locked = false; // 클릭 가능 (선택되면 즉시 해제해 크기 배지는 잠깐만 보임)
+    group.locked = false; // 클릭해서 앞으로 가져올 수 있게 잠그지 않음 (끌어도 폴링이 제자리로 되돌림)
 
     // 그룹 하나만 추적 (배경/텍스트는 그룹 안에 있어 함께 이동·제거됨)
     tagAnnotation(group, key);
