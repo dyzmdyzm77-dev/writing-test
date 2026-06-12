@@ -335,9 +335,10 @@
         color: #333;
         word-break: break-word;
       }
-      .preview-reason {
-        margin-top: 8px;
+      /* 수정안 칩 + 키워드 칩을 한 줄로 */
+      .preview-after-labels {
         display: flex;
+        align-items: center;
         flex-wrap: wrap;
         gap: 4px;
       }
@@ -1242,21 +1243,21 @@
           // 변경된 부분 강조
           const { beforeHtml, afterHtml } = highlightChanges(item.before, item.after);
           
-          // 변경 이유를 키워드 칩으로 표시 (네이버/로컬 중복 키워드는 합침)
+          // 변경 이유 키워드 칩 — 수정안 칩과 같은 줄에 나열 (네이버/로컬 중복 키워드는 합침)
           const reasonItems = item.reason ? [...new Set(item.reason.split(' - ').map(r => r.trim()).filter(r => r))] : [];
-          const reasonHtml = reasonItems.length > 0 
-            ? `<div class="preview-reason">${reasonItems.map(r => `<span class="reason-item">${escapeHtml(r)}</span>`).join('')}</div>`
-            : '';
-          
+          const reasonChips = reasonItems.map(r => `<span class="reason-item">${escapeHtml(r)}</span>`).join('');
+
           div.innerHTML = `
             <div class="preview-before-box">
               <span class="preview-label-before">원문</span>
               <div class="preview-before">${beforeHtml}</div>
             </div>
             <div class="preview-after-box">
-              <span class="preview-label-after">수정안</span>
+              <div class="preview-after-labels">
+                <span class="preview-label-after">수정안</span>
+                ${reasonChips}
+              </div>
               <div class="preview-after">${afterHtml}</div>
-              ${reasonHtml}
             </div>
           `;
           
