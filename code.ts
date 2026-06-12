@@ -70,10 +70,21 @@ let suppressEmptySelectionUntil = 0;
       // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
       updateAnnotationOpacityBySeg(annSegIds);
       bringAnnotationsToFront(annNodeIds);
-      // 코멘트가 선택된 채로 있으면 Figma가 크기 배지(W×H)를 띄우므로 선택을 바로 비운다
-      // (흐림·맨 앞·목록 동기화는 이미 적용됐고, 위 가드가 해제 이벤트로부터 지켜준다)
-      suppressEmptySelectionUntil = Date.now() + 500;
+      // 코멘트가 선택된 채로 있으면 Figma가 크기 배지(W×H)를 띄우므로 선택을 비운다.
+      // 선택 이벤트는 마우스를 누르는 순간 오기 때문에, 제스처 중의 해제는 Figma가
+      // 되돌릴 수 있다 → 즉시 + 클릭이 끝난 뒤(150ms) 한 번 더 비운다.
+      suppressEmptySelectionUntil = Date.now() + 800;
       try { figma.currentPage.selection = []; } catch (_e) {}
+      setTimeout(() => {
+        try {
+          const sel = figma.currentPage.selection;
+          // 여전히 코멘트만 선택돼 있으면 비운다 (사용자가 그새 다른 걸 선택했으면 건드리지 않음)
+          if (sel && sel.length > 0 && sel.every((n: any) => isAnnotationNode(n))) {
+            suppressEmptySelectionUntil = Date.now() + 500;
+            figma.currentPage.selection = [];
+          }
+        } catch (_e) {}
+      }, 150);
     } else {
       // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
       updateAnnotationOpacityFromCanvas(selection || []);
