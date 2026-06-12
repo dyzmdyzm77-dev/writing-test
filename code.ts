@@ -337,6 +337,9 @@ const GLOSSARY_ACTION_NOUNS: string[] = [
   "차단",
   "허용",
 ];
+const GLOSSARY_KEEP_SPELLINGS: Array<{ keep: string; naver: string }> = [
+  { keep: "렌탈", naver: "렌털" },
+];
 // ===== GLOSSARY:END =====
 
 // ===============================
@@ -426,6 +429,19 @@ function protectCompounds(s: string): string {
   for (const r of COMPOUND_PROTECT_RULES) {
     r.pattern.lastIndex = 0;
     t = t.replace(r.pattern, r.replacement as string);
+  }
+  return t;
+}
+
+// 예외 표기 보호 (glossary.md "예외 표기"): 네이버가 표준 표기로 바꾼 단어를 우리 표기로 되돌린다.
+// 예: 렌탈 → (네이버) 렌털 → 렌탈 복원. 원문에 우리 표기가 쓰였을 때만 되돌리므로
+// 원문이 처음부터 표준 표기(렌털)면 그대로 둔다 — 양쪽 표기 모두 허용.
+function revertKeptSpellings(original: string, corrected: string): string {
+  let t = corrected;
+  for (const k of GLOSSARY_KEEP_SPELLINGS) {
+    if (original.indexOf(k.keep) !== -1 && original.indexOf(k.naver) === -1) {
+      t = t.split(k.naver).join(k.keep);
+    }
   }
   return t;
 }
@@ -1251,9 +1267,11 @@ async function naverSpellCheck(text: string): Promise<SpellResult> {
     if (key) r = await naverSpellChunk(sendText, key);
   }
   if (r === null) return { text, reasons: [], checked: false };
-  // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 — 되돌려서 원문과 같아지면 제안 자체가 사라진다
+  // 네이버가 합성어를 띄어 쓰거나 예외 표기를 바꾼 경우 용어집 표기로 되돌린다
+  // — 되돌려서 원문과 같아지면 제안 자체가 사라진다.
   // 공백 구조(줄바꿈·각 줄 앞뒤 공백)도 원문대로 복원 (네이버가 잘라내면 똑같아 보이는 제안이 생김)
-  const corrected = alignWhitespace(text, r.errata > 0 ? protectCompounds(r.corrected) : r.corrected);
+  const cleaned = r.errata > 0 ? revertKeptSpellings(text, protectCompounds(r.corrected)) : r.corrected;
+  const corrected = alignWhitespace(text, cleaned);
   let reasons: string[] = [];
   if (corrected !== text && r.errata > 0) {
     // 네이버가 분류한 교정 유형을 로컬 규칙처럼 문장형 사유로 (유형별 한 줄)
@@ -1408,8 +1426,8 @@ async function naverSpellCheckAll(
     }
     for (let i = 0; i < texts.length; i++) {
       const t = texts[i];
-      // 네이버가 합성어를 띄어 쓴 경우 용어집 표기로 되돌린다 (단건 검사와 동일) + 공백 구조 복원
-      const corrected = alignWhitespace(t, lines[i].corrected !== t ? protectCompounds(lines[i].corrected) : lines[i].corrected);
+      // 네이버가 합성어를 띄어 쓰거나 예외 표기를 바꾼 경우 되돌린다 (단건 검사와 동일) + 공백 구조 복원
+      const corrected = alignWhitespace(t, lines[i].corrected !== t ? revertKeptSpellings(t, protectCompounds(lines[i].corrected)) : lines[i].corrected);
       const reasons = corrected !== t
         ? (lines[i].types.length ? lines[i].types.map(naverReasonSentence) : ['맞춤법·띄어쓰기를 바로잡아요.'])
         : [];

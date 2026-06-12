@@ -42,6 +42,21 @@ function listItems(title) {
 const compounds = listItems('합성어 보호');
 const actionNouns = listItems('동작 명사');
 
+// "예외 표기" 표 파싱: | 유지할 표기 | 네이버가 바꾸는 표기 | (섹션이 없으면 빈 목록)
+const keepSpellings = [];
+try {
+  for (const line of section('예외 표기').split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    const cells = t.split('|').map((c) => c.trim()).filter((c, i, arr) => i > 0 && i < arr.length - 1);
+    if (cells.length < 2) continue;
+    if (cells[0] === '유지할 표기' || /^-+$/.test(cells[0])) continue;
+    keepSpellings.push({ keep: cells[0], naver: cells[1] });
+  }
+} catch (_e) {
+  // 섹션 없음 — 빈 목록 유지
+}
+
 if (terms.length === 0 || compounds.length === 0 || actionNouns.length === 0) {
   throw new Error('glossary.md 파싱 결과가 비어 있습니다. 표/목록 형식을 확인하세요.');
 }
@@ -60,6 +75,9 @@ const gen = [
   'const GLOSSARY_ACTION_NOUNS: string[] = [',
   ...actionNouns.map((w) => `  ${JSON.stringify(w)},`),
   '];',
+  'const GLOSSARY_KEEP_SPELLINGS: Array<{ keep: string; naver: string }> = [',
+  ...keepSpellings.map((k) => `  { keep: ${JSON.stringify(k.keep)}, naver: ${JSON.stringify(k.naver)} },`),
+  '];',
   '// ===== GLOSSARY:END =====',
 ].join('\n');
 
@@ -69,4 +87,4 @@ if (!re.test(src)) {
   throw new Error('code.ts에서 GLOSSARY 마커를 찾을 수 없습니다.');
 }
 fs.writeFileSync(tsPath, src.replace(re, gen), 'utf8');
-console.log(`[glossary] 용어 ${terms.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건 반영`);
+console.log(`[glossary] 용어 ${terms.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건, 예외 표기 ${keepSpellings.length}건 반영`);
