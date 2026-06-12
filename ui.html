@@ -500,6 +500,8 @@
     <script>
       let previewData = [];
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
+      // 검토 직후에는 캔버스 자동 선택이 목록 스크롤을 위로 끌어올리지 않도록 잠시 억제
+      let suppressListScrollUntil = 0;
 
       // 고정 헤더 높이만큼 본문 상단 여백을 맞춘다 (창 폭이 바뀌면 안내문 줄바꿈으로 높이가 달라짐)
       function adjustTopPadding() {
@@ -723,7 +725,8 @@
           const selectAllCheckbox = document.getElementById('selectAll');
           if (selectAllCheckbox) selectAllCheckbox.checked = false;
           // 선택된 첫 항목을 목록에서 보이게 스크롤
-          if (firstEl && firstEl.scrollIntoView) {
+          // (검토 직후의 자동 선택은 제외 — 맨 아래 스크롤을 덮어쓰지 않도록)
+          if (firstEl && firstEl.scrollIntoView && Date.now() >= suppressListScrollUntil) {
             firstEl.scrollIntoView({ block: 'nearest' });
           }
         }
@@ -777,7 +780,9 @@
           displayPreview(previewData);
 
           // 새 결과는 목록 맨 아래에 누적되므로 검토가 끝나면 맨 아래로 스크롤
+          // (직후에 도착하는 캔버스 자동 선택 스크롤이 이걸 덮어쓰지 않게 잠시 억제)
           if (newItems.length > 0) {
+            suppressListScrollUntil = Date.now() + 2000;
             requestAnimationFrame(() => {
               window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
             });
