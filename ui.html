@@ -636,8 +636,11 @@
         
         updateToolbarButtonsState();
 
-        // UI 업데이트
-        displayPreview(previewData);
+        // 선택 표시만 갱신 (전체 재렌더링하면 스크롤이 맨 위로 튕긴다)
+        document.querySelectorAll('.preview-item').forEach(el => {
+          if (selectedNodeIds.has(el.dataset.nodeId)) el.classList.add('selected');
+          else el.classList.remove('selected');
+        });
       });
 
       document.getElementById('apply').onclick = () => {
