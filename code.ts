@@ -2421,7 +2421,7 @@ function createCommentFrame(
     const group = figma.group([bg, text], figma.currentPage);
     group.name = COMMENT_DISPLAY_NAME;
     if (!annotationsVisible) group.visible = false;
-    group.locked = true; // 잠금 — 클릭 선택이 안 되게 해 크기 배지(W×H)가 아예 뜨지 않도록 (목록 카드 클릭으로 조작)
+    group.locked = false; // 클릭 가능 (선택되면 즉시 해제해 크기 배지는 잠깐만 보임)
 
     // 그룹 하나만 추적 (배경/텍스트는 그룹 안에 있어 함께 이동·제거됨)
     tagAnnotation(group, key);
