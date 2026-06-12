@@ -104,11 +104,17 @@
       .preview-section.active {
         display: block;
       }
-      .preview-header {
+      /* 검토 결과 타이틀 아래 줄: 좌측 전체 선택, 우측 코멘트 삭제/숨기기 */
+      .preview-toolbar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
+      }
+      .preview-toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
       .preview-title {
         font-weight: 600;
@@ -487,15 +493,15 @@
     </div>
 
     <div id="previewSection" class="preview-section">
-      <div class="preview-header">
-        <div class="preview-title">검토 결과 : </div>
-        <div style="display:flex; align-items:center; gap:8px;">
+      <div class="preview-title">검토 결과 : </div>
+      <div class="preview-toolbar">
+        <label class="checkbox-select-all">
+          <input type="checkbox" id="selectAll" />
+          <span>전체 선택</span>
+        </label>
+        <div class="preview-toolbar-actions">
           <button id="clearAnnotations" class="toggle-annotations-btn">코멘트 삭제</button>
           <button id="toggleAnnotations" class="toggle-annotations-btn">코멘트 숨기기</button>
-          <label class="checkbox-select-all">
-            <input type="checkbox" id="selectAll" />
-            <span>전체 선택</span>
-          </label>
         </div>
       </div>
       <div id="previewList"></div>
