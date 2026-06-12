@@ -739,6 +739,8 @@
 
         // 캔버스에서 노드/코멘트를 선택하면 검토 목록에서도 같은 항목을 선택 표시
         if (event.data.pluginMessage.type === 'canvas-selection') {
+          // 검토 직후의 자동 선택은 무시 — 목록은 미선택 상태로 시작
+          if (pendingScrollToBottom) return;
           const ids = event.data.pluginMessage.nodeIds || [];
           selectedNodeIds = new Set(ids);
           let firstEl = null;
@@ -817,6 +819,10 @@
             map.set(item.nodeId, item);
           }
           previewData = Array.from(map.values());
+          // 검토 직후에는 목록을 미선택 상태로 시작
+          selectedNodeIds.clear();
+          const selectAllCb = document.getElementById('selectAll');
+          if (selectAllCb) selectAllCb.checked = false;
           displayPreview(previewData);
 
           // 새 결과는 목록 맨 아래에 누적되므로 맨 아래로 스크롤.
