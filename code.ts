@@ -25,7 +25,7 @@ interface PluginMessage {
 }
 
 // UI 띄우기
-const UI_INIT_W = 360;
+const UI_INIT_W = 400;
 const UI_INIT_H = 780;
 figma.showUI(__html__, { width: UI_INIT_W, height: UI_INIT_H });
 // 직전 UI 크기 추적 (리사이즈 시 반대쪽 가장자리 고정 계산용)
