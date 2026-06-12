@@ -40,31 +40,43 @@ figma.on('selectionchange', () => {
             }
         }
         if (annSegIds.length > 0) {
-            // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
-            updateAnnotationOpacityBySeg(annSegIds);
-            bringAnnotationsToFront(annNodeIds);
-            // 코멘트가 선택된 채로 있으면 Figma가 크기 배지(W×H)를 띄우므로 선택을 비운다.
-            // 선택 이벤트는 마우스를 누르는 순간 오기 때문에, 제스처 중의 해제는 Figma가
-            // 되돌릴 수 있다 → 즉시 + 클릭이 끝난 뒤(150ms) 한 번 더 비운다.
-            suppressEmptySelectionUntil = Date.now() + 800;
-            try {
-                figma.currentPage.selection = [];
-            }
-            catch (_e) { }
-            // 빠르게 + 안전망 한 번 더 (클릭 속도에 따라 제스처 종료 시점이 달라서)
-            const clearAnnSelection = () => {
-                try {
-                    const sel = figma.currentPage.selection;
-                    // 여전히 코멘트만 선택돼 있으면 비운다 (사용자가 그새 다른 걸 선택했으면 건드리지 않음)
-                    if (sel && sel.length > 0 && sel.every((n) => isAnnotationNode(n))) {
-                        suppressEmptySelectionUntil = Date.now() + 500;
-                        figma.currentPage.selection = [];
+            // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게 + 선택 해제.
+            // 선택 이벤트는 마우스를 누르는 순간 오고, 제스처/드래그 중의 해제는 Figma가
+            // 되돌릴 수 있다 → 클릭 효과와 해제를 묶어 일정 시간 동안 반복 재시도한다.
+            const applyAndClear = (sel) => {
+                const ids = [];
+                const segs = [];
+                for (const n of sel) {
+                    const p = parseAnnNode(n);
+                    if (p) {
+                        ids.push(p.nodeId);
+                        segs.push(annSegId(p.key));
                     }
+                }
+                if (segs.length === 0)
+                    return;
+                updateAnnotationOpacityBySeg(segs);
+                bringAnnotationsToFront(ids);
+                suppressEmptySelectionUntil = Date.now() + 1600;
+                try {
+                    figma.currentPage.selection = [];
                 }
                 catch (_e) { }
             };
-            setTimeout(clearAnnSelection, 60);
-            setTimeout(clearAnnSelection, 200);
+            applyAndClear(selection);
+            for (const delay of [60, 200, 500, 900, 1400]) {
+                setTimeout(() => {
+                    try {
+                        const sel = figma.currentPage.selection;
+                        // 여전히 코멘트(또는 그 자식)만 선택돼 있으면 효과 재적용 + 해제
+                        // (사용자가 그새 다른 걸 선택했으면 건드리지 않음)
+                        if (sel && sel.length > 0 && sel.every((n) => isAnnotationNode(n))) {
+                            applyAndClear(sel);
+                        }
+                    }
+                    catch (_e) { }
+                }, delay);
+            }
         }
         else {
             // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
@@ -1722,8 +1734,10 @@ function updateAnnotationOpacity(selectedIds) {
     const selected = new Set(selectedIds);
     for (const [nodeId, arr] of annotationsByNode) {
         const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : DIM_OPACITY;
+        // 선명하게 만들 소수 항목은 캐시가 어긋나 있어도 확실히 반영되도록 항상 쓴다
+        const force = op === 1 && selected.size > 0;
         for (const entry of arr) {
-            if (entry.op === op)
+            if (!force && entry.op === op)
                 continue; // 같은 값이면 브리지 호출 생략 (수천 개일 때 중요)
             try {
                 if (entry.ann && !entry.ann.removed) {
@@ -1742,7 +1756,9 @@ function updateAnnotationOpacityBySeg(selectedSegIds) {
     for (const [, arr] of annotationsByNode) {
         for (const entry of arr) {
             const op = (selected.size === 0 || selected.has(annSegId(entry.key))) ? 1 : DIM_OPACITY;
-            if (entry.op === op)
+            // 선명하게 만들 소수 항목은 캐시가 어긋나 있어도 확실히 반영되도록 항상 쓴다
+            const force = op === 1 && selected.size > 0;
+            if (!force && entry.op === op)
                 continue;
             try {
                 if (entry.ann && !entry.ann.removed) {
