@@ -212,7 +212,7 @@
         height: 40px; /* 타이틀 영역 높이 */
         display: flex;
         align-items: center;
-        margin: -16px 0 12px; /* 카드 상단 패딩을 상쇄해 타이틀 영역이 카드 맨 위에 붙도록 (위아래 간격 균형) */
+        margin: -16px 0 0; /* 카드 상단 패딩 상쇄 — 아래 간격은 행 패딩이 담당 (호버가 구분선에 붙게) */
         /* overflow를 여기 걸면 하단 풀 와이드 선(::after)까지 잘린다 — 말줄임은 내부 텍스트에 */
       }
       .preview-group-header-text {
@@ -266,12 +266,11 @@
         border-bottom: 1px solid #E5E5E5;
       }
       .preview-item-wrapper {
-        margin-bottom: 12px;
+        margin-bottom: 0; /* 행 간격은 항목 안쪽 패딩으로 — 호버가 구분선까지 차게 */
       }
       /* 항목 사이는 박스 대신 카드 끝까지 이어지는 가로 구분선 */
       .preview-item-wrapper:not(:last-child) {
         position: relative;
-        padding-bottom: 12px;
       }
       .preview-item-wrapper:not(:last-child)::after {
         content: '';
