@@ -288,6 +288,7 @@ const GLOSSARY_COMPOUNDS: string[] = [
   "배경화면",
   "상단정보",
   "부팅중",
+  "풍수재",
 ];
 const GLOSSARY_ACTION_NOUNS: string[] = [
   "확인",

@@ -217,6 +217,7 @@ const GLOSSARY_COMPOUNDS = [
     "배경화면",
     "상단정보",
     "부팅중",
+    "풍수재",
 ];
 const GLOSSARY_ACTION_NOUNS = [
     "확인",
