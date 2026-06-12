@@ -499,7 +499,6 @@
           <span>전체 선택</span>
         </label>
         <div class="preview-toolbar-actions">
-          <button id="clearAnnotations" class="toggle-annotations-btn">코멘트 삭제</button>
           <button id="toggleAnnotations" class="toggle-annotations-btn">코멘트 숨기기</button>
         </div>
       </div>
@@ -683,10 +682,6 @@
 
         document.addEventListener('mouseup', () => { active = null; });
       })();
-
-      document.getElementById('clearAnnotations').onclick = () => {
-        parent.postMessage({ pluginMessage: { type: 'CLEAR_ANNOTATIONS' } }, '*');
-      };
 
       document.getElementById('toggleAnnotations').onclick = () => {
         parent.postMessage({ pluginMessage: { type: 'TOGGLE_ANNOTATIONS' } }, '*');
