@@ -205,19 +205,38 @@
         margin-bottom: 16px; /* 그룹 카드 사이 간격 */
       }
       .preview-group-header {
+        position: relative;
         font-size: 13px;
         font-weight: 700;
         color: #353535;
         margin: 0 0 12px;
+        padding-bottom: 12px;
         word-break: break-all;
+      }
+      /* 타이틀 아래 카드 끝까지 이어지는 가로선 (카드 패딩 16px을 가로지름) */
+      .preview-group-header::after {
+        content: '';
+        position: absolute;
+        left: -16px;
+        right: -16px;
+        bottom: 0;
+        border-bottom: 1px solid #E5E5E5;
       }
       .preview-item-wrapper {
         margin-bottom: 12px;
       }
-      /* 항목 사이는 박스 대신 가로 구분선 */
+      /* 항목 사이는 박스 대신 카드 끝까지 이어지는 가로 구분선 */
       .preview-item-wrapper:not(:last-child) {
-        border-bottom: 1px solid #E5E5E5;
+        position: relative;
         padding-bottom: 12px;
+      }
+      .preview-item-wrapper:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        left: -16px;
+        right: -16px;
+        bottom: 0;
+        border-bottom: 1px solid #E5E5E5;
       }
       .preview-item-wrapper:last-child {
         margin-bottom: 0;
