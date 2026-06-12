@@ -1557,6 +1557,16 @@ function getAnnNodeKey(node) {
     if (typeof node.name === 'string' && node.name.startsWith(ANNOTATION_PREFIX)) {
         return node.name.slice(ANNOTATION_PREFIX.length);
     }
+    // 키는 그룹에만 심으므로, 딥클릭으로 자식(배경/텍스트)이 선택된 경우 부모(그룹)의 키로 인식
+    try {
+        const p = node.parent;
+        if (p && p.getPluginData) {
+            const pk = p.getPluginData(PLUGIN_DATA_KEY);
+            if (pk)
+                return pk;
+        }
+    }
+    catch (_e) { }
     return '';
 }
 function isAnnotationNode(node) {
