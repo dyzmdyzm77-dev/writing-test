@@ -773,7 +773,12 @@
           if (pendingScrollToBottom) {
             requestAnimationFrame(() => {
               scrollListToBottom();
-              pendingScrollToBottom = false;
+              // 캔버스 선택 동기화(canvas-selection)가 뒤늦게 도착해
+              // 위쪽 항목으로 가운데 스크롤을 걸 수 있으므로, 억제를 잠시 뒤에 해제
+              setTimeout(() => {
+                scrollListToBottom(); // 그 사이 끼어든 스크롤이 있어도 최종적으로 맨 아래 확정
+                pendingScrollToBottom = false;
+              }, 800);
             });
           }
         }
