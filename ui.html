@@ -206,6 +206,8 @@
       }
       .preview-group-header {
         position: relative;
+        cursor: pointer; /* 영역 전체가 접기/펼치기 클릭 대상 */
+        user-select: none;
         font-size: 14px;
         font-weight: 700;
         color: #353535;
@@ -1190,13 +1192,13 @@
             toggleBtn.className = 'preview-group-toggle';
             toggleBtn.title = '목록 접기/펼치기';
             toggleBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.75 13.625L12 9.375L16.25 13.625" stroke="#353535" stroke-linecap="square"/></svg>';
-            toggleBtn.addEventListener('click', (ev) => {
-              ev.stopPropagation();
+            groupHeader.appendChild(toggleBtn);
+            // 타이틀 영역 전체를 눌러도 접기/펼치기 (화살표 버튼 클릭은 버블링으로 함께 처리)
+            groupHeader.addEventListener('click', () => {
               if (collapsedFrames.has(frameKey)) collapsedFrames.delete(frameKey);
               else collapsedFrames.add(frameKey);
               groupEl.classList.toggle('collapsed');
             });
-            groupHeader.appendChild(toggleBtn);
             groupEl.appendChild(groupHeader);
           }
           const groupBody = document.createElement('div');
