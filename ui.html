@@ -213,6 +213,11 @@
         display: flex;
         align-items: center;
         margin: -16px 0 12px; /* 카드 상단 패딩을 상쇄해 타이틀 영역이 카드 맨 위에 붙도록 (위아래 간격 균형) */
+        /* overflow를 여기 걸면 하단 풀 와이드 선(::after)까지 잘린다 — 말줄임은 내부 텍스트에 */
+      }
+      .preview-group-header-text {
+        flex: 1;
+        min-width: 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis; /* 긴 프레임 이름은 말줄임 */
@@ -1138,7 +1143,10 @@
           if (frameGroup.name) {
             const groupHeader = document.createElement('div');
             groupHeader.className = 'preview-group-header';
-            groupHeader.textContent = frameGroup.name;
+            const headerText = document.createElement('span');
+            headerText.className = 'preview-group-header-text';
+            headerText.textContent = frameGroup.name;
+            groupHeader.appendChild(headerText);
             groupEl.appendChild(groupHeader);
           }
 
