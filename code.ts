@@ -3162,6 +3162,36 @@ figma.ui.onmessage = async (msg: any) => {
     return;
   }
 
+  // 선택한 항목들의 어노테이션만 삭제
+  if (msg.type === "CLEAR_ANNOTATIONS_NODES") {
+    const ids: string[] = msg.nodeIds || [];
+    for (const id of ids) removeAnnotationByNodeId(id);
+    return;
+  }
+
+  // 선택한 항목들의 어노테이션만 숨기기/보이기 토글
+  // (하나라도 보이면 전부 숨기고, 전부 숨겨져 있으면 보이기)
+  if (msg.type === "TOGGLE_ANNOTATIONS_NODES") {
+    const ids: string[] = msg.nodeIds || [];
+    let anyVisible = false;
+    for (const id of ids) {
+      const arr = annotationsByNode.get(id);
+      if (!arr) continue;
+      for (const e of arr) {
+        if (e.ann && !e.ann.removed && e.ann.visible) { anyVisible = true; break; }
+      }
+      if (anyVisible) break;
+    }
+    for (const id of ids) {
+      const arr = annotationsByNode.get(id);
+      if (!arr) continue;
+      for (const e of arr) {
+        try { if (e.ann && !e.ann.removed) e.ann.visible = !anyVisible; } catch (_e) {}
+      }
+    }
+    return;
+  }
+
   // 취소: 어노테이션 제거
   if (msg.type === "CANCEL") {
     removeAnnotations();

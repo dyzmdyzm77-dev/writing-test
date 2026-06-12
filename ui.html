@@ -140,6 +140,11 @@
       .toggle-annotations-btn:hover {
         background: #F2F2F2;
       }
+      .toggle-annotations-btn:disabled {
+        background: #F5F5F5;
+        color: #C4C4C4;
+        cursor: not-allowed;
+      }
       .result-count {
         color: #1D6CEB;
       }
@@ -499,7 +504,8 @@
           <span>전체 선택</span>
         </label>
         <div class="preview-toolbar-actions">
-          <button id="toggleAnnotations" class="toggle-annotations-btn">코멘트 숨기기</button>
+          <button id="clearAnnotations" class="toggle-annotations-btn" disabled>코멘트 삭제</button>
+          <button id="toggleAnnotations" class="toggle-annotations-btn" disabled>코멘트 숨기기</button>
         </div>
       </div>
       <div id="previewList"></div>
@@ -610,6 +616,8 @@
           } 
         }, '*');
         
+        updateToolbarButtonsState();
+
         // UI 업데이트
         displayPreview(previewData);
       });
@@ -683,8 +691,23 @@
         document.addEventListener('mouseup', () => { active = null; });
       })();
 
+      // 코멘트 삭제/숨기기는 카드를 선택했을 때만 활성화
+      function updateToolbarButtonsState() {
+        const hasSel = selectedNodeIds.size > 0;
+        const clearBtn = document.getElementById('clearAnnotations');
+        const toggleBtn = document.getElementById('toggleAnnotations');
+        if (clearBtn) clearBtn.disabled = !hasSel;
+        if (toggleBtn) toggleBtn.disabled = !hasSel;
+      }
+
+      document.getElementById('clearAnnotations').onclick = () => {
+        if (selectedNodeIds.size === 0) return;
+        parent.postMessage({ pluginMessage: { type: 'CLEAR_ANNOTATIONS_NODES', nodeIds: Array.from(selectedNodeIds) } }, '*');
+      };
+
       document.getElementById('toggleAnnotations').onclick = () => {
-        parent.postMessage({ pluginMessage: { type: 'TOGGLE_ANNOTATIONS' } }, '*');
+        if (selectedNodeIds.size === 0) return;
+        parent.postMessage({ pluginMessage: { type: 'TOGGLE_ANNOTATIONS_NODES', nodeIds: Array.from(selectedNodeIds) } }, '*');
       };
 
       document.getElementById('cancel').onclick = () => {
@@ -748,6 +771,7 @@
           });
           const selectAllCheckbox = document.getElementById('selectAll');
           if (selectAllCheckbox) selectAllCheckbox.checked = false;
+          updateToolbarButtonsState();
           // 선택된 첫 항목이 목록 가운데로 오게 스크롤
           // (검토 직후의 자동 선택은 제외 — 맨 아래 스크롤을 덮어쓰지 않도록)
           if (firstEl && firstEl.scrollIntoView && !pendingScrollToBottom) {
@@ -817,6 +841,7 @@
           selectedNodeIds.clear();
           const selectAllCb = document.getElementById('selectAll');
           if (selectAllCb) selectAllCb.checked = false;
+          updateToolbarButtonsState();
           displayPreview(previewData);
 
           // 새 결과는 목록 맨 아래에 누적되므로 맨 아래로 스크롤.
@@ -838,6 +863,7 @@
           changedNodeIds.forEach(nodeId => {
             selectedNodeIds.delete(nodeId);
           });
+          updateToolbarButtonsState();
           
           console.log(`[UI] 변경 전 ${beforeLength}개, 변경된 항목: ${changedNodeIds.length}개, 남은 항목: ${previewData.length}개`);
           
@@ -1098,6 +1124,8 @@
               selectAllCheckbox.checked = false;
             }
             
+            updateToolbarButtonsState();
+
             // 선택된 노드들을 Figma에도 반영
             parent.postMessage({ 
               pluginMessage: { 
