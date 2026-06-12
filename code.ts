@@ -1877,7 +1877,7 @@ function updateAnnotationOpacityFromCanvas(selection: ReadonlyArray<any>): void 
 }
 
 // 지정한 노드들의 어노테이션을 z-order 맨 앞으로 올린다 (페이지 끝에 다시 붙이면 최상단)
-function bringAnnotationsToFront(nodeIds: string[]): void {
+function raiseAnnotations(nodeIds: string[]): void {
   for (const nodeId of nodeIds) {
     const arr = annotationsByNode.get(nodeId);
     if (!arr) continue;
@@ -1888,6 +1888,20 @@ function bringAnnotationsToFront(nodeIds: string[]): void {
       } catch (_e) {}
     }
   }
+}
+
+let raiseRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function bringAnnotationsToFront(nodeIds: string[]): void {
+  raiseAnnotations(nodeIds);
+  // 선택 이벤트는 마우스를 누르는 순간 발생해, 클릭 제스처 중의 순서 변경을
+  // Figma가 되돌리는 경우가 있다 → 클릭이 끝난 시점에 한 번 더 올린다
+  const ids = nodeIds.slice();
+  if (raiseRetryTimer !== null) clearTimeout(raiseRetryTimer);
+  raiseRetryTimer = setTimeout(() => {
+    raiseRetryTimer = null;
+    raiseAnnotations(ids);
+  }, 120);
 }
 
 // before/after에서 바뀐 구간만 추출 (공통 접두/접미 제거)
