@@ -1809,12 +1809,15 @@ function getAllAnnotations(): any[] {
   return result;
 }
 
+// 선택되지 않은 어노테이션의 흐림 정도 (낮을수록 더 흐림)
+const DIM_OPACITY = 0.15;
+
 // 선택 상태에 따라 어노테이션 투명도 조절 (노드 단위 — 목록 항목 선택 등에 사용)
 // selectedIds가 비어있으면 전부 불투명, 아니면 선택된 노드만 불투명/나머지는 반투명
 function updateAnnotationOpacity(selectedIds: string[]): void {
   const selected = new Set(selectedIds);
   for (const [nodeId, arr] of annotationsByNode) {
-    const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : 0.35;
+    const op = (selected.size === 0 || selected.has(nodeId)) ? 1 : DIM_OPACITY;
     for (const entry of arr) {
       if (entry.op === op) continue; // 같은 값이면 브리지 호출 생략 (수천 개일 때 중요)
       try {
@@ -1833,7 +1836,7 @@ function updateAnnotationOpacityBySeg(selectedSegIds: string[]): void {
   const selected = new Set(selectedSegIds);
   for (const [, arr] of annotationsByNode) {
     for (const entry of arr) {
-      const op = (selected.size === 0 || selected.has(annSegId(entry.key))) ? 1 : 0.35;
+      const op = (selected.size === 0 || selected.has(annSegId(entry.key))) ? 1 : DIM_OPACITY;
       if (entry.op === op) continue;
       try {
         if (entry.ann && !entry.ann.removed) {
