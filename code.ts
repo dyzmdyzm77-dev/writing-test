@@ -32,6 +32,10 @@ figma.showUI(__html__, { width: UI_INIT_W, height: UI_INIT_H });
 let uiLastW = UI_INIT_W;
 let uiLastH = UI_INIT_H;
 
+// 코멘트 클릭 직후 프로그램적으로 선택을 비웠을 때, 그 해제 이벤트가
+// 방금 적용한 흐림/목록 선택을 되돌리지 않도록 잠시 무시하는 가드
+let suppressEmptySelectionUntil = 0;
+
 // 선택 상태 변경 감지
 (figma as any).on('selectionchange', () => {
   const selection = figma.currentPage.selection;
@@ -42,6 +46,11 @@ let uiLastH = UI_INIT_H;
     type: 'selection-changed',
     hasSelection: hasSelection
   });
+
+  // 코멘트 클릭 후 우리가 비운 선택의 해제 이벤트 → 상태 유지를 위해 여기서 종료
+  if (!hasSelection && Date.now() < suppressEmptySelectionUntil) {
+    return;
+  }
 
   // 캔버스에서 코멘트(어노테이션)를 직접 클릭한 경우 → 그것만 선명, 나머지는 흐리게 + 맨 앞으로
   try {
@@ -61,6 +70,10 @@ let uiLastH = UI_INIT_H;
       // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
       updateAnnotationOpacityBySeg(annSegIds);
       bringAnnotationsToFront(annNodeIds);
+      // 코멘트가 선택된 채로 있으면 Figma가 크기 배지(W×H)를 띄우므로 선택을 바로 비운다
+      // (흐림·맨 앞·목록 동기화는 이미 적용됐고, 위 가드가 해제 이벤트로부터 지켜준다)
+      suppressEmptySelectionUntil = Date.now() + 500;
+      try { figma.currentPage.selection = []; } catch (_e) {}
     } else {
       // 일반 노드 선택 시: 관련 코멘트 투명도 갱신 + 앞으로
       updateAnnotationOpacityFromCanvas(selection || []);
