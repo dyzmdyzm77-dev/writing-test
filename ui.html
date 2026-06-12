@@ -532,6 +532,10 @@
       // 검토가 완전히 끝나는 hide-loading 시점에 한 번 더 확정한다.
       let pendingScroll = null; // { mode: 'top' } | { mode: 'center', ids: Set<nodeId> }
 
+      // UI에서 시작한 선택(SELECT_NODES)이 캔버스 선택 이벤트로 메아리쳐 돌아와
+      // 방금 만든 선택 상태(특히 전체 선택)를 덮어쓰지 않도록 잠시 무시한다
+      let uiSelectionEchoUntil = 0;
+
       function performPendingScroll() {
         if (!pendingScroll) return;
         if (pendingScroll.mode === 'top') {
@@ -621,7 +625,8 @@
           selectedNodeIds.clear();
         }
         
-        // 선택된 노드들을 Figma에도 반영
+        // 선택된 노드들을 Figma에도 반영 (에코로 되돌아오는 선택 동기화는 무시)
+        uiSelectionEchoUntil = Date.now() + 800;
         parent.postMessage({ 
           pluginMessage: { 
             type: 'SELECT_NODES', 
@@ -784,6 +789,8 @@
         if (event.data.pluginMessage.type === 'canvas-selection') {
           // 검토 직후의 자동 선택은 무시 — 목록은 미선택 상태로 시작
           if (pendingScroll) return;
+          // UI에서 방금 시작한 선택의 메아리도 무시 (전체 선택 등을 덮어쓰지 않게)
+          if (Date.now() < uiSelectionEchoUntil) return;
           const ids = event.data.pluginMessage.nodeIds || [];
           selectedNodeIds = new Set(ids);
           let firstEl = null;
@@ -1161,7 +1168,8 @@
             
             updateToolbarButtonsState();
 
-            // 선택된 노드들을 Figma에도 반영
+            // 선택된 노드들을 Figma에도 반영 (에코로 되돌아오는 선택 동기화는 무시)
+            uiSelectionEchoUntil = Date.now() + 800;
             parent.postMessage({ 
               pluginMessage: { 
                 type: 'SELECT_NODES', 
