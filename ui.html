@@ -715,7 +715,20 @@
 
       document.getElementById('clearAnnotations').onclick = () => {
         if (selectedNodeIds.size === 0) return;
+        // 캔버스의 코멘트/형광펜 삭제
         parent.postMessage({ pluginMessage: { type: 'CLEAR_ANNOTATIONS_NODES', nodeIds: Array.from(selectedNodeIds) } }, '*');
+        // 목록에서도 해당 카드 제거
+        previewData = previewData.filter(item => !selectedNodeIds.has(item.nodeId));
+        selectedNodeIds.clear();
+        const selectAllCb = document.getElementById('selectAll');
+        if (selectAllCb) selectAllCb.checked = false;
+        updateToolbarButtonsState();
+        if (previewData.length === 0) {
+          const btnGroupEl = document.querySelector('.button-group');
+          if (btnGroupEl) btnGroupEl.classList.remove('active');
+          document.getElementById('previewSection').classList.remove('active');
+        }
+        displayPreview(previewData);
       };
 
       document.getElementById('toggleAnnotations').onclick = () => {
