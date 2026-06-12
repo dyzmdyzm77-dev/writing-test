@@ -1009,7 +1009,6 @@
           frameGroups.get(key).items.push(item);
         }
 
-        let itemIndex = 0;
         for (const [, frameGroup] of frameGroups) {
           // 프레임 이름 섹션 헤더
           if (frameGroup.name) {
@@ -1020,16 +1019,10 @@
           }
 
           frameGroup.items.forEach((item) => {
-          const index = itemIndex++;
           // Wrapper div 생성
           const wrapper = document.createElement('div');
           wrapper.className = 'preview-item-wrapper';
-          
-          // Header div 생성
-          const header = document.createElement('div');
-          header.className = 'preview-item-header';
-          header.textContent = `${index + 1}.`;
-          
+
           // Preview item div 생성
           const div = document.createElement('div');
           div.className = 'preview-item';
@@ -1062,8 +1055,7 @@
             </div>
           `;
           
-          // Wrapper에 헤더와 아이템 추가
-          wrapper.appendChild(header);
+          // Wrapper에 아이템 추가
           wrapper.appendChild(div);
           
           // 클릭 시 해당 텍스트 레이어로 이동 및 단일 선택/해제
