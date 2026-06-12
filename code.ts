@@ -3282,10 +3282,10 @@ figma.ui.onmessage = async (msg: any) => {
       }
 
       // 선택된 노드들을 Figma에서 선택
+      // (뷰포트 이동은 하지 않는다 — 전체 선택 시 캔버스가 첫 노드로 튕기는 문제.
+      //  카드 클릭으로 이동하는 건 FOCUS_NODE가 담당)
       if (nodesToSelect.length > 0) {
         figma.currentPage.selection = nodesToSelect;
-        // 뷰포트 이동 (첫 번째 노드로)
-        figma.viewport.scrollAndZoomIntoView([nodesToSelect[0]]);
       }
     } catch (e) {
       console.error("[SELECT_NODES] 오류:", e);
