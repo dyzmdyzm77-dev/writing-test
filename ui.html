@@ -1121,7 +1121,8 @@
           // 클릭 시 해당 텍스트 레이어로 이동 및 단일 선택/해제
           div.addEventListener('click', () => {
             // 클릭한 항목이 이미 선택되어 있으면 해제
-            if (selectedNodeIds.has(item.nodeId)) {
+            const deselecting = selectedNodeIds.has(item.nodeId);
+            if (deselecting) {
               selectedNodeIds.delete(item.nodeId);
               div.classList.remove('selected');
             } else {
@@ -1155,12 +1156,16 @@
               } 
             }, '*');
             
-            parent.postMessage({ 
-              pluginMessage: { 
-                type: 'FOCUS_NODE', 
-                nodeId: item.nodeId 
-              } 
-            }, '*');
+            // 해제할 때는 캔버스 포커스를 보내지 않는다
+            // (FOCUS_NODE가 노드를 다시 선택해 해제가 무효화되는 것 방지)
+            if (!deselecting) {
+              parent.postMessage({ 
+                pluginMessage: { 
+                  type: 'FOCUS_NODE', 
+                  nodeId: item.nodeId 
+                } 
+              }, '*');
+            }
           });
           
           previewList.appendChild(wrapper);
