@@ -590,12 +590,110 @@
       .rs-ne { top:0; right:0;  width:8px; height:8px; cursor:ne-resize; }
       .rs-sw { bottom:0; left:0;  width:8px; height:8px; cursor:sw-resize; }
       .rs-se { bottom:0; right:0; width:8px; height:8px; cursor:se-resize; }
+
+      /* ── 홈 / 기능 화면 (문구 추천·번역) ── */
+      #homeView { display: none; }
+      .home-btn { margin-bottom: 12px; }
+      .feature-header { display: none; }
+      .feature-section {
+        display: none;
+        margin-top: 16px;
+        padding-top: 12px;
+        padding-bottom: 100px;
+      }
+      /* 뒤로가기(← 홈) — 전역 button 규칙(width:100%, height:48px) 무시 */
+      .back-btn {
+        width: auto !important;
+        height: auto !important;
+        line-height: normal !important;
+        display: inline-block;
+        background: none;
+        border: none;
+        color: #757575;
+        font-size: 13px;
+        padding: 0;
+        margin: 0 0 12px 0;
+        cursor: pointer;
+      }
+      .back-btn:hover { color: #353535; }
+      .feature-input {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 64px;
+        padding: 10px;
+        border: 1px solid #D9D9D9;
+        border-radius: 4px;
+        font-size: 14px;
+        font-family: inherit;
+        line-height: 1.4;
+        resize: vertical;
+        margin-bottom: 12px;
+      }
+      .feature-input:focus { outline: none; border-color: #1D6CEB; }
+      .result-label {
+        font-size: 12px;
+        color: #757575;
+        margin: 12px 0 6px 0;
+      }
+      .result-original {
+        font-size: 13px;
+        color: #353535;
+        background: #F5F5F5;
+        border-radius: 6px;
+        padding: 10px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+      .sugg-card {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+        border: 1px solid #E0E0E0;
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 8px;
+      }
+      .sugg-text {
+        font-size: 14px;
+        color: #000000;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        flex: 1;
+      }
+      /* 복사 버튼 — 전역 button 규칙 무시 */
+      .copy-btn {
+        width: auto !important;
+        height: auto !important;
+        line-height: normal !important;
+        flex: 0 0 auto;
+        background: #FFFFFF;
+        border: 1px solid #D9D9D9 !important;
+        border-radius: 4px;
+        color: #353535;
+        font-size: 12px;
+        padding: 5px 10px !important;
+        margin: 0;
+        cursor: pointer;
+      }
+      .copy-btn:hover { background: #F2F2F2; }
+      .result-empty { color: #757575; font-size: 13px; padding: 8px 0; }
     </style>
   </head>
   <body>
+    <!-- 홈 화면: 작업 선택 메뉴 -->
+    <div id="homeView">
+      <div class="title">에스원 UX Writing Checker</div>
+      <div class="hint">원하는 작업을 선택하세요.</div>
+      <button class="button-primary home-btn" data-go="review">Writing 검토하기</button>
+      <button class="button-primary home-btn" data-go="recommend">문구 추천받기</button>
+      <button class="button-primary home-btn" data-go="translate">번역하기</button>
+    </div>
+
     <div id="topFixed" class="top-fixed">
+      <button class="back-btn" data-back>← 홈</button>
       <div class="title-section">
-        <div class="title">에스원 UX Writing Checker</div>
+        <div class="title">Writing 검토하기</div>
         <div class="hint">텍스트 레이어 또는 Frame을 선택한 뒤 [검토하기] 버튼을 눌러주세요.</div>
       </div>
       <button id="preview" class="button-primary button-full-width">검토하기</button>
@@ -634,6 +732,34 @@
     <div class="button-group">
       <button id="apply" class="button-primary">변경하기</button>
       <button id="cancel" class="button-secondary">취소</button>
+    </div>
+
+    <!-- 문구 추천 화면 -->
+    <div id="recommendHeader" class="top-fixed feature-header">
+      <button class="back-btn" data-back>← 홈</button>
+      <div class="title-section">
+        <div class="title">문구 추천받기</div>
+        <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택한 뒤 눌러주세요.</div>
+      </div>
+      <textarea id="recommendInput" class="feature-input" placeholder="예) 로그인이 필요합니다"></textarea>
+      <button id="recommendRun" class="button-primary button-full-width">추천받기</button>
+    </div>
+    <div id="recommendSection" class="feature-section">
+      <div id="recommendList"></div>
+    </div>
+
+    <!-- 번역 화면 -->
+    <div id="translateHeader" class="top-fixed feature-header">
+      <button class="back-btn" data-back>← 홈</button>
+      <div class="title-section">
+        <div class="title">번역하기</div>
+        <div class="hint">한국어 ↔ 영어 자동 번역. 문구를 입력하거나 캔버스에서 텍스트를 선택하세요.</div>
+      </div>
+      <textarea id="translateInput" class="feature-input" placeholder="예) 로그인이 필요합니다 / Please log in"></textarea>
+      <button id="translateRun" class="button-primary button-full-width">번역하기</button>
+    </div>
+    <div id="translateSection" class="feature-section">
+      <div id="translateResult"></div>
     </div>
 
     <button id="scrollTopBtn" class="scroll-top-btn" title="맨 위로" aria-label="맨 위로">
@@ -699,10 +825,36 @@
         }
       }
 
-      // 고정 헤더 높이만큼 본문 상단 여백을 맞춘다 (창 폭이 바뀌면 안내문 줄바꿈으로 높이가 달라짐)
+      // ── 화면 전환 컨트롤러 (홈 / 검토 / 문구추천 / 번역) ──
+      let currentView = 'home';
+      function activeHeaderEl() {
+        if (currentView === 'review') return document.getElementById('topFixed');
+        if (currentView === 'recommend') return document.getElementById('recommendHeader');
+        if (currentView === 'translate') return document.getElementById('translateHeader');
+        return null; // 홈에는 고정 헤더가 없다
+      }
+      // 본문 상단 여백을 현재 활성 고정 헤더 높이에 맞춘다 (홈이면 기본 여백)
       function adjustTopPadding() {
-        const tf = document.getElementById('topFixed');
-        if (tf) document.body.style.paddingTop = tf.offsetHeight + 'px';
+        const header = activeHeaderEl();
+        document.body.style.paddingTop = header ? header.offsetHeight + 'px' : '20px';
+      }
+      function showView(name) {
+        currentView = name;
+        document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
+        document.getElementById('topFixed').style.display = name === 'review' ? 'block' : 'none';
+        document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'block' : 'none';
+        document.getElementById('translateHeader').style.display = name === 'translate' ? 'block' : 'none';
+        document.getElementById('recommendSection').style.display = name === 'recommend' ? 'block' : 'none';
+        document.getElementById('translateSection').style.display = name === 'translate' ? 'block' : 'none';
+        // 검토 결과 영역/하단 버튼은 '검토' 화면에서만 보인다
+        if (name !== 'review') {
+          const ps = document.getElementById('previewSection');
+          if (ps) ps.classList.remove('active');
+          const bg = document.querySelector('.button-group');
+          if (bg) bg.classList.remove('active');
+        }
+        adjustTopPadding();
+        window.scrollTo({ top: 0 });
       }
       adjustTopPadding();
       window.addEventListener('resize', adjustTopPadding);
@@ -958,7 +1110,15 @@
         if (event.data.pluginMessage.type === 'show-toast') {
           showToast(event.data.pluginMessage.message);
         }
-        
+
+        if (event.data.pluginMessage.type === 'recommend-result') {
+          renderRecommend(event.data.pluginMessage.original || '', event.data.pluginMessage.suggestions || []);
+        }
+
+        if (event.data.pluginMessage.type === 'translate-result') {
+          renderTranslate(event.data.pluginMessage.original || '', event.data.pluginMessage.translated || '', event.data.pluginMessage.direction || '');
+        }
+
         if (event.data.pluginMessage.type === 'show-loading') {
           const loadingOverlay = document.getElementById('loadingOverlay');
           const loadingProgress = document.getElementById('loadingProgress');
@@ -1414,13 +1574,91 @@
 
         previewSection.classList.add('active');
         setResultHeaderVisible(data.length > 0);
-        
+
         // 플로팅 버튼 그룹 표시
         const btnGroup = document.querySelector('.button-group');
         if (btnGroup && data.length > 0) {
           btnGroup.classList.add('active');
         }
       }
+
+      // ── 홈 메뉴 / 뒤로가기 버튼 연결 ──
+      document.querySelectorAll('[data-go]').forEach((btn) => {
+        btn.addEventListener('click', () => showView(btn.dataset.go));
+      });
+      document.querySelectorAll('[data-back]').forEach((btn) => {
+        btn.addEventListener('click', () => showView('home'));
+      });
+
+      // ── 문구 추천 / 번역 실행 ──
+      document.getElementById('recommendRun').onclick = () => {
+        const text = document.getElementById('recommendInput').value.trim();
+        parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text } }, '*');
+      };
+      document.getElementById('translateRun').onclick = () => {
+        const text = document.getElementById('translateInput').value.trim();
+        parent.postMessage({ pluginMessage: { type: 'TRANSLATE', text } }, '*');
+      };
+
+      // ── 결과 렌더링 ──
+      function escapeHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      function renderRecommend(original, suggestions) {
+        const list = document.getElementById('recommendList');
+        if (!list) return;
+        let html = '<div class="result-label">원본</div><div class="result-original">' + escapeHtml(original) + '</div>';
+        if (!suggestions.length) {
+          html += '<div class="result-empty">추천 결과가 없어요. 다시 시도해 주세요.</div>';
+          list.innerHTML = html;
+          adjustTopPadding();
+          return;
+        }
+        html += '<div class="result-label">추천 문구</div>';
+        suggestions.forEach((s) => {
+          html += '<div class="sugg-card"><span class="sugg-text">' + escapeHtml(s) +
+            '</span><button class="copy-btn" data-copy="' + encodeURIComponent(s) + '">복사</button></div>';
+        });
+        list.innerHTML = html;
+        wireCopyButtons(list);
+      }
+      function renderTranslate(original, translated, direction) {
+        const box = document.getElementById('translateResult');
+        if (!box) return;
+        const dirLabel = direction === 'ko->en' ? '한국어 → 영어' : (direction === 'en->ko' ? '영어 → 한국어' : '');
+        let html = '<div class="result-label">원본</div><div class="result-original">' + escapeHtml(original) + '</div>';
+        html += '<div class="result-label">번역' + (dirLabel ? ' (' + dirLabel + ')' : '') + '</div>';
+        html += '<div class="sugg-card"><span class="sugg-text">' + escapeHtml(translated) +
+          '</span><button class="copy-btn" data-copy="' + encodeURIComponent(translated) + '">복사</button></div>';
+        box.innerHTML = html;
+        wireCopyButtons(box);
+      }
+      function wireCopyButtons(container) {
+        container.querySelectorAll('.copy-btn').forEach((b) => {
+          b.onclick = () => copyText(decodeURIComponent(b.dataset.copy));
+        });
+      }
+      function copyText(t) {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(t).then(() => showToast('복사했어요.')).catch(() => fallbackCopy(t));
+            return;
+          }
+        } catch (_e) { /* 폴백으로 */ }
+        fallbackCopy(t);
+      }
+      function fallbackCopy(t) {
+        const ta = document.createElement('textarea');
+        ta.value = t;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showToast('복사했어요.'); }
+        catch (_e) { showToast('복사에 실패했어요.'); }
+        document.body.removeChild(ta);
+      }
+
+      // 처음엔 홈 화면부터 보여준다
+      showView('home');
     </script>
   </body>
 </html>

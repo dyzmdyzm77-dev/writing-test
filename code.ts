@@ -11,7 +11,8 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE';
+  text?: string;
   data?: PreviewItem[];
   nodeId?: string;
   changedNodeIds?: string[];
@@ -1072,6 +1073,35 @@ function errStr(e: any): string {
   if (typeof e === 'string') return e;
   if (e.message) return String(e.message);
   try { return JSON.stringify(e); } catch (_e) { return String(e); }
+}
+
+// ── AI 기능(문구 추천 / 번역) — 같은 워커의 다른 경로로 POST 요청 ──
+// NAVER_PROXY_URL은 끝에 '/'가 있으므로 경로를 그대로 이어 붙인다.
+async function postJsonWithTimeout(url: string, body: any, ms: number): Promise<Response> {
+  return Promise.race([
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    new Promise<Response>((_resolve, reject) => setTimeout(() => reject(new Error('타임아웃 ' + ms + 'ms')), ms)),
+  ]);
+}
+
+// 현재 선택 영역 안의 모든 텍스트를 하나의 문자열로 모은다 (직접 입력이 없을 때 사용)
+async function collectSelectedText(): Promise<string> {
+  const selection = figma.currentPage.selection;
+  if (!selection || selection.length === 0) return '';
+  const parts: string[] = [];
+  for (const node of selection) {
+    if (node.type === 'TEXT') {
+      parts.push((node as TextNode).characters);
+    } else {
+      const found = await findAllTextNodes(node, 10000);
+      for (const t of found) parts.push(t.characters);
+    }
+  }
+  return parts.join('\n').trim();
 }
 
 // 진행 중인 키 요청 공유 — 동시 작업들이 각자 키를 다시 가져오지 않게 한다
@@ -3375,6 +3405,58 @@ figma.ui.onmessage = async (msg: any) => {
       }
     } catch (e) {
       console.error("[SELECT_NODES] 오류:", e);
+    }
+    return;
+  }
+
+  // 문구 추천 — 직접 입력이 있으면 그걸, 없으면 선택 영역 텍스트를 대상으로 한다
+  if (msg.type === "RECOMMEND") {
+    figma.ui.postMessage({ type: 'show-loading' });
+    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '문구 추천 받는 중...' });
+    try {
+      const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
+      if (!text) {
+        figma.ui.postMessage({ type: 'hide-loading' });
+        figma.ui.postMessage({ type: 'show-toast', message: '문구를 입력하거나 텍스트를 선택해주세요.' });
+        return;
+      }
+      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text }, 20000);
+      const data = await res.json();
+      figma.ui.postMessage({ type: 'hide-loading' });
+      if (!res.ok || data.error) {
+        figma.ui.postMessage({ type: 'show-toast', message: '추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
+        return;
+      }
+      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: (data && data.suggestions) || [] });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'hide-loading' });
+      figma.ui.postMessage({ type: 'show-toast', message: '추천 실패: ' + errStr(e) });
+    }
+    return;
+  }
+
+  // 번역 — 한국어 ↔ 영어 자동 (직접 입력 우선, 없으면 선택 영역 텍스트)
+  if (msg.type === "TRANSLATE") {
+    figma.ui.postMessage({ type: 'show-loading' });
+    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '번역 중...' });
+    try {
+      const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
+      if (!text) {
+        figma.ui.postMessage({ type: 'hide-loading' });
+        figma.ui.postMessage({ type: 'show-toast', message: '번역할 문구를 입력하거나 텍스트를 선택해주세요.' });
+        return;
+      }
+      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'translate', { text }, 20000);
+      const data = await res.json();
+      figma.ui.postMessage({ type: 'hide-loading' });
+      if (!res.ok || data.error) {
+        figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
+        return;
+      }
+      figma.ui.postMessage({ type: 'translate-result', original: text, translated: (data && data.translated) || '', direction: (data && data.direction) || '' });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'hide-loading' });
+      figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + errStr(e) });
     }
     return;
   }
