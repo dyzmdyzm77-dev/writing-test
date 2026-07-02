@@ -6,15 +6,17 @@ figma.showUI(__html__, { width: UI_INIT_W, height: UI_INIT_H });
 // 직전 UI 크기 추적 (리사이즈 시 반대쪽 가장자리 고정 계산용)
 let uiLastW = UI_INIT_W;
 let uiLastH = UI_INIT_H;
+// 코멘트 말풍선을 클릭하면 우리가 곧바로 선택을 비운다(크기 배지 숨김용).
+// 그때 되돌아오는 빈 선택 메아리(selectionchange)는 흐려짐 상태를 유지한 채 무시해야 한다.
+let suppressSelectionReset = false;
 // 선택 상태 변경 감지
 figma.on('selectionchange', () => {
     const selection = figma.currentPage.selection;
-    const hasSelection = selection && selection.length > 0;
-    // UI에 선택 상태 전송
-    figma.ui.postMessage({
-        type: 'selection-changed',
-        hasSelection: hasSelection
-    });
+    // 우리가 말풍선 클릭 직후 비운 선택의 메아리 → 흐려짐/포커스 상태를 그대로 두고 종료
+    if (suppressSelectionReset) {
+        suppressSelectionReset = false;
+        return;
+    }
     // 캔버스에서 코멘트(어노테이션)를 직접 클릭한 경우 → 그것만 선명, 나머지는 흐리게 + 맨 앞으로
     try {
         const annNodeIds = [];
@@ -30,8 +32,23 @@ figma.on('selectionchange', () => {
                 regularNodes.push(n);
             }
         }
+        // 말풍선(코멘트)만 클릭한 경우: 그것만 선명 + 목록 동기화 후 즉시 선택 해제 → 배지가 뜰 새 없이 사라진다.
+        // (코멘트는 콘텐츠 선택이 아니므로 selection-changed는 보내지 않아 검토 버튼 상태가 흔들리지 않는다)
+        if (annSegIds.length > 0 && regularNodes.length === 0) {
+            updateAnnotationOpacityBySeg(annSegIds);
+            bringAnnotationsToFront(annNodeIds);
+            figma.ui.postMessage({ type: 'canvas-selection', nodeIds: Array.from(new Set(annNodeIds)) });
+            suppressSelectionReset = true;
+            figma.currentPage.selection = []; // 흐려짐은 opacity로 노드에 남고, 선택만 비워 배지 숨김
+            return;
+        }
+        // 그 외(일반 노드 / 혼합 / 빈 선택): UI에 선택 상태 전송
+        figma.ui.postMessage({
+            type: 'selection-changed',
+            hasSelection: selection && selection.length > 0
+        });
         if (annSegIds.length > 0) {
-            // 같은 노드에 여러 코멘트가 있어도, 클릭한 그 코멘트(세그먼트)만 선명하게
+            // 코멘트+일반 혼합 선택(드묾) — 세그먼트 단위로 처리
             updateAnnotationOpacityBySeg(annSegIds);
             bringAnnotationsToFront(annNodeIds);
         }
@@ -1061,12 +1078,14 @@ function buildCorrectedExcluding(originHtml, html) {
     });
     return decodeEntities(out);
 }
-// ≤500자 한 덩어리 검사. 반환: {corrected, errata, types} 또는 null(실패/키만료)
-async function naverSpellChunk(text, key) {
+// SpellerProxy 호출 공통 부분: URL 조립 → fetch → JSON 파싱 → 오류 검사까지.
+// 성공하면 data.message.result(notag_html 포함)를 돌려주고, 실패는 null + naverDiag 설정.
+// 단건(naverSpellChunk)과 배치(naverSpellChunkLines)가 이 헬퍼를 공유한다.
+async function fetchSpellerResult(q, key) {
     try {
         const url = 'https://m.search.naver.com/p/csearch/ocontent/util/SpellerProxy'
             + '?passportKey=' + encodeURIComponent(key)
-            + '&color_blindness=0&q=' + encodeURIComponent(text);
+            + '&color_blindness=0&q=' + encodeURIComponent(q);
         const res = await fetchWithTimeout(url, 8000);
         if (!res.ok) {
             naverDiag = 'SpellerProxy HTTP ' + res.status;
@@ -1092,18 +1111,25 @@ async function naverSpellChunk(text, key) {
         if (!result || typeof result.notag_html !== 'string')
             return null;
         naverOkCount++; // 정상 응답 1건
-        // html + origin_html이 있으면 통계적 교정을 제외하고 재조립, 없으면 notag_html 그대로
-        const corrected = (typeof result.html === 'string' && typeof result.origin_html === 'string')
-            ? buildCorrectedExcluding(result.origin_html, result.html)
-            : decodeEntities(result.notag_html);
-        const types = typeof result.html === 'string' ? extractNaverTypes(result.html) : [];
-        return { corrected, errata: result.errata_count || 0, types };
+        return result;
     }
     catch (e) {
         naverDiag = 'SpellerProxy fetch 실패: ' + errStr(e);
         console.log('[UX-SPELL] SpellerProxy fetch error', e);
         return null;
     }
+}
+// ≤500자 한 덩어리 검사. 반환: {corrected, errata, types} 또는 null(실패/키만료)
+async function naverSpellChunk(text, key) {
+    const result = await fetchSpellerResult(text, key);
+    if (!result)
+        return null;
+    // html + origin_html이 있으면 통계적 교정을 제외하고 재조립, 없으면 notag_html 그대로
+    const corrected = (typeof result.html === 'string' && typeof result.origin_html === 'string')
+        ? buildCorrectedExcluding(result.origin_html, result.html)
+        : decodeEntities(result.notag_html);
+    const types = typeof result.html === 'string' ? extractNaverTypes(result.html) : [];
+    return { corrected, errata: result.errata_count || 0, types };
 }
 async function naverSpellCheck(text) {
     if (!text || !text.trim() || text.length > 500)
@@ -1145,32 +1171,9 @@ async function naverSpellCheck(text) {
 // 줄 수가 안 맞으면 null (호출자가 단건 검사로 폴백).
 async function naverSpellChunkLines(joined, key, lineCount) {
     try {
-        const url = 'https://m.search.naver.com/p/csearch/ocontent/util/SpellerProxy'
-            + '?passportKey=' + encodeURIComponent(key)
-            + '&color_blindness=0&q=' + encodeURIComponent(joined);
-        const res = await fetchWithTimeout(url, 8000);
-        if (!res.ok) {
-            naverDiag = 'SpellerProxy HTTP ' + res.status;
-            console.log('[UX-SPELL]', naverDiag);
+        const result = await fetchSpellerResult(joined, key);
+        if (!result)
             return null;
-        }
-        const raw = await res.text();
-        let data = null;
-        try {
-            data = JSON.parse(raw);
-        }
-        catch (_e) {
-            naverDiag = 'SpellerProxy 응답 JSON 파싱 실패';
-            return null;
-        }
-        if (!data || !data.message || data.message.error) {
-            naverDiag = 'SpellerProxy 오류: ' + (data && data.message && data.message.error ? data.message.error : '알 수 없음');
-            return null;
-        }
-        const result = data.message.result;
-        if (!result || typeof result.notag_html !== 'string')
-            return null;
-        naverOkCount++;
         // html + origin_html이 있으면 줄별로 통계 교정 제외 + 유형 추출
         if (typeof result.html === 'string' && typeof result.origin_html === 'string') {
             const hLines = result.html.split(/<br\s*\/?>/i);
@@ -2358,7 +2361,9 @@ function createCommentFrame(key, label, fontName, anchorX, anchorY, absX, absY) 
         group.name = COMMENT_DISPLAY_NAME;
         if (!annotationsVisible)
             group.visible = false;
-        group.locked = false; // 클릭해서 앞으로 가져올 수 있게 잠그지 않음 (끌어도 폴링이 제자리로 되돌림)
+        // 잠그지 않는다: 클릭으로 선택돼야 "그 코멘트만 선명" 동작이 작동한다.
+        // 클릭 직후 selectionchange 핸들러가 선택을 즉시 비워 크기 배지는 뜨지 않는다.
+        group.locked = false;
         // 그룹 하나만 추적 (배경/텍스트는 그룹 안에 있어 함께 이동·제거됨)
         tagAnnotation(group, key);
         annotationOffset.set(key, { dx: group.x - absX, dy: group.y - absY });
@@ -2480,10 +2485,11 @@ async function createAnnotations(previewData, onProgress) {
         for (const h of job.highlights) {
             createHighlightRect(h.key, h.geom, job.absX, job.absY);
         }
-        // 코멘트는 씬 노드(말풍선) 대신 네이티브 어노테이션으로 — 클릭해도 크기 배지가 안 뜬다
-        if (job.comments.length > 0) {
-            const md = job.comments.map((c) => '- ' + c.label).join('\n');
-            setNativeAnnotation(job.nodeId, md);
+        // 코멘트는 캔버스 말풍선(씬 노드)으로 그린다. 네이티브 어노테이션(node.annotations)은
+        // Dev Mode 전용이라 일반 디자인 모드에서 안 보여서, 세그먼트별 초록 말풍선으로 표시한다.
+        // (클릭 시 Figma 크기 배지가 함께 뜨는 건 알려진 트레이드오프)
+        for (const c of job.comments) {
+            createCommentFrame(c.key, c.label, fontName, c.anchorX, c.anchorY, job.absX, job.absY);
         }
     }
     // 위치 추적은 documentchange 이벤트가 담당 (별도 폴링 없음)
@@ -3195,27 +3201,35 @@ figma.ui.onmessage = async (msg) => {
             removeAnnotationByNodeId(id);
         return;
     }
-    // 선택한 항목들의 어노테이션만 숨기기/보이기 토글
-    // (하나라도 보이면 전부 숨기고, 전부 숨겨져 있으면 보이기)
+    // 선택한 항목들의 어노테이션만 숨기기/보이기.
+    // msg.hidden(boolean)이 오면 전부 그 상태로 맞추고(일괄 동일 적용),
+    // 없으면 토글(하나라도 보이면 전부 숨기고, 전부 숨겨져 있으면 보이기).
     if (msg.type === "TOGGLE_ANNOTATIONS_NODES") {
         const ids = msg.nodeIds || [];
-        let anyVisible = false;
-        for (const id of ids) {
-            if (annotatedNodeIds.has(id)) {
-                anyVisible = true;
-                break;
-            } // 네이티브 어노테이션이 보이는 상태
-            const arr = annotationsByNode.get(id);
-            if (!arr)
-                continue;
-            for (const e of arr) {
-                if (e.ann && !e.ann.removed && e.ann.visible) {
+        let hide;
+        if (typeof msg.hidden === 'boolean') {
+            hide = msg.hidden;
+        }
+        else {
+            let anyVisible = false;
+            for (const id of ids) {
+                if (annotatedNodeIds.has(id)) {
                     anyVisible = true;
                     break;
+                } // 네이티브 어노테이션이 보이는 상태
+                const arr = annotationsByNode.get(id);
+                if (!arr)
+                    continue;
+                for (const e of arr) {
+                    if (e.ann && !e.ann.removed && e.ann.visible) {
+                        anyVisible = true;
+                        break;
+                    }
                 }
+                if (anyVisible)
+                    break;
             }
-            if (anyVisible)
-                break;
+            hide = anyVisible;
         }
         for (const id of ids) {
             const arr = annotationsByNode.get(id);
@@ -3223,14 +3237,14 @@ figma.ui.onmessage = async (msg) => {
                 for (const e of arr) {
                     try {
                         if (e.ann && !e.ann.removed)
-                            e.ann.visible = !anyVisible;
+                            e.ann.visible = !hide;
                     }
                     catch (_e) { }
                 }
             }
             // 네이티브 어노테이션 토글 (제거/복원)
             const node = annotationNodeCache.get(id);
-            if (anyVisible) {
+            if (hide) {
                 try {
                     if (node && !node.removed && annotatedNodeIds.has(id))
                         node.annotations = [];

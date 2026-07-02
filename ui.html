@@ -306,12 +306,46 @@
         font-size: 14px;
         margin: 0 -16px; /* 호버/선택 표시가 카드 좌우 끝까지 차도록 (구분선과 같은 폭) */
         padding: 12px 19px; /* 보더 1px 포함 좌우 여백 20px, 위아래 12px */
+        display: flex; /* 좌측 눈 아이콘 + 우측 내용 */
+        align-items: center; /* 눈 아이콘을 내용 높이 기준 세로 가운데로 */
+        gap: 12px;
       }
       .preview-item:hover {
         background: #F7F7F7;
       }
       .preview-item.selected {
         background: #E2F1FF; /* 선택 시 배경색만 변경 (테두리 없음) */
+      }
+      /* 항목별 숨기기/보이기 눈 아이콘 */
+      .preview-eye-btn {
+        flex-shrink: 0;
+        width: 24px !important; /* 전역 button(width:100%, min-width:64px) 무시 */
+        height: 24px !important; /* 전역 button height:48px !important 무시 */
+        min-width: unset;
+        padding: 0;
+        margin: 0;
+        line-height: 0;
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: #353535;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .preview-eye-btn svg {
+        display: block;
+      }
+      .preview-item-content {
+        flex: 1;
+        min-width: 0; /* 긴 텍스트가 flex 칸을 넘치지 않게 */
+      }
+      /* 숨김 상태면 내용을 흐리게 + 아이콘을 회색으로 */
+      .preview-item.annotation-hidden .preview-item-content {
+        opacity: 0.45;
+      }
+      .preview-item.annotation-hidden .preview-eye-btn {
+        color: #B0B0B0;
       }
       /* 변경 전/제안은 박스 없이 가로 구분선 하나로만 구분 */
       .preview-before-box {
@@ -574,7 +608,6 @@
           </label>
           <div class="preview-toolbar-actions">
             <button id="clearAnnotations" class="toggle-annotations-btn" disabled>코멘트 삭제</button>
-            <button id="toggleAnnotations" class="toggle-annotations-btn" disabled>코멘트 숨기기</button>
           </div>
         </div>
       </div>
@@ -612,6 +645,30 @@
     <script>
       let previewData = [];
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
+      const hiddenNodeIds = new Set(); // 캔버스에서 코멘트를 숨긴 항목들 (항목별 눈 아이콘)
+
+      // 항목별 숨기기/보이기 아이콘 (눈 / 눈 빗금)
+      const EYE_SVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.6"/></svg>';
+      const EYE_OFF_SVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.9 5.2A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.8 3.6M6.3 6.3A17 17 0 0 0 2 12s3.5 7 10 7c1.9 0 3.5-.5 5-1.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+      // 여러 항목의 코멘트 숨김 상태를 한 번에 같은 값으로 맞춘다 (아이콘/흐림/캔버스 일괄 갱신)
+      function setItemsHidden(ids, hidden) {
+        const idSet = new Set(ids);
+        ids.forEach(id => { if (hidden) hiddenNodeIds.add(id); else hiddenNodeIds.delete(id); });
+        document.querySelectorAll('.preview-item').forEach(el => {
+          if (!idSet.has(el.dataset.nodeId)) return;
+          el.classList.toggle('annotation-hidden', hidden);
+          const btn = el.querySelector('.preview-eye-btn');
+          if (btn) {
+            btn.innerHTML = hidden ? EYE_OFF_SVG : EYE_SVG;
+            const lbl = hidden ? '캔버스에 코멘트 보이기' : '캔버스에서 코멘트 숨기기';
+            btn.title = lbl;
+            btn.setAttribute('aria-label', lbl);
+          }
+        });
+        // 백엔드에 명시적 상태 전달(hidden) — 선택 항목들이 섞여 있어도 모두 같은 상태로 맞춘다
+        parent.postMessage({ pluginMessage: { type: 'TOGGLE_ANNOTATIONS_NODES', nodeIds: ids, hidden: hidden } }, '*');
+      }
       // 검토 후 스크롤 동작 예약:
       // - 최초 검토: 목록 맨 위로
       // - 추가 검토: 새로 추가된 카드 중 가장 위의 것이 화면 중앙에 오도록
@@ -699,6 +756,7 @@
           return;
         }
         selectedNodeIds.clear(); // 미리보기 새로고침 시 선택 초기화
+        hiddenNodeIds.clear(); // 새 검토면 코멘트가 다시 다 보이게 시작
         const selectAllCheckbox = document.getElementById('selectAll');
         if (selectAllCheckbox) {
           selectAllCheckbox.checked = false;
@@ -809,13 +867,11 @@
         document.addEventListener('mouseup', () => { active = null; });
       })();
 
-      // 코멘트 삭제/숨기기는 카드를 선택했을 때만 활성화
+      // 코멘트 삭제는 카드를 선택했을 때만 활성화
       function updateToolbarButtonsState() {
         const hasSel = selectedNodeIds.size > 0;
         const clearBtn = document.getElementById('clearAnnotations');
-        const toggleBtn = document.getElementById('toggleAnnotations');
         if (clearBtn) clearBtn.disabled = !hasSel;
-        if (toggleBtn) toggleBtn.disabled = !hasSel;
       }
 
       document.getElementById('clearAnnotations').onclick = () => {
@@ -837,11 +893,6 @@
         displayPreview(previewData);
       };
 
-      document.getElementById('toggleAnnotations').onclick = () => {
-        if (selectedNodeIds.size === 0) return;
-        parent.postMessage({ pluginMessage: { type: 'TOGGLE_ANNOTATIONS_NODES', nodeIds: Array.from(selectedNodeIds) } }, '*');
-      };
-
       document.getElementById('cancel').onclick = () => {
         parent.postMessage({ pluginMessage: { type: 'CANCEL' } }, '*');
         document.getElementById('previewSection').classList.remove('active');
@@ -851,6 +902,7 @@
         }
         previewData = [];
         selectedNodeIds.clear();
+        hiddenNodeIds.clear();
         const selectAllCheckbox = document.getElementById('selectAll');
         if (selectAllCheckbox) {
           selectAllCheckbox.checked = false;
@@ -872,16 +924,6 @@
       }
 
       window.addEventListener('message', (event) => {
-        if (event.data.pluginMessage.type === 'annotations-visibility') {
-          const btn = document.getElementById('toggleAnnotations');
-          if (btn) btn.textContent = event.data.pluginMessage.visible ? '코멘트 숨기기' : '코멘트 보이기';
-        }
-
-        if (event.data.pluginMessage.type === 'annotations-cleared') {
-          const btn = document.getElementById('toggleAnnotations');
-          if (btn) btn.textContent = '코멘트 숨기기';
-        }
-
         if (event.data.pluginMessage.type === 'selection-changed') {
           updatePreviewButtonState(event.data.pluginMessage.hasSelection);
         }
@@ -1203,6 +1245,9 @@
           if (frameGroup.name) {
             const groupHeader = document.createElement('div');
             groupHeader.className = 'preview-group-header';
+            groupHeader.setAttribute('role', 'button');
+            groupHeader.tabIndex = 0;
+            groupHeader.setAttribute('aria-label', frameGroup.name + ' 목록 접기/펼치기');
             const headerText = document.createElement('span');
             headerText.className = 'preview-group-header-text';
             headerText.textContent = frameGroup.name;
@@ -1219,6 +1264,13 @@
               else collapsedFrames.add(frameKey);
               groupEl.classList.toggle('collapsed');
             });
+            // 키보드(Enter/Space)로도 접기/펼치기
+            groupHeader.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                groupHeader.click();
+              }
+            });
             groupEl.appendChild(groupHeader);
           }
           const groupBody = document.createElement('div');
@@ -1234,6 +1286,9 @@
           div.className = 'preview-item';
           div.style.cursor = 'pointer';
           div.dataset.nodeId = item.nodeId;
+          div.setAttribute('role', 'button');
+          div.tabIndex = 0;
+          div.setAttribute('aria-label', '수정 제안: ' + item.before + ' → ' + item.after);
           
           // 선택된 항목이면 선택 상태 표시
           if (selectedNodeIds.has(item.nodeId)) {
@@ -1247,7 +1302,30 @@
           const reasonItems = item.reason ? [...new Set(item.reason.split(' - ').map(r => r.trim()).filter(r => r))] : [];
           const reasonChips = reasonItems.map(r => `<span class="reason-item">${escapeHtml(r)}</span>`).join('');
 
-          div.innerHTML = `
+          // 항목별 숨기기/보이기 눈 아이콘 (맨 앞)
+          const isHidden = hiddenNodeIds.has(item.nodeId);
+          if (isHidden) div.classList.add('annotation-hidden');
+          const eyeBtn = document.createElement('button');
+          eyeBtn.className = 'preview-eye-btn';
+          eyeBtn.tabIndex = -1; // 항목(div) 포커스로 충분
+          eyeBtn.innerHTML = isHidden ? EYE_OFF_SVG : EYE_SVG;
+          const eyeLbl = isHidden ? '캔버스에 코멘트 보이기' : '캔버스에서 코멘트 숨기기';
+          eyeBtn.title = eyeLbl;
+          eyeBtn.setAttribute('aria-label', eyeLbl);
+          eyeBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 항목 선택/이동과 분리
+            const nowHidden = !hiddenNodeIds.has(item.nodeId);
+            // 선택된 항목들 중 하나의 눈을 누르면 → 선택 항목 전체를 같은 상태로. 그 외엔 이 항목만.
+            const targets = (selectedNodeIds.size > 0 && selectedNodeIds.has(item.nodeId))
+              ? Array.from(selectedNodeIds)
+              : [item.nodeId];
+            setItemsHidden(targets, nowHidden);
+          });
+
+          // 내용 래퍼 (눈 아이콘 우측)
+          const contentEl = document.createElement('div');
+          contentEl.className = 'preview-item-content';
+          contentEl.innerHTML = `
             <div class="preview-before-box">
               <span class="preview-label-before">원문</span>
               <div class="preview-before">${beforeHtml}</div>
@@ -1260,7 +1338,10 @@
               <div class="preview-after">${afterHtml}</div>
             </div>
           `;
-          
+
+          div.appendChild(eyeBtn);
+          div.appendChild(contentEl);
+
           // Wrapper에 아이템 추가
           wrapper.appendChild(div);
           
@@ -1315,7 +1396,15 @@
               }, '*');
             }
           });
-          
+
+          // 키보드(Enter/Space)로도 항목 선택/이동
+          div.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              div.click();
+            }
+          });
+
           groupBody.appendChild(wrapper);
           });
 
