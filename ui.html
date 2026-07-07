@@ -1063,6 +1063,7 @@
 
     <script>
       let previewData = [];
+      let lastSelectionText = ''; // 캔버스에서 마지막으로 선택한 영역의 텍스트 (추천/번역 입력창 자동 채움용)
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
       const reportedKeys = new Set(); // 이미 "오수정 제보"한 항목 (nodeId::after 조합) — 재렌더링돼도 유지
       const pendingReports = new Map(); // 전송 중인 제보: reportKey → { panel, btn, submit } (결과 회신 시 해당 UI 갱신)
@@ -1145,6 +1146,14 @@
         } else {
           if (ps) ps.classList.remove('active');
           if (bg) bg.classList.remove('active');
+        }
+        // 추천/번역 화면으로 들어올 때 입력창이 비어 있으면 마지막 선택 텍스트로 자동 채움
+        if (name === 'recommend' && lastSelectionText) {
+          const el = document.getElementById('recommendInput');
+          if (el && !el.value.trim()) el.value = lastSelectionText;
+        } else if (name === 'translate' && lastSelectionText) {
+          const el = document.getElementById('translateInput');
+          if (el && !el.value.trim()) el.value = lastSelectionText;
         }
         adjustTopPadding();
         updateReviewGuide();
@@ -1427,6 +1436,15 @@
 
         if (event.data.pluginMessage.type === 'translate-result') {
           renderTranslate(event.data.pluginMessage.original || '', event.data.pluginMessage.translated || '', event.data.pluginMessage.direction || '');
+        }
+
+        // 캔버스에서 프레임/텍스트 선택 시 → 추천/번역 입력창에 자동 채움
+        if (event.data.pluginMessage.type === 'selection-text') {
+          lastSelectionText = event.data.pluginMessage.text || '';
+          if (lastSelectionText) {
+            if (currentView === 'recommend') document.getElementById('recommendInput').value = lastSelectionText;
+            else if (currentView === 'translate') document.getElementById('translateInput').value = lastSelectionText;
+          }
         }
 
         if (event.data.pluginMessage.type === 'show-loading') {

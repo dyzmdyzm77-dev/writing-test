@@ -76,6 +76,13 @@ figma.on('selectionchange', () => {
             }
         }
         figma.ui.postMessage({ type: 'canvas-selection', nodeIds: Array.from(targetIds) });
+        // 추천/번역 화면 자동 입력용: 선택 영역(프레임/텍스트) 안의 문구를 UI로 전달
+        if (regularNodes.length > 0) {
+            collectSelectedText().then((t) => {
+                if (t && t.trim())
+                    figma.ui.postMessage({ type: 'selection-text', text: t });
+            }).catch(() => { });
+        }
     }
     catch (_e) { }
 });
