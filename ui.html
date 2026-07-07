@@ -237,9 +237,9 @@
         background: #ffffff;
         border: 1px solid #D9D9D9;
         border-radius: 10px;
-        padding: 16px 16px 0; /* 하단 패딩 제거 — 마지막 행의 호버/선택 배경이 카드 바닥까지 닿게 */
+        padding: 16px; /* 항목이 박스가 되어 카드 안쪽에 여백을 두고 배치 */
         margin-bottom: 16px; /* 그룹 카드 사이 간격 */
-        overflow: hidden; /* 행 배경이 라운드 모서리에 맞게 잘리도록 */
+        overflow: hidden;
       }
       .preview-group-header {
         position: relative;
@@ -304,20 +304,13 @@
         bottom: 0;
         border-bottom: 1px solid #E5E5E5;
       }
+      /* 타이틀 구분선과 첫 박스 사이 간격 */
+      .preview-group-body {
+        margin-top: 12px;
+      }
+      /* 항목은 각각 박스 — 사이는 구분선 대신 간격으로 */
       .preview-item-wrapper {
-        margin-bottom: 0; /* 행 간격은 항목 안쪽 패딩으로 — 호버가 구분선까지 차게 */
-      }
-      /* 항목 사이는 박스 대신 카드 끝까지 이어지는 가로 구분선 */
-      .preview-item-wrapper:not(:last-child) {
-        position: relative;
-      }
-      .preview-item-wrapper:not(:last-child)::after {
-        content: '';
-        position: absolute;
-        left: -16px;
-        right: -16px;
-        bottom: 0;
-        border-bottom: 1px solid #E5E5E5;
+        margin-bottom: 8px;
       }
       .preview-item-wrapper:last-child {
         margin-bottom: 0;
@@ -330,11 +323,11 @@
       }
       .preview-item {
         background: #ffffff;
-        border: 1px solid transparent; /* 평소엔 박스 없음 — 선택 시 파란 테두리 자리 확보 */
-        border-radius: 0;
+        border: 1px solid #E5E5E5; /* 항목마다 박스 테두리 */
+        border-radius: 8px;
         font-size: 14px;
-        margin: 0 -16px; /* 호버/선택 표시가 카드 좌우 끝까지 차도록 (구분선과 같은 폭) */
-        padding: 12px 19px; /* 보더 1px 포함 좌우 여백 20px, 위아래 12px */
+        margin: 0;
+        padding: 12px 14px;
         display: flex; /* 좌측 내용 + 우측 제보 버튼 */
         flex-wrap: wrap; /* 제보 입력창이 아래 줄 전체 폭으로 내려오도록 */
         align-items: flex-start;
@@ -342,9 +335,11 @@
       }
       .preview-item:hover {
         background: #F7F7F7;
+        border-color: #D5D5D5;
       }
       .preview-item.selected {
-        background: #E2F1FF; /* 선택 시 배경색만 변경 (테두리 없음) */
+        background: #E2F1FF;
+        border-color: #1D6CEB; /* 선택 시 파란 테두리 */
       }
       .preview-item-content {
         flex: 1;
