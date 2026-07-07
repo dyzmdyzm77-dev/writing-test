@@ -44,8 +44,11 @@ export default {
     if (path === '/report') return handleReport(request, env);
     if (path === '/admin') return handleAdmin(request, env);
 
-    // 기본 경로(GET /): 네이버 passportKey 긁어오기
-    return handlePassportKey();
+    // 루트(/)만 네이버 passportKey 반환 (플러그인이 맞춤법 검사에 사용)
+    if (path === '/') return handlePassportKey();
+
+    // 그 외 경로는 passportKey가 새지 않도록 404
+    return Response.json({ error: 'Not found' }, { status: 404, headers: CORS });
   },
 };
 
