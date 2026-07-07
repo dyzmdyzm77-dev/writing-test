@@ -981,9 +981,6 @@
             <input type="checkbox" id="selectAll" />
             <span>전체 선택</span>
           </label>
-          <div class="preview-toolbar-actions">
-            <button id="clearAnnotations" class="toggle-annotations-btn" disabled>코멘트 삭제</button>
-          </div>
         </div>
       </div>
     </div>
@@ -1315,25 +1312,6 @@
         const clearBtn = document.getElementById('clearAnnotations');
         if (clearBtn) clearBtn.disabled = !hasSel;
       }
-
-      document.getElementById('clearAnnotations').onclick = () => {
-        if (selectedNodeIds.size === 0) return;
-        // 캔버스의 코멘트/형광펜 삭제
-        parent.postMessage({ pluginMessage: { type: 'CLEAR_ANNOTATIONS_NODES', nodeIds: Array.from(selectedNodeIds) } }, '*');
-        // 목록에서도 해당 카드 제거
-        previewData = previewData.filter(item => !selectedNodeIds.has(item.nodeId));
-        selectedNodeIds.clear();
-        const selectAllCb = document.getElementById('selectAll');
-        if (selectAllCb) selectAllCb.checked = false;
-        updateToolbarButtonsState();
-        if (previewData.length === 0) {
-          const btnGroupEl = document.querySelector('.button-group');
-          if (btnGroupEl) btnGroupEl.classList.remove('active');
-          document.getElementById('previewSection').classList.remove('active');
-          setResultHeaderVisible(false);
-        }
-        displayPreview(previewData);
-      };
 
       // 검토 결과 + 캔버스 코멘트를 모두 지우고 빈 화면으로 되돌린다
       function resetReview() {
