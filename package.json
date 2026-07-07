@@ -1,7 +1,7 @@
 {
-  "name": "UX-Writing-Test",
+  "name": "s1-ux-writing-assistant",
   "version": "1.0.0",
-  "description": "Your Figma Plugin",
+  "description": "S1 UX Writing Assistant (Figma Plugin)",
   "main": "code.js",
   "scripts": {
     "build": "node scripts/build-glossary.js && tsc -p tsconfig.json",
