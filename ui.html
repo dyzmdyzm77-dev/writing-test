@@ -383,11 +383,15 @@
         width: auto !important;
         min-width: unset;
         height: 32px !important;
+        line-height: 1 !important; /* 전역 button의 line-height:48px 덮어써서 글자 세로 중앙 정렬 */
         padding: 0 14px;
         margin: 0;
         font-size: 13px;
         border-radius: 6px;
         cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
       .report-cancel {
         background: #F0F0F0;
