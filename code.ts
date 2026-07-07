@@ -1058,6 +1058,11 @@ let naverOkCount = 0; // 이번 검토에서 SpellerProxy 정상 응답 건수
 // ↓ 배포 후 본인 워커 주소로 교체할 것 (manifest.json allowedDomains에도 같은 도메인 추가)
 const NAVER_PROXY_URL = 'https://writingtest.dyzmdyzm77.workers.dev/';
 
+// 오수정 제보 저장/열람은 별도 Vercel 앱(ux-writing-reports)에서 처리한다.
+// 저장 API: POST /api/report, 관리자 페이지: https://report-admin-weld.vercel.app/
+// (manifest.json allowedDomains에도 이 도메인 추가)
+const REPORT_URL = 'https://report-admin-weld.vercel.app/api/report';
+
 // 타임아웃 있는 fetch — 한 요청이 멈춰도 그 슬롯이 영원히 막히지 않게 한다.
 // Figma 플러그인 런타임엔 AbortController가 없어 Promise.race로 구현 (느린 fetch는 버려지고 슬롯만 푼다).
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
@@ -3429,7 +3434,7 @@ figma.ui.onmessage = async (msg: any) => {
         comment: msg.comment || '',
         fileName: (figma.root && figma.root.name) || '',
       };
-      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'report', payload, 15000);
+      const res = await postJsonWithTimeout(REPORT_URL, payload, 15000);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || (data && data.error)) {
         figma.ui.postMessage({ type: 'report-result', key: msg.key, ok: false, error: (data && data.error) ? data.error : ('HTTP ' + res.status) });

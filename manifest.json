@@ -13,7 +13,8 @@
   "networkAccess": {
     "allowedDomains": [
       "https://m.search.naver.com",
-      "https://writingtest.dyzmdyzm77.workers.dev"
+      "https://writingtest.dyzmdyzm77.workers.dev",
+      "https://report-admin-weld.vercel.app"
     ]
   }
 }
