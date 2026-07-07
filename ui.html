@@ -79,8 +79,29 @@
         box-sizing: border-box;
         z-index: 100;
       }
-      /* 검토 빈 화면(결과 없음)에서는 버튼 아래 구분선 숨김 */
-      #topFixed.no-border { border-bottom: none; }
+      /* 세 기능 화면 헤더는 flex 컬럼 (showView가 display:flex로 표시) */
+      #topFixed, #recommendHeader, #translateHeader {
+        flex-direction: column;
+      }
+      /* 추천/번역 헤더는 동일 높이로 고정 → 버튼이 항상 같은 위치 */
+      #recommendHeader, #translateHeader {
+        min-height: 320px;
+      }
+      /* 입력창이 헤더의 남는 세로 공간을 채움 (버튼은 항상 바닥) */
+      #recommendHeader .feature-input, #translateHeader .feature-input {
+        flex: 1 1 auto;
+      }
+      /* 검토 빈 화면: 동일 높이 + 버튼 아래 구분선 숨김 + 예시 그래픽이 남는 공간을 채워 세로 가운데 */
+      #topFixed.empty-review {
+        min-height: 320px;
+        border-bottom: none;
+      }
+      #topFixed.empty-review #reviewEmpty {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
       .top-fixed #preview {
         margin-bottom: 0; /* 고정 헤더 안에서는 하단 여백 제거 */
       }
@@ -687,7 +708,7 @@
         margin: 4px auto 14px;
         text-align: center;
       }
-      .review-guide svg { display: block; max-width: 280px; margin: 0 auto; }
+      .review-guide svg { display: block; max-width: 200px; margin: 0 auto; }
       .review-guide-caption {
         margin-top: 12px;
         font-size: 12px;
@@ -1104,9 +1125,9 @@
       function showView(name) {
         currentView = name;
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
-        document.getElementById('topFixed').style.display = name === 'review' ? 'block' : 'none';
-        document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'block' : 'none';
-        document.getElementById('translateHeader').style.display = name === 'translate' ? 'block' : 'none';
+        document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
+        document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'flex' : 'none';
+        document.getElementById('translateHeader').style.display = name === 'translate' ? 'flex' : 'none';
         document.getElementById('recommendSection').style.display = name === 'recommend' ? 'block' : 'none';
         document.getElementById('translateSection').style.display = name === 'translate' ? 'block' : 'none';
         // 상단 탭 바: 홈이 아닐 때만 표시하고 현재 탭을 강조
@@ -1145,7 +1166,7 @@
         if (resetBtn) resetBtn.classList.toggle('visible', currentView === 'review' && hasResults);
         // 검토 빈 화면에서는 헤더 하단 구분선 숨김 (결과가 뜨면 다시 표시)
         const topFixed = document.getElementById('topFixed');
-        if (topFixed) topFixed.classList.toggle('no-border', currentView === 'review' && !hasResults);
+        if (topFixed) topFixed.classList.toggle('empty-review', currentView === 'review' && !hasResults);
         adjustTopPadding(); // 헤더 안 일러스트가 켜/꺼지며 헤더 높이가 바뀌므로 본문 여백 재계산
       }
       adjustTopPadding();
