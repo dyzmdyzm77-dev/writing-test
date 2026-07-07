@@ -1079,11 +1079,16 @@
         document.querySelectorAll('.tab-btn').forEach((t) => {
           t.classList.toggle('active', t.dataset.tab === name);
         });
-        // 검토 결과 영역/하단 버튼은 '검토' 화면에서만 보인다
-        if (name !== 'review') {
-          const ps = document.getElementById('previewSection');
+        // 검토 결과 영역/하단 버튼은 '검토' 화면에서만 보인다.
+        // 다른 탭으로 나가면 숨기고, '검토'로 돌아오면 결과가 있을 때 다시 복원한다.
+        const ps = document.getElementById('previewSection');
+        const bg = document.querySelector('.button-group');
+        const hasResults = previewData && previewData.length > 0;
+        if (name === 'review') {
+          if (ps) ps.classList.toggle('active', hasResults);
+          if (bg) bg.classList.toggle('active', hasResults);
+        } else {
           if (ps) ps.classList.remove('active');
-          const bg = document.querySelector('.button-group');
           if (bg) bg.classList.remove('active');
         }
         adjustTopPadding();
