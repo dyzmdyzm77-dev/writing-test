@@ -678,16 +678,17 @@
       /* 검토 전 사용법 예시 (결과 없을 때만 JS로 표시) */
       .review-guide {
         display: none;
-        max-width: 280px;
+        max-width: 300px;
         margin: 4px auto 14px;
         text-align: center;
       }
-      .review-guide svg { display: block; }
+      .review-guide svg { display: block; max-width: 280px; margin: 0 auto; }
       .review-guide-caption {
         margin-top: 12px;
-        font-size: 13px;
+        font-size: 12px;
         color: #757575;
         line-height: 1.5;
+        white-space: nowrap; /* 각 줄이 접히지 않게 → <br> 기준 항상 2줄 유지 */
       }
       .review-guide-caption b { color: #353535; font-weight: 600; }
 
@@ -966,7 +967,7 @@
           </g>
           <path d="M150 92l0 26 6-7 5 10 4-2-5-9 9-1z" fill="#111111" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>
         </svg>
-        <div class="review-guide-caption">프레임이나 레이어를 선택하면 이렇게 파란 테두리가 생겨요.<br>그다음 <b>[검토하기]</b> 버튼을 눌러주세요.</div>
+        <div class="review-guide-caption">프레임이나 레이어를 선택하면 파란 테두리가 생겨요.<br>그다음 <b>[검토하기]</b> 버튼을 눌러주세요.</div>
       </div>
       <button id="preview" class="button-primary button-full-width">검토하기</button>
       <div id="resultHeader" class="result-header">
