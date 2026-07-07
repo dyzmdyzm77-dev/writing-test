@@ -82,6 +82,35 @@
       .title-section {
         margin-bottom: 16px;
       }
+      /* 검토 화면: 타이틀 + 초기화 버튼 한 줄 배치 */
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .reset-btn {
+        display: none; /* 결과가 있을 때만 JS로 표시 */
+        width: auto !important;
+        height: auto !important;
+        min-width: unset;
+        line-height: normal !important;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        padding: 5px 10px;
+        margin: 0;
+        background: none;
+        border: 1px solid #D9D9D9;
+        border-radius: 6px;
+        color: #757575;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .reset-btn.visible { display: inline-flex; }
+      .reset-btn:hover { background: #F5F5F5; color: #353535; border-color: #C4C4C4; }
+      .reset-btn svg { display: block; }
       .title {
         font-size: 16px;
         font-weight: 600;
@@ -915,7 +944,13 @@
     <div id="topFixed" class="top-fixed">
       <button class="back-btn" data-back>← 홈</button>
       <div class="title-section">
-        <div class="title">Writing 검토하기</div>
+        <div class="title-row">
+          <div class="title">Writing 검토하기</div>
+          <button id="resetReview" class="reset-btn" title="검토 결과와 캔버스 코멘트를 모두 초기화">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 11a8 8 0 1 0-.9 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 4v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            초기화
+          </button>
+        </div>
       </div>
       <!-- 검토 전(결과 없을 때) 사용법 예시 일러스트 -->
       <div id="reviewEmpty" class="review-guide">
@@ -1106,6 +1141,9 @@
         const ps = document.getElementById('previewSection');
         const hasResults = ps && ps.classList.contains('active');
         g.style.display = (currentView === 'review' && !hasResults) ? 'block' : 'none';
+        // 초기화 버튼: '검토' 화면 + 결과가 있을 때만 표시
+        const resetBtn = document.getElementById('resetReview');
+        if (resetBtn) resetBtn.classList.toggle('visible', currentView === 'review' && hasResults);
         adjustTopPadding(); // 헤더 안 일러스트가 켜/꺼지며 헤더 높이가 바뀌므로 본문 여백 재계산
       }
       adjustTopPadding();
@@ -1297,21 +1335,22 @@
         displayPreview(previewData);
       };
 
-      document.getElementById('cancel').onclick = () => {
-        parent.postMessage({ pluginMessage: { type: 'CANCEL' } }, '*');
+      // 검토 결과 + 캔버스 코멘트를 모두 지우고 빈 화면으로 되돌린다
+      function resetReview() {
+        parent.postMessage({ pluginMessage: { type: 'CANCEL' } }, '*'); // 캔버스 어노테이션 제거
         document.getElementById('previewSection').classList.remove('active');
         const buttonGroup = document.querySelector('.button-group');
-        if (buttonGroup) {
-          buttonGroup.classList.remove('active');
-        }
+        if (buttonGroup) buttonGroup.classList.remove('active');
         previewData = [];
         selectedNodeIds.clear();
         reportedKeys.clear();
         const selectAllCheckbox = document.getElementById('selectAll');
-        if (selectAllCheckbox) {
-          selectAllCheckbox.checked = false;
-        }
-      };
+        if (selectAllCheckbox) selectAllCheckbox.checked = false;
+        setResultHeaderVisible(false); // '검토 결과 N건' 헤더 숨김
+        updateReviewGuide();           // 사용법 예시 일러스트 다시 표시 + 초기화 버튼 숨김
+      }
+      document.getElementById('cancel').onclick = resetReview;
+      document.getElementById('resetReview').onclick = resetReview;
 
       // 토스트 알림 표시 함수
       function showToast(message) {
