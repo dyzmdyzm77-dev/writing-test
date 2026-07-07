@@ -5,7 +5,7 @@
 //   POST /translate   → 한국어 ↔ 영어 번역 (Gemini)
 //   POST /recommend   → UX 문구 대안 3개 추천 (Gemini)
 //   POST /report      → "이 수정안 잘못됐어요" 오수정 제보 저장 (Cloudflare KV)
-//   GET  /admin       → 저장된 제보를 모아 보는 관리자 웹페이지 (토큰 보호)
+//   GET  /admin       → 저장된 제보를 모아 보는 관리자 웹페이지 (키 없이 접속)
 //
 // 왜 워커가 필요한가:
 //   1) 네이버 검색페이지는 CORS 헤더가 없어 플러그인에서 직접 못 긁는다 → 여기서 대신 긁는다.
@@ -18,8 +18,7 @@
 //   2) 제보 저장소용 KV 만들기: Storage & Databases → KV → Create namespace (예: ux-writing-reports).
 //      그런 다음 이 워커 → Settings → Bindings → Add → KV namespace,
 //      Variable name 은 반드시 REPORTS 로 지정하고 위에서 만든 namespace 선택.
-//   3) 관리자 접속용 비밀번호: Variables and Secrets 에 ADMIN_TOKEN (원하는 문자열, Encrypt 권장) 추가.
-//      관리자 페이지는  https://<워커주소>/admin?key=<ADMIN_TOKEN>  으로 접속.
+//   3) 관리자 페이지는 별도 키 없이  https://<워커주소>/admin  으로 접속(누구나 열람 가능).
 //   설정 후 이 파일을 붙여넣어 Deploy.
 
 const CORS = {
@@ -229,28 +228,21 @@ async function handleReport(request, env) {
   return Response.json({ ok: true }, { headers: CORS });
 }
 
-// ── 관리자 페이지 (토큰 보호, 제보 목록 열람) ────────────────
+// ── 관리자 페이지 (키 없이 열람) ─────────────────────────────
 async function handleAdmin(request, env) {
   const url = new URL(request.url);
-  const key = url.searchParams.get('key') || '';
 
-  if (!env || !env.ADMIN_TOKEN) {
-    return htmlResponse(adminNotice('ADMIN_TOKEN 미설정', '워커 Settings > Variables and Secrets 에 ADMIN_TOKEN 을 추가한 뒤 <code>?key=</code> 로 접속하세요.'), 500);
-  }
-  if (key !== env.ADMIN_TOKEN) {
-    return htmlResponse(adminLogin(), 401);
-  }
-  if (!env.REPORTS) {
+  if (!env || !env.REPORTS) {
     return htmlResponse(adminNotice('KV(REPORTS) 미설정', '워커 Settings > Bindings 에서 KV namespace를 <code>REPORTS</code> 로 연결하세요.'), 500);
   }
 
-  // 삭제 요청 처리 (POST /admin?key=...&del=<reportKey>)
+  // 삭제 요청 처리 (POST /admin&del=<reportKey>)
   if (request.method === 'POST') {
     const form = await request.formData().catch(() => null);
     const del = form && form.get('del');
     if (del) {
       try { await env.REPORTS.delete(String(del)); } catch (_e) {}
-      return Response.redirect(url.origin + '/admin?key=' + encodeURIComponent(key), 303);
+      return Response.redirect(url.origin + '/admin', 303);
     }
   }
 
@@ -271,7 +263,7 @@ async function handleAdmin(request, env) {
     return htmlResponse(adminNotice('목록 조회 실패', esc(String(e && e.message ? e.message : e))), 502);
   }
 
-  return htmlResponse(adminPage(items, key), 200);
+  return htmlResponse(adminPage(items), 200);
 }
 
 // ── HTML 헬퍼 ────────────────────────────────────────────────
@@ -319,18 +311,7 @@ function adminNotice(title, msg) {
   return '<h1>' + esc(title) + '</h1><div class="notice">' + msg + '</div>';
 }
 
-function adminLogin() {
-  return (
-    '<h1>관리자 로그인</h1>' +
-    '<div class="notice"><form method="get" action="/admin">' +
-    '<p>접속 키(ADMIN_TOKEN)를 입력하세요.</p>' +
-    '<input type="password" name="key" placeholder="접속 키" autofocus> ' +
-    '<button class="primary" type="submit">입장</button>' +
-    '</form></div>'
-  );
-}
-
-function adminPage(items, key) {
+function adminPage(items) {
   const head =
     '<h1>오수정 제보 관리자</h1>' +
     '<div class="count">총 ' + items.length + '건 · 최신순</div>';
@@ -354,7 +335,7 @@ function adminPage(items, key) {
         '<td class="after">' + esc(d.after) + '</td>' +
         '<td>' + reasons + '</td>' +
         '<td class="comment">' + esc(d.comment) + '</td>' +
-        '<td><form method="post" action="/admin?key=' + encodeURIComponent(key) + '" onsubmit="return confirm(\'이 제보를 삭제할까요?\')">' +
+        '<td><form method="post" action="/admin" onsubmit="return confirm(\'이 제보를 삭제할까요?\')">' +
         '<input type="hidden" name="del" value="' + esc(it.key) + '">' +
         '<button class="del" type="submit">삭제</button></form></td>' +
         '</tr>'
