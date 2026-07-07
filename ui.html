@@ -647,6 +647,22 @@
       .rs-sw { bottom:0; left:0;  width:8px; height:8px; cursor:sw-resize; }
       .rs-se { bottom:0; right:0; width:8px; height:8px; cursor:se-resize; }
 
+      /* 검토 전 사용법 예시 (결과 없을 때만 JS로 표시) */
+      .review-guide {
+        display: none;
+        max-width: 280px;
+        margin: 4px auto 14px;
+        text-align: center;
+      }
+      .review-guide svg { display: block; }
+      .review-guide-caption {
+        margin-top: 12px;
+        font-size: 13px;
+        color: #757575;
+        line-height: 1.5;
+      }
+      .review-guide-caption b { color: #353535; font-weight: 600; }
+
       /* ── 상단 탭 바 ── */
       #tabBar {
         display: none; /* 홈에서는 숨김 — showView에서 제어 */
@@ -898,6 +914,27 @@
         <div class="title">Writing 검토하기</div>
         <div class="hint">텍스트 레이어 또는 Frame을 선택한 뒤 [검토하기] 버튼을 눌러주세요.</div>
       </div>
+      <!-- 검토 전(결과 없을 때) 사용법 예시 일러스트 -->
+      <div id="reviewEmpty" class="review-guide">
+        <svg viewBox="0 0 280 150" width="100%" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="텍스트 레이어나 프레임을 선택하면 파란 테두리가 생긴다는 예시">
+          <rect x="8" y="8" width="264" height="134" rx="10" fill="#F7F7F7" stroke="#E9E9E9"/>
+          <rect x="42" y="42" width="150" height="60" rx="4" fill="#FFFFFF" stroke="#1D6CEB" stroke-width="1.6"/>
+          <rect x="56" y="58" width="108" height="9" rx="4.5" fill="#DADADA"/>
+          <rect x="56" y="74" width="76" height="9" rx="4.5" fill="#E4E4E4"/>
+          <g fill="#FFFFFF" stroke="#1D6CEB" stroke-width="1.4">
+            <rect x="38" y="38" width="8" height="8" rx="1.5"/>
+            <rect x="188" y="38" width="8" height="8" rx="1.5"/>
+            <rect x="38" y="98" width="8" height="8" rx="1.5"/>
+            <rect x="188" y="98" width="8" height="8" rx="1.5"/>
+          </g>
+          <g>
+            <rect x="42" y="24" width="42" height="16" rx="4" fill="#1D6CEB"/>
+            <text x="49" y="36" font-family="Pretendard, sans-serif" font-size="10" font-weight="600" fill="#FFFFFF">T 텍스트</text>
+          </g>
+          <path d="M150 92l0 26 6-7 5 10 4-2-5-9 9-1z" fill="#111111" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        <div class="review-guide-caption">텍스트 레이어나 프레임을 선택하면 이렇게 파란 테두리가 생겨요.</div>
+      </div>
       <button id="preview" class="button-primary button-full-width">검토하기</button>
       <div id="resultHeader" class="result-header">
         <div class="preview-title">검토 결과 : </div>
@@ -1051,7 +1088,17 @@
           if (bg) bg.classList.remove('active');
         }
         adjustTopPadding();
+        updateReviewGuide();
         window.scrollTo({ top: 0 });
+      }
+      // 사용법 예시: '검토' 화면이면서 아직 결과가 없을 때만 보여준다
+      function updateReviewGuide() {
+        const g = document.getElementById('reviewEmpty');
+        if (!g) return;
+        const ps = document.getElementById('previewSection');
+        const hasResults = ps && ps.classList.contains('active');
+        g.style.display = (currentView === 'review' && !hasResults) ? 'block' : 'none';
+        adjustTopPadding(); // 헤더 안 일러스트가 켜/꺼지며 헤더 높이가 바뀌므로 본문 여백 재계산
       }
       adjustTopPadding();
       window.addEventListener('resize', adjustTopPadding);
@@ -1454,6 +1501,7 @@
             btnGroupEl.classList.remove('active');
           }
           selectedNodeIds.clear(); // 선택 초기화
+          updateReviewGuide(); // 결과 없으면 사용법 예시 다시 표시
           return;
         }
 
@@ -1826,6 +1874,7 @@
         }
 
         previewSection.classList.add('active');
+        updateReviewGuide(); // 결과가 뜨면 사용법 예시 숨김
         setResultHeaderVisible(data.length > 0);
 
         // 플로팅 버튼 그룹 표시
