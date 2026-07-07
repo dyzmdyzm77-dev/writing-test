@@ -647,6 +647,68 @@
       .rs-sw { bottom:0; left:0;  width:8px; height:8px; cursor:sw-resize; }
       .rs-se { bottom:0; right:0; width:8px; height:8px; cursor:se-resize; }
 
+      /* ── 상단 탭 바 ── */
+      #tabBar {
+        display: none; /* 홈에서는 숨김 — showView에서 제어 */
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 44px;
+        background: #FFFFFF;
+        border-bottom: 1px solid #E0E0E0;
+        z-index: 200; /* 각 화면 고정 헤더(z-index 100)보다 위 */
+        box-sizing: border-box;
+        align-items: stretch;
+      }
+      #tabBar.visible { display: flex; }
+      .tab-home {
+        width: 44px !important;
+        height: 100% !important;
+        min-width: 44px;
+        flex-shrink: 0;
+        padding: 0;
+        margin: 0;
+        line-height: 0;
+        background: none;
+        border: none;
+        border-right: 1px solid #EEEEEE;
+        border-radius: 0;
+        color: #757575;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .tab-home:hover { color: #1D6CEB; background: #F7F7F7; }
+      .tab-btn {
+        flex: 1;
+        width: auto !important;
+        height: 100% !important;
+        min-width: 0;
+        padding: 0 4px;
+        margin: 0;
+        line-height: normal !important;
+        background: none;
+        border: none;
+        border-radius: 0;
+        border-bottom: 2px solid transparent;
+        color: #757575;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .tab-btn:hover { color: #353535; background: #F7F7F7; }
+      .tab-btn.active {
+        color: #1D6CEB;
+        border-bottom-color: #1D6CEB;
+      }
+      /* 탭 바가 떠 있을 때: 각 화면 고정 헤더를 탭 바 아래로 내리고, 화면 내 '← 홈' 링크는 숨김 */
+      body.has-tabbar #topFixed,
+      body.has-tabbar #recommendHeader,
+      body.has-tabbar #translateHeader { top: 44px; }
+      body.has-tabbar .back-btn { display: none; }
+
       /* ── 홈 / 기능 화면 (문구 추천·번역) ── */
       #homeView { display: none; }
       /* 홈 메뉴 카드 (흰색 + 아이콘 + 서브 문구) — 전역 button 높이/줄맞춤 규칙을 덮어씀 */
@@ -787,6 +849,16 @@
     </style>
   </head>
   <body>
+    <!-- 상단 탭 바 (홈이 아닐 때만 표시) — 홈 버튼 + 검토/추천/번역 탭 -->
+    <div id="tabBar">
+      <button id="tabHome" class="tab-home" title="홈으로" aria-label="홈으로">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 11l8-6 8 6M6 10v9h12v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="tab-btn" data-tab="review">검토</button>
+      <button class="tab-btn" data-tab="recommend">추천</button>
+      <button class="tab-btn" data-tab="translate">번역</button>
+    </div>
+
     <!-- 홈 화면: 작업 선택 메뉴 -->
     <div id="homeView">
       <div class="title">에스원 UX Writing Checker</div>
@@ -947,10 +1019,13 @@
         if (currentView === 'translate') return document.getElementById('translateHeader');
         return null; // 홈에는 고정 헤더가 없다
       }
-      // 본문 상단 여백을 현재 활성 고정 헤더 높이에 맞춘다 (홈이면 기본 여백)
+      // 본문 상단 여백을 (탭 바 + 현재 활성 고정 헤더) 높이에 맞춘다 (홈이면 기본 여백)
       function adjustTopPadding() {
+        if (currentView === 'home') { document.body.style.paddingTop = '20px'; return; }
+        const tabBar = document.getElementById('tabBar');
+        const tabH = tabBar ? tabBar.offsetHeight : 0;
         const header = activeHeaderEl();
-        document.body.style.paddingTop = header ? header.offsetHeight + 'px' : '20px';
+        document.body.style.paddingTop = (tabH + (header ? header.offsetHeight : 0)) + 'px';
       }
       function showView(name) {
         currentView = name;
@@ -960,6 +1035,14 @@
         document.getElementById('translateHeader').style.display = name === 'translate' ? 'block' : 'none';
         document.getElementById('recommendSection').style.display = name === 'recommend' ? 'block' : 'none';
         document.getElementById('translateSection').style.display = name === 'translate' ? 'block' : 'none';
+        // 상단 탭 바: 홈이 아닐 때만 표시하고 현재 탭을 강조
+        const tabBar = document.getElementById('tabBar');
+        const showTabs = name !== 'home';
+        tabBar.classList.toggle('visible', showTabs);
+        document.body.classList.toggle('has-tabbar', showTabs);
+        document.querySelectorAll('.tab-btn').forEach((t) => {
+          t.classList.toggle('active', t.dataset.tab === name);
+        });
         // 검토 결과 영역/하단 버튼은 '검토' 화면에서만 보인다
         if (name !== 'review') {
           const ps = document.getElementById('previewSection');
@@ -1759,6 +1842,12 @@
       document.querySelectorAll('[data-back]').forEach((btn) => {
         btn.addEventListener('click', () => showView('home'));
       });
+
+      // ── 상단 탭 바 연결 (탭 전환 / 홈 버튼) ──
+      document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => showView(btn.dataset.tab));
+      });
+      document.getElementById('tabHome').addEventListener('click', () => showView('home'));
 
       // ── 문구 추천 / 번역 실행 ──
       document.getElementById('recommendRun').onclick = () => {
