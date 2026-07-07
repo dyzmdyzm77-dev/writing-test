@@ -103,11 +103,14 @@ let suppressSelectionReset = false;
     }
     figma.ui.postMessage({ type: 'canvas-selection', nodeIds: Array.from(targetIds) });
 
-    // 추천/번역 화면 자동 입력용: 선택 영역(프레임/텍스트) 안의 문구를 UI로 전달
+    // 추천/번역 화면 자동 입력용: 선택 영역(프레임/텍스트) 안의 문구를 UI로 전달.
+    // 선택 해제(빈 선택) 시엔 빈 문자열을 보내 입력창도 비울 수 있게 한다.
     if (regularNodes.length > 0) {
       collectSelectedText().then((t) => {
-        if (t && t.trim()) figma.ui.postMessage({ type: 'selection-text', text: t });
+        figma.ui.postMessage({ type: 'selection-text', text: (t && t.trim()) ? t : '' });
       }).catch(() => {});
+    } else if (!selection || selection.length === 0) {
+      figma.ui.postMessage({ type: 'selection-text', text: '' });
     }
   } catch (_e) {}
 });

@@ -1438,12 +1438,19 @@
           renderTranslate(event.data.pluginMessage.original || '', event.data.pluginMessage.translated || '', event.data.pluginMessage.direction || '');
         }
 
-        // 캔버스에서 프레임/텍스트 선택 시 → 추천/번역 입력창에 자동 채움
+        // 캔버스에서 프레임/텍스트 선택 시 → 추천/번역 입력창에 자동 채움.
+        // 선택 해제(빈 문자열) 시 → 자동으로 채워졌던 값 그대로면 입력창을 비운다(직접 타이핑한 건 보존).
         if (event.data.pluginMessage.type === 'selection-text') {
-          lastSelectionText = event.data.pluginMessage.text || '';
-          if (lastSelectionText) {
-            if (currentView === 'recommend') document.getElementById('recommendInput').value = lastSelectionText;
-            else if (currentView === 'translate') document.getElementById('translateInput').value = lastSelectionText;
+          const text = event.data.pluginMessage.text || '';
+          const el = currentView === 'recommend' ? document.getElementById('recommendInput')
+                   : currentView === 'translate' ? document.getElementById('translateInput')
+                   : null;
+          if (text) {
+            if (el) el.value = text;
+            lastSelectionText = text;
+          } else {
+            if (el && lastSelectionText && el.value === lastSelectionText) el.value = '';
+            lastSelectionText = '';
           }
         }
 
