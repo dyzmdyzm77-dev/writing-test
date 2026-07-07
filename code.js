@@ -3231,70 +3231,6 @@ figma.ui.onmessage = async (msg) => {
             removeAnnotationByNodeId(id);
         return;
     }
-    // 선택한 항목들의 어노테이션만 숨기기/보이기.
-    // msg.hidden(boolean)이 오면 전부 그 상태로 맞추고(일괄 동일 적용),
-    // 없으면 토글(하나라도 보이면 전부 숨기고, 전부 숨겨져 있으면 보이기).
-    if (msg.type === "TOGGLE_ANNOTATIONS_NODES") {
-        const ids = msg.nodeIds || [];
-        let hide;
-        if (typeof msg.hidden === 'boolean') {
-            hide = msg.hidden;
-        }
-        else {
-            let anyVisible = false;
-            for (const id of ids) {
-                if (annotatedNodeIds.has(id)) {
-                    anyVisible = true;
-                    break;
-                } // 네이티브 어노테이션이 보이는 상태
-                const arr = annotationsByNode.get(id);
-                if (!arr)
-                    continue;
-                for (const e of arr) {
-                    if (e.ann && !e.ann.removed && e.ann.visible) {
-                        anyVisible = true;
-                        break;
-                    }
-                }
-                if (anyVisible)
-                    break;
-            }
-            hide = anyVisible;
-        }
-        for (const id of ids) {
-            const arr = annotationsByNode.get(id);
-            if (arr) {
-                for (const e of arr) {
-                    try {
-                        if (e.ann && !e.ann.removed)
-                            e.ann.visible = !hide;
-                    }
-                    catch (_e) { }
-                }
-            }
-            // 네이티브 어노테이션 토글 (제거/복원)
-            const node = annotationNodeCache.get(id);
-            if (hide) {
-                try {
-                    if (node && !node.removed && annotatedNodeIds.has(id))
-                        node.annotations = [];
-                }
-                catch (_e) { }
-                annotatedNodeIds.delete(id); // 라벨은 복원 위해 유지
-            }
-            else {
-                const md = nativeAnnotationLabels.get(id);
-                if (md && node && !node.removed) {
-                    try {
-                        node.annotations = [{ labelMarkdown: md }];
-                        annotatedNodeIds.add(id);
-                    }
-                    catch (_e) { }
-                }
-            }
-        }
-        return;
-    }
     // 취소: 어노테이션 제거
     if (msg.type === "CANCEL") {
         removeAnnotations();
@@ -3431,6 +3367,30 @@ figma.ui.onmessage = async (msg) => {
         catch (e) {
             figma.ui.postMessage({ type: 'hide-loading' });
             figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + errStr(e) });
+        }
+        return;
+    }
+    // 오수정 제보 — "이 수정안이 잘못됐다"는 신고를 워커(/report)로 보내 관리자 페이지에 저장한다
+    if (msg.type === "REPORT") {
+        try {
+            const payload = {
+                nodeId: msg.nodeId || '',
+                before: msg.before || '',
+                after: msg.after || '',
+                reason: msg.reason || '',
+                comment: msg.comment || '',
+                fileName: (figma.root && figma.root.name) || '',
+            };
+            const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'report', payload, 15000);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || (data && data.error)) {
+                figma.ui.postMessage({ type: 'report-result', key: msg.key, ok: false, error: (data && data.error) ? data.error : ('HTTP ' + res.status) });
+                return;
+            }
+            figma.ui.postMessage({ type: 'report-result', key: msg.key, ok: true });
+        }
+        catch (e) {
+            figma.ui.postMessage({ type: 'report-result', key: msg.key, ok: false, error: errStr(e) });
         }
         return;
     }

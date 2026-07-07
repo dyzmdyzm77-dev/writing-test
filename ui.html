@@ -306,8 +306,9 @@
         font-size: 14px;
         margin: 0 -16px; /* 호버/선택 표시가 카드 좌우 끝까지 차도록 (구분선과 같은 폭) */
         padding: 12px 19px; /* 보더 1px 포함 좌우 여백 20px, 위아래 12px */
-        display: flex; /* 좌측 눈 아이콘 + 우측 내용 */
-        align-items: center; /* 눈 아이콘을 내용 높이 기준 세로 가운데로 */
+        display: flex; /* 좌측 내용 + 우측 제보 버튼 */
+        flex-wrap: wrap; /* 제보 입력창이 아래 줄 전체 폭으로 내려오도록 */
+        align-items: flex-start;
         gap: 12px;
       }
       .preview-item:hover {
@@ -316,36 +317,91 @@
       .preview-item.selected {
         background: #E2F1FF; /* 선택 시 배경색만 변경 (테두리 없음) */
       }
-      /* 항목별 숨기기/보이기 눈 아이콘 */
-      .preview-eye-btn {
+      .preview-item-content {
+        flex: 1;
+        min-width: 0; /* 긴 텍스트가 flex 칸을 넘치지 않게 */
+      }
+      /* 항목별 "오수정 제보" 버튼 (우측 상단) */
+      .preview-report-btn {
         flex-shrink: 0;
         width: 24px !important; /* 전역 button(width:100%, min-width:64px) 무시 */
         height: 24px !important; /* 전역 button height:48px !important 무시 */
         min-width: unset;
         padding: 0;
-        margin: 0;
+        margin: 2px 0 0 0; /* '원문' 라벨 높이에 맞춰 살짝 내림 */
         line-height: 0;
         background: none;
         border: none;
         cursor: pointer;
-        color: #353535;
+        color: #B0B0B0;
         display: flex;
         align-items: center;
         justify-content: center;
       }
-      .preview-eye-btn svg {
+      .preview-report-btn:hover {
+        color: #E5484D; /* 제보(경고) 느낌의 빨강 */
+      }
+      .preview-report-btn.reported {
+        color: #E5484D; /* 이미 제보한 항목은 빨강으로 고정 */
+        cursor: default;
+      }
+      .preview-report-btn svg {
         display: block;
       }
-      .preview-item-content {
-        flex: 1;
-        min-width: 0; /* 긴 텍스트가 flex 칸을 넘치지 않게 */
+      /* 제보 입력창 (버튼 클릭 시 아래 줄 전체 폭으로 열림) */
+      .report-panel {
+        flex-basis: 100%; /* flex-wrap 상태에서 한 줄 전체 차지 */
+        width: 100%;
+        display: none;
+        margin-top: 4px;
       }
-      /* 숨김 상태면 내용을 흐리게 + 아이콘을 회색으로 */
-      .preview-item.annotation-hidden .preview-item-content {
-        opacity: 0.45;
+      .report-panel.open {
+        display: block;
       }
-      .preview-item.annotation-hidden .preview-eye-btn {
-        color: #B0B0B0;
+      .report-input {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 56px;
+        resize: vertical;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        border: 1px solid #D5D5D5;
+        border-radius: 6px;
+        outline: none;
+      }
+      .report-input:focus {
+        border-color: #2F88FF;
+      }
+      .report-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .report-actions button {
+        width: auto !important;
+        min-width: unset;
+        height: 32px !important;
+        padding: 0 14px;
+        margin: 0;
+        font-size: 13px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .report-cancel {
+        background: #F0F0F0;
+        border: 1px solid #D5D5D5;
+        color: #353535;
+      }
+      .report-submit {
+        background: #E5484D;
+        border: 1px solid #E5484D;
+        color: #ffffff;
+      }
+      .report-submit:disabled {
+        opacity: 0.5;
+        cursor: default;
       }
       /* 변경 전/제안은 박스 없이 가로 구분선 하나로만 구분 */
       .preview-before-box {
@@ -771,30 +827,14 @@
     <script>
       let previewData = [];
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
-      const hiddenNodeIds = new Set(); // 캔버스에서 코멘트를 숨긴 항목들 (항목별 눈 아이콘)
+      const reportedKeys = new Set(); // 이미 "오수정 제보"한 항목 (nodeId::after 조합) — 재렌더링돼도 유지
+      const pendingReports = new Map(); // 전송 중인 제보: reportKey → { panel, btn, submit } (결과 회신 시 해당 UI 갱신)
 
-      // 항목별 숨기기/보이기 아이콘 (눈 / 눈 빗금)
-      const EYE_SVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.6"/></svg>';
-      const EYE_OFF_SVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.9 5.2A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.8 3.6M6.3 6.3A17 17 0 0 0 2 12s3.5 7 10 7c1.9 0 3.5-.5 5-1.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      // 항목별 "오수정 제보" 아이콘 (깃발)
+      const REPORT_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 3v18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M5 4h11l-2 3.5L16 11H5z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-      // 여러 항목의 코멘트 숨김 상태를 한 번에 같은 값으로 맞춘다 (아이콘/흐림/캔버스 일괄 갱신)
-      function setItemsHidden(ids, hidden) {
-        const idSet = new Set(ids);
-        ids.forEach(id => { if (hidden) hiddenNodeIds.add(id); else hiddenNodeIds.delete(id); });
-        document.querySelectorAll('.preview-item').forEach(el => {
-          if (!idSet.has(el.dataset.nodeId)) return;
-          el.classList.toggle('annotation-hidden', hidden);
-          const btn = el.querySelector('.preview-eye-btn');
-          if (btn) {
-            btn.innerHTML = hidden ? EYE_OFF_SVG : EYE_SVG;
-            const lbl = hidden ? '캔버스에 코멘트 보이기' : '캔버스에서 코멘트 숨기기';
-            btn.title = lbl;
-            btn.setAttribute('aria-label', lbl);
-          }
-        });
-        // 백엔드에 명시적 상태 전달(hidden) — 선택 항목들이 섞여 있어도 모두 같은 상태로 맞춘다
-        parent.postMessage({ pluginMessage: { type: 'TOGGLE_ANNOTATIONS_NODES', nodeIds: ids, hidden: hidden } }, '*');
-      }
+      // 제보 상태를 노드+수정안 조합으로 식별 (같은 노드라도 수정안이 바뀌면 새 제보 가능)
+      function reportKey(item) { return (item.nodeId || '') + '::' + (item.after || ''); }
       // 검토 후 스크롤 동작 예약:
       // - 최초 검토: 목록 맨 위로
       // - 추가 검토: 새로 추가된 카드 중 가장 위의 것이 화면 중앙에 오도록
@@ -908,7 +948,7 @@
           return;
         }
         selectedNodeIds.clear(); // 미리보기 새로고침 시 선택 초기화
-        hiddenNodeIds.clear(); // 새 검토면 코멘트가 다시 다 보이게 시작
+        reportedKeys.clear(); // 새 검토면 제보 상태도 초기화
         const selectAllCheckbox = document.getElementById('selectAll');
         if (selectAllCheckbox) {
           selectAllCheckbox.checked = false;
@@ -1054,7 +1094,7 @@
         }
         previewData = [];
         selectedNodeIds.clear();
-        hiddenNodeIds.clear();
+        reportedKeys.clear();
         const selectAllCheckbox = document.getElementById('selectAll');
         if (selectAllCheckbox) {
           selectAllCheckbox.checked = false;
@@ -1109,6 +1149,25 @@
         
         if (event.data.pluginMessage.type === 'show-toast') {
           showToast(event.data.pluginMessage.message);
+        }
+
+        if (event.data.pluginMessage.type === 'report-result') {
+          const { key, ok, error } = event.data.pluginMessage;
+          const p = pendingReports.get(key);
+          pendingReports.delete(key);
+          if (ok) {
+            reportedKeys.add(key);
+            if (p) {
+              p.panel.classList.remove('open');
+              p.btn.classList.add('reported');
+              p.btn.title = '제보됨 — 이 수정안을 잘못됐다고 알림';
+              p.btn.setAttribute('aria-label', p.btn.title);
+            }
+            showToast('제보를 보냈어요. 감사합니다!');
+          } else {
+            if (p && p.submit) { p.submit.disabled = false; p.submit.textContent = '제보 보내기'; }
+            showToast('제보 실패: ' + (error || '잠시 후 다시 시도해주세요.'));
+          }
         }
 
         if (event.data.pluginMessage.type === 'recommend-result') {
@@ -1462,27 +1521,7 @@
           const reasonItems = item.reason ? [...new Set(item.reason.split(' - ').map(r => r.trim()).filter(r => r))] : [];
           const reasonChips = reasonItems.map(r => `<span class="reason-item">${escapeHtml(r)}</span>`).join('');
 
-          // 항목별 숨기기/보이기 눈 아이콘 (맨 앞)
-          const isHidden = hiddenNodeIds.has(item.nodeId);
-          if (isHidden) div.classList.add('annotation-hidden');
-          const eyeBtn = document.createElement('button');
-          eyeBtn.className = 'preview-eye-btn';
-          eyeBtn.tabIndex = -1; // 항목(div) 포커스로 충분
-          eyeBtn.innerHTML = isHidden ? EYE_OFF_SVG : EYE_SVG;
-          const eyeLbl = isHidden ? '캔버스에 코멘트 보이기' : '캔버스에서 코멘트 숨기기';
-          eyeBtn.title = eyeLbl;
-          eyeBtn.setAttribute('aria-label', eyeLbl);
-          eyeBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // 항목 선택/이동과 분리
-            const nowHidden = !hiddenNodeIds.has(item.nodeId);
-            // 선택된 항목들 중 하나의 눈을 누르면 → 선택 항목 전체를 같은 상태로. 그 외엔 이 항목만.
-            const targets = (selectedNodeIds.size > 0 && selectedNodeIds.has(item.nodeId))
-              ? Array.from(selectedNodeIds)
-              : [item.nodeId];
-            setItemsHidden(targets, nowHidden);
-          });
-
-          // 내용 래퍼 (눈 아이콘 우측)
+          // 내용 래퍼 (좌측)
           const contentEl = document.createElement('div');
           contentEl.className = 'preview-item-content';
           contentEl.innerHTML = `
@@ -1499,8 +1538,65 @@
             </div>
           `;
 
-          div.appendChild(eyeBtn);
+          // 항목별 "오수정 제보" 버튼 (우측 상단)
+          const alreadyReported = reportedKeys.has(reportKey(item));
+          const reportBtn = document.createElement('button');
+          reportBtn.className = 'preview-report-btn' + (alreadyReported ? ' reported' : '');
+          reportBtn.tabIndex = -1; // 항목(div) 포커스로 충분
+          reportBtn.innerHTML = REPORT_SVG;
+          const reportLbl = alreadyReported ? '제보됨 — 이 수정안을 잘못됐다고 알림' : '이 수정안이 잘못됐다고 제보하기';
+          reportBtn.title = reportLbl;
+          reportBtn.setAttribute('aria-label', reportLbl);
+
+          // 제보 입력창 (버튼 클릭 시 아래 줄 전체 폭으로 열림)
+          const reportPanel = document.createElement('div');
+          reportPanel.className = 'report-panel';
+          reportPanel.innerHTML = `
+            <textarea class="report-input" placeholder="이 수정안이 왜 잘못됐는지 적어주세요 (선택)"></textarea>
+            <div class="report-actions">
+              <button class="report-cancel" tabindex="-1">취소</button>
+              <button class="report-submit" tabindex="-1">제보 보내기</button>
+            </div>
+          `;
+          const reportInput = reportPanel.querySelector('.report-input');
+          const reportCancel = reportPanel.querySelector('.report-cancel');
+          const reportSubmit = reportPanel.querySelector('.report-submit');
+
+          const closePanel = () => reportPanel.classList.remove('open');
+
+          reportBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 항목 선택/이동과 분리
+            if (reportBtn.classList.contains('reported')) {
+              showToast('이미 제보한 항목이에요.');
+              return;
+            }
+            const opening = !reportPanel.classList.contains('open');
+            reportPanel.classList.toggle('open', opening);
+            if (opening) setTimeout(() => reportInput.focus(), 0);
+          });
+          reportCancel.addEventListener('click', (e) => { e.stopPropagation(); closePanel(); });
+          reportPanel.addEventListener('click', (e) => e.stopPropagation()); // 패널 클릭이 항목 선택으로 번지지 않게
+
+          reportSubmit.addEventListener('click', (e) => {
+            e.stopPropagation();
+            reportSubmit.disabled = true;
+            reportSubmit.textContent = '보내는 중...';
+            const key = reportKey(item);
+            pendingReports.set(key, { panel: reportPanel, btn: reportBtn, submit: reportSubmit });
+            parent.postMessage({ pluginMessage: {
+              type: 'REPORT',
+              key: key,
+              nodeId: item.nodeId,
+              before: item.before,
+              after: item.after,
+              reason: item.reason || '',
+              comment: (reportInput.value || '').trim()
+            } }, '*');
+          });
+
           div.appendChild(contentEl);
+          div.appendChild(reportBtn);
+          div.appendChild(reportPanel);
 
           // Wrapper에 아이템 추가
           wrapper.appendChild(div);
