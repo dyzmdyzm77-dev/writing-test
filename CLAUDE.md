@@ -16,6 +16,12 @@
 - "X → X처럼 똑같아 보이는 제안"이 나오면 → 네이버가 합성어를 띄어 쓴 것 → glossary.md "합성어 보호"에 단어 추가
 - 네이버가 표기를 바꾸는 단어(렌탈→렌털 등) → "예외 표기" 표에 추가
 
+## 피드백 환류 워크플로우
+
+- 추천 카드의 좋아요(👍)는 제보 저장소(report-admin)에 `reason='추천 좋아요'` 마커로 저장됨 — 이 문자열은 code.ts(LIKE_SUGGESTION)와 scripts/sync-feedback.js가 공유하므로 한쪽만 바꾸면 안 됨
+- `npm run sync-feedback` → 좋아요+오수정 제보를 내려받아 `feedback-candidates.md` 생성(커밋 금지, gitignore됨) → 사람이 골라 recommend-examples.md/ux-writing.md에 옮기고 `npm run build`
+- 사내 프록시 때문에 node fetch에 `--use-env-proxy` 필요 (npm 스크립트에 포함됨, Node 24+)
+
 ## 핵심 설계 결정 (바꾸기 전에 읽을 것)
 
 - **띄어쓰기는 네이버 우선**: 부사 띄어쓰기 정규식(ADVERB_SPACING_RULES)은 네이버 실패 시 폴백 전용. COMPOUND_PROTECT_RULES가 네이버의 합성어 분리를 되돌림

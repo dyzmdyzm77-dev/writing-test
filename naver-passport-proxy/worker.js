@@ -7,15 +7,15 @@
 //
 // 왜 워커가 필요한가:
 //   1) 네이버 검색페이지는 CORS 헤더가 없어 플러그인에서 직접 못 긁는다 → 여기서 대신 긁는다.
-//   2) Gemini API 키를 플러그인(클라이언트)에 노출하지 않으려고 서버(=워커)에서만 호출한다.
+//   2) Gemini는 CORS 때문에 플러그인에서 직접 호출이 불안정 → 워커가 대신 호출한다.
+//
+// ★ API 키 정책: 개인 키 방식.
+//   추천/번역 요청 본문에 각 사용자의 Gemini 키(apiKey)가 실려 오고, 워커는 그 키로 호출만 한다(저장 안 함).
+//   → 워커에 공유 GEMINI_API_KEY를 둘 필요가 없다. 무료 할당량도 사용자별로 각자 소모된다.
+//   무료 키 발급: https://aistudio.google.com/apikey (구글 계정 로그인 → Create API key)
 //
 // ※ "오수정 제보" 저장/열람은 이 워커가 아니라 별도 Vercel 앱(ux-writing-reports)에서 처리한다.
 //    저장: POST https://report-admin-weld.vercel.app/api/report, 관리자: https://report-admin-weld.vercel.app/
-//
-// 배포:
-//   Cloudflare 대시보드 → Workers & Pages → 이 워커 → Settings → Variables and Secrets
-//   에 GEMINI_API_KEY 라는 이름으로 무료 키를 넣고(Encrypt 권장), 이 파일을 붙여넣어 Deploy.
-//   무료 키 발급: https://aistudio.google.com/apikey (구글 계정 로그인 → Create API key)
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -71,26 +71,27 @@ async function handlePassportKey() {
 }
 
 // ── Gemini 호출 공통 ─────────────────────────────────────────
-// 주 모델로 호출하고, 혼잡(503)·분당 한도(429)면 예비 모델로 한 번 더 시도한다.
+// apiKey는 요청 본문에서 온 개인 키. 주 모델로 호출하고, 혼잡(503)·분당 한도(429)면 예비 모델로 한 번 더 시도한다.
 // schema를 주면 구조화 출력(responseSchema)으로 JSON 형식을 강제한다
 // (추천 문구 안에 줄바꿈이 있어도 JSON이 깨지지 않는다 — 깨지면 줄 단위 폴백으로 문장이 쪼개져 보임)
-async function callGemini(env, prompt, schema) {
-  if (!env || !env.GEMINI_API_KEY) {
-    return { error: 'GEMINI_API_KEY 미설정 (워커 Variables에 키를 추가하세요)' };
+// 성공 시 { text, usage } 반환 — usage는 Gemini usageMetadata(토큰 수), 플러그인이 사용량 표시에 씀.
+async function callGemini(apiKey, prompt, schema) {
+  if (!apiKey) {
+    return { error: 'Gemini API 키가 없어요. 플러그인 설정에서 개인 키를 넣어주세요.' };
   }
-  const first = await callGeminiModel(env, GEMINI_MODEL, prompt, schema);
+  const first = await callGeminiModel(apiKey, GEMINI_MODEL, prompt, schema);
   if (!first.retryable) return first;
-  const second = await callGeminiModel(env, GEMINI_FALLBACK_MODEL, prompt, schema);
+  const second = await callGeminiModel(apiKey, GEMINI_FALLBACK_MODEL, prompt, schema);
   return second.retryable ? { error: second.error } : second;
 }
 
-async function callGeminiModel(env, model, prompt, schema) {
+async function callGeminiModel(apiKey, model, prompt, schema) {
   try {
     const url =
       'https://generativelanguage.googleapis.com/v1beta/models/' +
       model +
       ':generateContent?key=' +
-      env.GEMINI_API_KEY;
+      apiKey;
     // thinkingBudget 0: 2.5 모델의 '생각' 단계를 꺼서 응답을 ~8배 빠르게 (7초 → 1초, 짧은 문구 작업엔 품질 차이 미미)
     const generationConfig = { temperature: 0.7, thinkingConfig: { thinkingBudget: 0 } };
     if (schema) {
@@ -122,25 +123,36 @@ async function callGeminiModel(env, model, prompt, schema) {
       data.candidates[0].content.parts[0] &&
       data.candidates[0].content.parts[0].text;
     if (!text) return { error: 'Gemini 응답 비어 있음' };
-    return { text: String(text).trim() };
+    const um = data && data.usageMetadata;
+    const usage = {
+      prompt: (um && um.promptTokenCount) || 0,
+      output: (um && um.candidatesTokenCount) || 0,
+      total: (um && um.totalTokenCount) || 0,
+      model: model,
+    };
+    return { text: String(text).trim(), usage };
   } catch (e) {
     return { error: 'Gemini 호출 실패: ' + String(e && e.message ? e.message : e) };
   }
 }
 
-// 요청 본문에서 text 안전하게 꺼내기
-async function readText(request) {
+// 요청 본문에서 text / apiKey 안전하게 꺼내기
+async function readBody(request) {
   try {
     const body = await request.json();
-    return body && typeof body.text === 'string' ? body.text : '';
+    return {
+      text: body && typeof body.text === 'string' ? body.text : '',
+      apiKey: body && typeof body.apiKey === 'string' ? body.apiKey.trim() : '',
+    };
   } catch (_e) {
-    return '';
+    return { text: '', apiKey: '' };
   }
 }
 
 // ── 번역 (한국어 ↔ 영어 자동) ────────────────────────────────
-async function handleTranslate(request, env) {
-  const text = (await readText(request)).trim();
+async function handleTranslate(request, _env) {
+  const { text: rawText, apiKey } = await readBody(request);
+  const text = rawText.trim();
   if (!text) {
     return Response.json({ error: '번역할 텍스트가 비어 있습니다.' }, { status: 400, headers: CORS });
   }
@@ -152,14 +164,14 @@ async function handleTranslate(request, env) {
     'Return ONLY the translated text.\n\n' +
     'Input:\n' +
     text;
-  const out = await callGemini(env, prompt);
+  const out = await callGemini(apiKey, prompt);
   if (out.error) {
     return Response.json({ error: out.error }, { status: 502, headers: CORS });
   }
   // 한글 포함 여부로 방향 라벨만 붙여줌 (표시용)
   const hadKorean = /[가-힣]/.test(text);
   return Response.json(
-    { translated: out.text, direction: hadKorean ? 'ko->en' : 'en->ko' },
+    { translated: out.text, direction: hadKorean ? 'ko->en' : 'en->ko', usage: out.usage || null },
     { headers: CORS }
   );
 }
@@ -206,8 +218,9 @@ const RECOMMEND_SCHEMA = {
   },
 };
 
-async function handleRecommend(request, env) {
-  const text = (await readText(request)).trim();
+async function handleRecommend(request, _env) {
+  const { text: rawText, apiKey } = await readBody(request);
+  const text = rawText.trim();
   if (!text) {
     return Response.json({ error: '추천받을 문구가 비어 있습니다.' }, { status: 400, headers: CORS });
   }
@@ -232,7 +245,7 @@ async function handleRecommend(request, env) {
     'reason examples: "딱딱한 한자어를 풀어 썼어요 (잠금 처리→잠겼어요)", "과도한 경어를 뺐어요 (~하시겠어요?→~할까요?)", "상황을 먼저 알리고 행동을 묻는 구조로 바꿨어요".\n\n' +
     'Text:\n' +
     text;
-  const out = await callGemini(env, prompt, RECOMMEND_SCHEMA);
+  const out = await callGemini(apiKey, prompt, RECOMMEND_SCHEMA);
   if (out.error) {
     return Response.json({ error: out.error }, { status: 502, headers: CORS });
   }
@@ -247,9 +260,10 @@ async function handleRecommend(request, env) {
     return true;
   });
   if (!suggestions.length) {
-    return Response.json({ error: '원본이 이미 가이드 기준에 잘 맞는 문구예요.' }, { status: 200, headers: CORS });
+    // Gemini는 호출됐으므로(할당량 소모) usage를 함께 내려 플러그인이 사용량을 반영하게 한다
+    return Response.json({ error: '원본이 이미 가이드 기준에 잘 맞는 문구예요.', usage: out.usage || null }, { status: 200, headers: CORS });
   }
-  return Response.json({ suggestions }, { headers: CORS });
+  return Response.json({ suggestions, usage: out.usage || null }, { headers: CORS });
 }
 
 // Gemini가 준 텍스트에서 {text, reason} 배열 추출 (JSON 우선, 실패하면 줄 단위 폴백)

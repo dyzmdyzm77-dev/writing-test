@@ -11,7 +11,7 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'SET_API_KEY' | 'GET_API_KEY_STATUS' | 'CLEAR_API_KEY' | 'GET_USAGE' | 'LIKE_SUGGESTION';
   text?: string;
   data?: PreviewItem[];
   nodeId?: string;
@@ -1170,6 +1170,63 @@ async function postJsonWithTimeout(url: string, body: any, ms: number): Promise<
     }),
     new Promise<Response>((_resolve, reject) => setTimeout(() => reject(new Error('타임아웃 ' + ms + 'ms')), ms)),
   ]);
+}
+
+// ── 개인 Gemini API 키 (사용자별 clientStorage 저장) ──────────
+// 공유 키 없음: 각 사용자가 자기 키를 넣어 자기 무료 할당량을 쓴다.
+const API_KEY_STORAGE = 'geminiApiKey';
+async function getStoredApiKey(): Promise<string> {
+  try {
+    const k = await figma.clientStorage.getAsync(API_KEY_STORAGE);
+    return typeof k === 'string' ? k.trim() : '';
+  } catch (_e) {
+    return '';
+  }
+}
+// 키 일부만 노출 (앞4 + 뒤4) — 설정 화면 표시용
+function maskApiKey(k: string): string {
+  if (!k) return '';
+  if (k.length <= 8) return '••••';
+  return k.slice(0, 4) + '••••' + k.slice(-4);
+}
+
+// ── 일일 사용량 카운터 ────────────────────────────────────────
+// 개인 키 = 사용자 1명이므로 플러그인 로컬 집계가 곧 정확한 '내 사용량'.
+// GEMINI_DAILY_LIMIT: 무료 등급 gemini-2.5-flash 추정 일일 한도. Google이 수시로 바꾸고
+// "남은 양"을 API로 주지 않으므로 이 값은 추정 기준선일 뿐 — 실제 키 한도가 다르면 이 상수만 고치면 된다.
+const GEMINI_DAILY_LIMIT = 250;
+const USAGE_STORAGE = 'geminiUsageDaily';
+// 무료 할당량은 태평양시(PT) 자정에 리셋 → 카운터도 PT 날짜 기준으로 리셋해야 잔량 추정이 맞는다
+function todayKeyPT(): string {
+  try {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }); // YYYY-MM-DD
+  } catch (_e) {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+async function readUsage(): Promise<{ date: string; count: number }> {
+  const today = todayKeyPT();
+  let stored: any = null;
+  try { stored = await figma.clientStorage.getAsync(USAGE_STORAGE); } catch (_e) { /* 무시 */ }
+  if (stored && stored.date === today && typeof stored.count === 'number') {
+    return { date: today, count: stored.count };
+  }
+  return { date: today, count: 0 }; // 새 날짜면 0부터
+}
+async function bumpUsage(): Promise<{ date: string; count: number }> {
+  const cur = await readUsage();
+  const next = { date: cur.date, count: cur.count + 1 };
+  try { await figma.clientStorage.setAsync(USAGE_STORAGE, next); } catch (_e) { /* 무시 */ }
+  return next;
+}
+function postUsage(u: { date: string; count: number }): void {
+  figma.ui.postMessage({
+    type: 'usage-update',
+    used: u.count,
+    limit: GEMINI_DAILY_LIMIT,
+    remaining: Math.max(0, GEMINI_DAILY_LIMIT - u.count),
+    date: u.date,
+  });
 }
 
 // 현재 선택 영역 안의 모든 텍스트를 하나의 문자열로 모은다 (직접 입력이 없을 때 사용)
@@ -3464,12 +3521,20 @@ figma.ui.onmessage = async (msg: any) => {
       figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local });
       return;
     }
+    // 예시 사전에 없으면 AI 호출 — 개인 키 필요
+    const apiKey = await getStoredApiKey();
+    if (!apiKey) {
+      figma.ui.postMessage({ type: 'need-api-key' });
+      return;
+    }
     figma.ui.postMessage({ type: 'show-loading' });
     figma.ui.postMessage({ type: 'update-progress', progress: 30, status: 'AI 문구 추천 받는 중...' });
     try {
-      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text }, 20000);
+      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text, apiKey }, 20000);
       const data = await res.json();
       figma.ui.postMessage({ type: 'hide-loading' });
+      // 워커가 usage를 실어 보내면 Gemini가 실제 호출된 것 → 오늘 사용량 +1
+      if (data && data.usage) { postUsage(await bumpUsage()); }
       if (!res.ok || data.error || !data.suggestions || !data.suggestions.length) {
         figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
         return;
@@ -3484,18 +3549,24 @@ figma.ui.onmessage = async (msg: any) => {
 
   // 번역 — 한국어 ↔ 영어 자동 (직접 입력 우선, 없으면 선택 영역 텍스트)
   if (msg.type === "TRANSLATE") {
-    figma.ui.postMessage({ type: 'show-loading' });
-    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '번역 중...' });
     try {
       const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
       if (!text) {
-        figma.ui.postMessage({ type: 'hide-loading' });
         figma.ui.postMessage({ type: 'show-toast', message: '번역할 문구를 입력하거나 텍스트를 선택해주세요.' });
         return;
       }
-      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'translate', { text }, 20000);
+      const apiKey = await getStoredApiKey();
+      if (!apiKey) {
+        figma.ui.postMessage({ type: 'need-api-key' });
+        return;
+      }
+      figma.ui.postMessage({ type: 'show-loading' });
+      figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '번역 중...' });
+      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'translate', { text, apiKey }, 20000);
       const data = await res.json();
       figma.ui.postMessage({ type: 'hide-loading' });
+      // 워커가 usage를 실어 보내면 Gemini가 실제 호출된 것 → 오늘 사용량 +1
+      if (data && data.usage) { postUsage(await bumpUsage()); }
       if (!res.ok || data.error) {
         figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
         return;
@@ -3529,6 +3600,52 @@ figma.ui.onmessage = async (msg: any) => {
     } catch (e) {
       figma.ui.postMessage({ type: 'report-result', key: msg.key, ok: false, error: errStr(e) });
     }
+    return;
+  }
+
+  // 추천 좋아요 — 마음에 든 추천을 제보 저장소에 모은다 (reason='추천 좋아요' 마커).
+  // 나중에 scripts/sync-feedback.js가 이 마커로 걸러 recommend-examples.md 후보로 만든다.
+  if (msg.type === "LIKE_SUGGESTION") {
+    try {
+      const payload = {
+        nodeId: '',
+        before: msg.before || '',   // 원본 문구
+        after: msg.after || '',     // 좋아요한 추천 문구
+        reason: '추천 좋아요',       // sync-feedback.js가 이 값으로 좋아요를 식별한다 — 바꾸면 스크립트도 같이
+        comment: msg.comment || '', // AI가 붙인 추천 사유
+        fileName: (figma.root && figma.root.name) || '',
+      };
+      const res = await postJsonWithTimeout(REPORT_URL, payload, 15000);
+      const data = await res.json().catch(() => ({}));
+      const ok = res.ok && !(data && data.error);
+      figma.ui.postMessage({ type: 'like-result', key: msg.key, ok, error: ok ? '' : ((data && data.error) || ('HTTP ' + res.status)) });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'like-result', key: msg.key, ok: false, error: errStr(e) });
+    }
+    return;
+  }
+
+  // ── 개인 Gemini API 키 관리 + 사용량 조회 ──
+  if (msg.type === "GET_API_KEY_STATUS") {
+    const k = await getStoredApiKey();
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k) });
+    postUsage(await readUsage());
+    return;
+  }
+  if (msg.type === "SET_API_KEY") {
+    const k = (msg.text || '').trim();
+    try { await figma.clientStorage.setAsync(API_KEY_STORAGE, k); } catch (_e) { /* 무시 */ }
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true });
+    postUsage(await readUsage());
+    return;
+  }
+  if (msg.type === "CLEAR_API_KEY") {
+    try { await figma.clientStorage.deleteAsync(API_KEY_STORAGE); } catch (_e) { /* 무시 */ }
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: false, masked: '', justCleared: true });
+    return;
+  }
+  if (msg.type === "GET_USAGE") {
+    postUsage(await readUsage());
     return;
   }
 };

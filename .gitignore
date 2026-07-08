@@ -10,5 +10,8 @@ dist/
 *.log
 *.log.*
 
+# sync-feedback가 만드는 검토용 임시 파일 (커밋 금지 — 내용은 recommend-examples.md로 옮겨서 반영)
+feedback-candidates.md
+
 # macOS
 .DS_Store
