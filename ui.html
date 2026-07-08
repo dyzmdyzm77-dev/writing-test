@@ -83,6 +83,7 @@
       /* 추천/번역 헤더는 동일 높이로 고정 → 버튼이 항상 같은 위치 */
       #recommendHeader, #translateHeader {
         min-height: 320px;
+        border-bottom: none; /* 검토 빈 화면과 동일하게 버튼 아래 구분선 제거 */
       }
       /* 입력창이 헤더의 남는 세로 공간을 채움 (버튼은 항상 바닥) */
       #recommendHeader .feature-input, #translateHeader .feature-input {
@@ -99,8 +100,11 @@
         flex-direction: column;
         justify-content: center;
       }
-      .top-fixed #preview {
-        margin-bottom: 0; /* 고정 헤더 안에서는 하단 여백 제거 */
+      /* 고정 헤더 안 실행 버튼(검토/추천/번역)은 하단 여백 제거 → 버튼 위치 통일 */
+      .top-fixed #preview,
+      .top-fixed #recommendRun,
+      .top-fixed #translateRun {
+        margin-bottom: 0;
       }
       .title-section {
         margin-bottom: 16px;
@@ -897,22 +901,40 @@
         white-space: pre-wrap;
         flex: 1;
       }
-      /* 복사 버튼 — 전역 button 규칙 무시 */
+      /* 추천 사유 (AI가 어떤 기준을 적용했는지) — 문구 아래 작은 회색 글씨 */
+      .sugg-main { flex: 1; min-width: 0; }
+      .sugg-main .sugg-text { display: block; }
+      .sugg-reason {
+        margin-top: 6px;
+        font-size: 12px;
+        color: #757575;
+        line-height: 1.4;
+      }
+      /* 복사 버튼 (아이콘) — 전역 button 규칙 무시 */
       .copy-btn {
         width: auto !important;
         height: auto !important;
         line-height: normal !important;
         flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         background: #FFFFFF;
         border: 1px solid #D9D9D9 !important;
         border-radius: 4px;
-        color: #353535;
-        font-size: 12px;
-        padding: 5px 10px !important;
+        color: #757575;
+        padding: 6px !important;
         margin: 0;
         cursor: pointer;
       }
-      .copy-btn:hover { background: #F2F2F2; }
+      .copy-btn:hover { background: #F2F2F2; color: #353535; }
+      .copy-btn svg { display: block; }
+      /* 추천 문구에서 원본 대비 바뀐 부분 표시 (검토의 형광펜 느낌) */
+      .sugg-diff {
+        background: #FFF1A8;
+        border-radius: 2px;
+        padding: 0 1px;
+      }
       .result-empty { color: #757575; font-size: 13px; padding: 8px 0; }
     </style>
   </head>
@@ -930,7 +952,7 @@
     <!-- 홈 화면: 작업 선택 메뉴 -->
     <div id="homeView">
       <div class="title">S1 UX Writing Assistant</div>
-      <div class="hint">원하는 작업을 선택하세요.</div>
+      <div class="hint">문구 검토부터 번역까지 도와드려요.</div>
       <button class="home-card" data-go="review">
         <span class="home-card-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 3h8l4 4v14H6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 13.5l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -1032,7 +1054,7 @@
       <button class="back-btn" data-back>← 홈</button>
       <div class="title-section">
         <div class="title">문구 추천받기</div>
-        <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택한 뒤 눌러주세요.</div>
+        <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
       </div>
       <textarea id="recommendInput" class="feature-input" placeholder="예) 로그인이 필요합니다"></textarea>
       <button id="recommendRun" class="button-primary button-full-width">추천받기</button>
@@ -1046,7 +1068,7 @@
       <button class="back-btn" data-back>← 홈</button>
       <div class="title-section">
         <div class="title">번역하기</div>
-        <div class="hint">한국어 ↔ 영어 자동 번역. 문구를 입력하거나 캔버스에서 텍스트를 선택하세요.</div>
+        <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[번역하기]</b> 버튼을 눌러주세요.</div>
       </div>
       <textarea id="translateInput" class="feature-input" placeholder="예) 로그인이 필요합니다 / Please log in"></textarea>
       <button id="translateRun" class="button-primary button-full-width">번역하기</button>
@@ -1155,6 +1177,7 @@
           const el = document.getElementById('translateInput');
           if (el && !el.value.trim()) el.value = lastSelectionText;
         }
+        updateFeatureButtonState();
         adjustTopPadding();
         updateReviewGuide();
         window.scrollTo({ top: 0 });
@@ -1452,6 +1475,7 @@
             if (el && lastSelectionText && el.value === lastSelectionText) el.value = '';
             lastSelectionText = '';
           }
+          updateFeatureButtonState();
         }
 
         if (event.data.pluginMessage.type === 'show-loading') {
@@ -1973,16 +1997,66 @@
       // ── 문구 추천 / 번역 실행 ──
       document.getElementById('recommendRun').onclick = () => {
         const text = document.getElementById('recommendInput').value.trim();
+        if (!text) return;
         parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text } }, '*');
       };
       document.getElementById('translateRun').onclick = () => {
         const text = document.getElementById('translateInput').value.trim();
+        if (!text) return;
         parent.postMessage({ pluginMessage: { type: 'TRANSLATE', text } }, '*');
       };
+      // 추천/번역 실행 버튼: 입력창이 비어 있으면 비활성화 (검토 버튼과 동일 동작)
+      function updateFeatureButtonState() {
+        const rEl = document.getElementById('recommendInput');
+        const rBtn = document.getElementById('recommendRun');
+        if (rEl && rBtn) rBtn.disabled = !rEl.value.trim();
+        const tEl = document.getElementById('translateInput');
+        const tBtn = document.getElementById('translateRun');
+        if (tEl && tBtn) tBtn.disabled = !tEl.value.trim();
+      }
+      document.getElementById('recommendInput').addEventListener('input', updateFeatureButtonState);
+      document.getElementById('translateInput').addEventListener('input', updateFeatureButtonState);
+      updateFeatureButtonState();
 
       // ── 결과 렌더링 ──
       function escapeHtml(s) {
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      // 복사 아이콘 (버튼 안에 텍스트 대신 사용)
+      var COPY_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      // 원본 대비 추천 문구에서 바뀐(새로 들어온) 단어를 형광펜(<span class="sugg-diff">)으로 감싼 HTML 생성
+      // 단어 단위 LCS — 원본과 공통인 단어는 그대로, 나머지(바뀜·추가)만 표시
+      function diffMarkHtml(original, suggestion) {
+        const oWords = String(original).split(/\s+/).filter(Boolean);
+        const parts = String(suggestion).split(/(\s+)/); // 단어와 공백을 순서대로 보존
+        const sWords = [];
+        for (const p of parts) { if (p && !/^\s+$/.test(p)) sWords.push(p); }
+        let marked = null;
+        if (oWords.length && sWords.length && oWords.length * sWords.length <= 40000) {
+          const n = oWords.length, m = sWords.length;
+          const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+          for (let i = n - 1; i >= 0; i--) {
+            for (let j = m - 1; j >= 0; j--) {
+              dp[i][j] = oWords[i] === sWords[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+            }
+          }
+          marked = new Array(m).fill(true); // true = 바뀐 단어
+          let i = 0, j = 0;
+          while (i < n && j < m) {
+            if (oWords[i] === sWords[j]) { marked[j] = false; i++; j++; }
+            else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+            else j++;
+          }
+        }
+        let html = '', wi = 0;
+        for (const p of parts) {
+          if (!p) continue;
+          if (/^\s+$/.test(p)) { html += p.indexOf('\n') !== -1 ? '<br>' : ' '; continue; }
+          const esc = escapeHtml(p);
+          html += (marked && marked[wi]) ? '<span class="sugg-diff">' + esc + '</span>' : esc;
+          wi++;
+        }
+        return html;
       }
       function renderRecommend(original, suggestions) {
         const list = document.getElementById('recommendList');
@@ -1996,8 +2070,11 @@
         }
         html += '<div class="result-label">추천 문구</div>';
         suggestions.forEach((s) => {
-          html += '<div class="sugg-card"><span class="sugg-text">' + escapeHtml(s) +
-            '</span><button class="copy-btn" data-copy="' + encodeURIComponent(s) + '">복사</button></div>';
+          // 문자열(예시 사전) 또는 {text, reason}(AI) 둘 다 지원
+          const item = (typeof s === 'string') ? { text: s, reason: '' } : { text: s.text || '', reason: s.reason || '' };
+          html += '<div class="sugg-card"><div class="sugg-main"><span class="sugg-text">' + diffMarkHtml(original, item.text) + '</span>' +
+            (item.reason ? '<div class="sugg-reason">' + escapeHtml(item.reason) + '</div>' : '') +
+            '</div><button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(item.text) + '">' + COPY_ICON + '</button></div>';
         });
         list.innerHTML = html;
         wireCopyButtons(list);
@@ -2009,7 +2086,7 @@
         let html = '<div class="result-label">원본</div><div class="result-original">' + escapeHtml(original) + '</div>';
         html += '<div class="result-label">번역' + (dirLabel ? ' (' + dirLabel + ')' : '') + '</div>';
         html += '<div class="sugg-card"><span class="sugg-text">' + escapeHtml(translated) +
-          '</span><button class="copy-btn" data-copy="' + encodeURIComponent(translated) + '">복사</button></div>';
+          '</span><button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(translated) + '">' + COPY_ICON + '</button></div>';
         box.innerHTML = html;
         wireCopyButtons(box);
       }

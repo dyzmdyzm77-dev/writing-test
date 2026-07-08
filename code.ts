@@ -320,6 +320,7 @@ const GLOSSARY_COMPOUNDS: string[] = [
   "상단정보",
   "부팅중",
   "풍수재",
+  "알림톡",
 ];
 const GLOSSARY_ACTION_NOUNS: string[] = [
   "확인",
@@ -372,7 +373,58 @@ const GLOSSARY_ACTION_NOUNS: string[] = [
 const GLOSSARY_KEEP_SPELLINGS: Array<{ keep: string; naver: string }> = [
   { keep: "렌탈", naver: "렌털" },
 ];
+const GLOSSARY_PHRASES: Array<{ from: string; to: string }> = [
+  { from: "되어요", to: "돼요" },
+  { from: "되었어요", to: "됐어요" },
+  { from: "되었습니다", to: "됐어요" },
+  { from: "하시겠어요", to: "할까요" },
+  { from: "계시나요", to: "있나요" },
+  { from: "여쭤볼게요", to: "확인할게요" },
+  { from: "보냅니다", to: "보내요" },
+];
 // ===== GLOSSARY:END =====
+
+// ===== RECOMMEND:BEGIN — 자동 생성 영역. 직접 수정하지 말고 recommend-examples.md를 고친 뒤 npm run build =====
+const RECOMMEND_EXAMPLES: Array<{ input: string; suggestions: string[] }> = [
+  { input: "진행하던 작업이 있습니다. 계속하시겠습니까?", suggestions: ["진행 중인 내역이 있어요.\n이어서 진행할까요?"] },
+  { input: "공유 요청을 취소하면 요청 내역이 삭제됩니다. 취소하시겠습니까?", suggestions: ["취소할 경우 요청 내역도 삭제돼요.\n공유 요청을 취소할까요?"] },
+  { input: "기기를 찾지 못했습니다. QR코드를 다시 스캔하세요.", suggestions: ["기기를 찾을 수 없어요.\nQR코드를 다시 스캔해 주세요."] },
+  { input: "보호자가 허락하기 전에는 가입할 수 없어요", suggestions: ["보호자가 허락해야 가입할 수 있어요"] },
+  { input: "지금 버전에서는 쓸 수 없어요. 생체 인증을 쓰려면 앱을 최신 버전으로 업데이트 해주세요.", suggestions: ["앱을 업데이트해주세요.\n생체 인증을 쓰려면 최신 버전이 필요해요."] },
+  { input: "어떤 목적으로 대출받으시나요?", suggestions: ["대출 목적이 무엇인가요?"] },
+  { input: "어떤 이유로 신고하시나요?", suggestions: ["신고 이유를 선택해 주세요."] },
+  { input: "잔액 부족으로 구매하지 못했어요", suggestions: ["잔액이 부족해서 구매하지 못했어요"] },
+  { input: "홍*동(010-1234-5678) 외 2명에게 권한 삭제 알림톡을 전송할까요?", suggestions: ["권한 삭제 알림톡을 보내려고 해요.\n홍*동(010-1234-5678) 님 외 2명에게 보낼까요?","홍*동(010-1234-5678) 님 외 2명에게 권한 삭제 알림톡을 보낼까요?","권한 삭제 알림톡을 홍*동(010-1234-5678) 님 외 2명에게 보낼까요?"] },
+];
+// ===== RECOMMEND:END =====
+
+// 문구 추천 — 예시 사전 기반 (서버 없이 로컬에서 동작).
+// 입력을 정규화한 뒤 recommend-examples.md의 원본과
+// ① 완전히 같거나 ② 서로 포함하면 그 예시의 추천안을 돌려준다. 없으면 빈 배열.
+// 정규화 시 마스킹된 이름(홍*동)·숫자(전화번호, "외 2명" 등)·공백·문장부호를 무시하므로
+// 이름/수량/번호만 다른 가변 문구도 같은 예시로 매칭된다.
+function normalizeForMatch(s: string): string {
+  return s
+    .replace(/[가-힣]\*[가-힣]+/g, '') // 마스킹된 이름 (홍*동) — 문장부호 제거 전에 먼저
+    .replace(/[0-9]+/g, '')            // 숫자 (전화번호·수량·버전 등)
+    .replace(/[\s\p{P}]/gu, '')
+    .toLowerCase();
+}
+function localRecommend(text: string): string[] {
+  const q = normalizeForMatch(text);
+  if (!q) return [];
+  // 1) 완전 일치 우선
+  for (const ex of RECOMMEND_EXAMPLES) {
+    if (normalizeForMatch(ex.input) === q) return ex.suggestions;
+  }
+  // 2) 부분 포함 (입력이 예시를 포함하거나, 예시가 입력을 포함) — 가장 긴 예시 우선.
+  //    숫자 제거로 짧아진 입력("2명" 등)이 아무 예시에나 걸리지 않도록 최소 길이 가드.
+  if (q.length < 5) return [];
+  const contains = RECOMMEND_EXAMPLES
+    .filter((ex) => { const n = normalizeForMatch(ex.input); return n.length >= 5 && (q.includes(n) || n.includes(q)); })
+    .sort((a, b) => normalizeForMatch(b.input).length - normalizeForMatch(a.input).length);
+  return contains.length ? contains[0].suggestions : [];
+}
 
 // ===============================
 // 용어 통일 + 권장 문구 규칙 (사내 용어집 기반 — 항상 적용)
@@ -384,7 +436,9 @@ const GLOSSARY_KEEP_SPELLINGS: Array<{ keep: string; naver: string }> = [
 //       이미 권장 표기인 텍스트가 이중 치환되지 않도록 가드를 둔다.
 // 자동화에서 뺀 항목: "관리자/담당자"(역할 안내라 치환 불가),
 //                  "일요일"(휴일/공휴일 중 무엇으로 바꿀지 문맥 필요),
-//                  "사용→사용함" 류 긍정형(사용자·사용법 등 오탐 위험; 부정형 미사용→사용 안함만 자동화)
+//                  "사용→사용함" 류 긍정형(사용자·사용법 등 오탐 위험; 부정형 미사용→사용 안함만 자동화),
+//                  "됐어요→했어요"·"바뀌었어요→바꿨어요" 능동형 전환(연체돼요·종료돼요 등 수동형 예외가 많고,
+//                  자동사→타동사 전환은 주어가 사물이면 문법이 깨짐("설정이 바꿨어요") — ux-writing 가이드 예외 규칙 참고)
 // ===============================
 const TERM_RULES: FixRule[] = [
   // --- 용어 통일 (glossary.md "용어 통일" 표에서 자동 생성) ---
@@ -395,12 +449,22 @@ const TERM_RULES: FixRule[] = [
     tags: ["term"],
   })),
 
+  // --- 권장 문구 (glossary.md "권장 문구" 표에서 자동 생성 — 말투·어미 규칙) ---
+  ...GLOSSARY_PHRASES.map((t): FixRule => ({
+    pattern: new RegExp(escapeRegex(t.from), 'g'),
+    replacement: t.to,
+    reason: "권장 문구",
+    tags: ["term"],
+  })),
+
   // --- 예외 처리가 필요한 용어 규칙 (정규식 — 여기서 직접 수정) ---
   // 이미 "지문등록 품질 검사"인 텍스트는 건너뜀 (앞 글자 '문' 가드)
   { pattern: /(^|[^문])등록 품질 검사/g, replacement: "$1지문등록 품질 검사", reason: "용어 통일", tags: ["term"] },
   // 이미 "사용자번호(고객인증번호)"로 쓴 경우 이중 치환 방지 (여는 괄호 가드)
   { pattern: /(^|[^(])고객인증번호/g, replacement: "$1사용자번호(고객인증번호)", reason: "용어 통일", tags: ["term"] },
   { pattern: /사용자 DB ?정보/g, replacement: "사용자 데이터 정보", reason: "용어 통일", tags: ["term"] },
+  // 캐주얼한 경어: '께'→'에게' — '님' 뒤에서만 치환("함께" 오탐 방지), 주격 조사 '님께서'는 제외
+  { pattern: /님께(?!서)/g, replacement: "님에게", reason: "권장 문구", tags: ["term"] },
   // "미사용자/미등록자" 등 사람을 가리키는 합성어는 제외 (라벨 토글 용어만 치환)
   { pattern: /미사용(?!자)/g, replacement: "사용 안함", reason: "용어 통일", tags: ["term"] },
   { pattern: /미동의(?!자)/g, replacement: "동의 안함", reason: "용어 통일", tags: ["term"] },
@@ -453,7 +517,12 @@ const COMPOUND_PROTECT_RULES: FixRule[] = GLOSSARY_COMPOUNDS.map((w): FixRule =>
   replacement: w,
   reason: "용어 통일",
   tags: ["term"],
-}));
+})).concat([
+  // 아라비아 숫자 + 단위 '명'은 붙여 쓴다("3명"). 네이버가 "3 명"으로 띄우면 되돌린다.
+  // 한글 수사(세 명)는 띄어쓰기가 표준이라 건드리지 않는다.
+  // 뒤에 명령·명단·명세 등 '명'으로 시작하는 다른 단어가 이어지면 제외 (조사 '의'는 제외 안 함 → "3명의 …" 유지)
+  { pattern: /([0-9]+)\s+명(?![령단세함목칭예중작소])/g, replacement: "$1명", reason: "띄어쓰기", tags: ["spacing"] },
+]);
 
 // 합성어 보호만 조용히 적용 (네이버 교정 직후에 사용 — 사유 없이 텍스트만 복원)
 function protectCompounds(s: string): string {
@@ -3383,26 +3452,32 @@ figma.ui.onmessage = async (msg: any) => {
 
   // 문구 추천 — 직접 입력이 있으면 그걸, 없으면 선택 영역 텍스트를 대상으로 한다
   if (msg.type === "RECOMMEND") {
+    // 하이브리드 추천: ① 예시 사전(recommend-examples.md) 로컬 매칭 → 즉시 응답
+    //               ② 없으면 워커(AI)가 스타일 기준+예시(few-shot)로 새 문장을 제안 (워커 미배포면 안내만)
+    const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
+    if (!text) {
+      figma.ui.postMessage({ type: 'show-toast', message: '문구를 입력하거나 텍스트를 선택해주세요.' });
+      return;
+    }
+    const local = localRecommend(text);
+    if (local.length) {
+      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local });
+      return;
+    }
     figma.ui.postMessage({ type: 'show-loading' });
-    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '문구 추천 받는 중...' });
+    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: 'AI 문구 추천 받는 중...' });
     try {
-      const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
-      if (!text) {
-        figma.ui.postMessage({ type: 'hide-loading' });
-        figma.ui.postMessage({ type: 'show-toast', message: '문구를 입력하거나 텍스트를 선택해주세요.' });
-        return;
-      }
       const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text }, 20000);
       const data = await res.json();
       figma.ui.postMessage({ type: 'hide-loading' });
-      if (!res.ok || data.error) {
-        figma.ui.postMessage({ type: 'show-toast', message: '추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
+      if (!res.ok || data.error || !data.suggestions || !data.suggestions.length) {
+        figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
         return;
       }
-      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: (data && data.suggestions) || [] });
+      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: data.suggestions });
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
-      figma.ui.postMessage({ type: 'show-toast', message: '추천 실패: ' + errStr(e) });
+      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + errStr(e) });
     }
     return;
   }

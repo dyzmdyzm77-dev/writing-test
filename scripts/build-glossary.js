@@ -30,6 +30,21 @@ for (const line of section('용어 통일').split('\n')) {
   terms.push({ from: cells[0], to: cells[1] });
 }
 
+// "권장 문구" 표 파싱: | 기존 | 권장 | — 용어가 아닌 말투·어미 규칙 (칩: "권장 문구"). 섹션이 없으면 빈 목록
+const phrases = [];
+try {
+  for (const line of section('권장 문구').split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    const cells = t.split('|').map((c) => c.trim()).filter((c, i, arr) => i > 0 && i < arr.length - 1);
+    if (cells.length < 2) continue;
+    if (cells[0] === '기존' || /^-+$/.test(cells[0])) continue; // 헤더/구분선
+    phrases.push({ from: cells[0], to: cells[1] });
+  }
+} catch (_e) {
+  // 섹션 없음 — 빈 목록 유지
+}
+
 // 목록 파싱: "- 단어"
 function listItems(title) {
   const out = [];
@@ -78,13 +93,67 @@ const gen = [
   'const GLOSSARY_KEEP_SPELLINGS: Array<{ keep: string; naver: string }> = [',
   ...keepSpellings.map((k) => `  { keep: ${JSON.stringify(k.keep)}, naver: ${JSON.stringify(k.naver)} },`),
   '];',
+  'const GLOSSARY_PHRASES: Array<{ from: string; to: string }> = [',
+  ...phrases.map((t) => `  { from: ${JSON.stringify(t.from)}, to: ${JSON.stringify(t.to)} },`),
+  '];',
   '// ===== GLOSSARY:END =====',
 ].join('\n');
 
-const src = fs.readFileSync(tsPath, 'utf8');
+let src = fs.readFileSync(tsPath, 'utf8');
 const re = /\/\/ ===== GLOSSARY:BEGIN[\s\S]*?\/\/ ===== GLOSSARY:END =====/;
 if (!re.test(src)) {
   throw new Error('code.ts에서 GLOSSARY 마커를 찾을 수 없습니다.');
 }
-fs.writeFileSync(tsPath, src.replace(re, gen), 'utf8');
-console.log(`[glossary] 용어 ${terms.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건, 예외 표기 ${keepSpellings.length}건 반영`);
+src = src.replace(re, gen);
+
+// ── 문구 추천 예시(recommend-examples.md) 파싱 → RECOMMEND_EXAMPLES 주입 ──
+const recMdPath = path.join(root, 'recommend-examples.md');
+const recMd = fs.readFileSync(recMdPath, 'utf8');
+const recSecIdx = recMd.search(/^## 추천 예시\s*$/m);
+if (recSecIdx === -1) {
+  throw new Error('recommend-examples.md에서 "## 추천 예시" 섹션을 찾을 수 없습니다.');
+}
+const examples = [];
+let cur = null;
+for (const raw of recMd.slice(recSecIdx).split('\n')) {
+  const line = raw.replace(/\s+$/, '');
+  const h = line.match(/^###\s+(.+?)\s*$/);
+  if (h) { cur = { input: h[1], suggestions: [] }; examples.push(cur); continue; }
+  const b = line.match(/^\s*-\s+(.+?)\s*$/);
+  if (b && cur) { cur.suggestions.push(b[1].split(' / ').join('\n')); } // " / " → 줄바꿈
+}
+const validExamples = examples.filter((e) => e.suggestions.length > 0);
+
+const recGen = [
+  '// ===== RECOMMEND:BEGIN — 자동 생성 영역. 직접 수정하지 말고 recommend-examples.md를 고친 뒤 npm run build =====',
+  'const RECOMMEND_EXAMPLES: Array<{ input: string; suggestions: string[] }> = [',
+  ...validExamples.map((e) => `  { input: ${JSON.stringify(e.input)}, suggestions: ${JSON.stringify(e.suggestions)} },`),
+  '];',
+  '// ===== RECOMMEND:END =====',
+].join('\n');
+const reRec = /\/\/ ===== RECOMMEND:BEGIN[\s\S]*?\/\/ ===== RECOMMEND:END =====/;
+if (!reRec.test(src)) {
+  throw new Error('code.ts에서 RECOMMEND 마커를 찾을 수 없습니다.');
+}
+src = src.replace(reRec, recGen);
+
+fs.writeFileSync(tsPath, src, 'utf8');
+
+// 워커(worker.js)의 RECOMMEND 마커에도 같은 예시를 주입 — AI 추천 프롬프트의 few-shot으로 쓰인다
+const workerPath = path.join(root, 'naver-passport-proxy', 'worker.js');
+if (fs.existsSync(workerPath)) {
+  const workerGen = [
+    '// ===== RECOMMEND:BEGIN — 자동 생성 영역. 직접 수정하지 말고 recommend-examples.md를 고친 뒤 npm run build =====',
+    'const RECOMMEND_EXAMPLES = [',
+    ...validExamples.map((e) => `  { input: ${JSON.stringify(e.input)}, suggestions: ${JSON.stringify(e.suggestions)} },`),
+    '];',
+    '// ===== RECOMMEND:END =====',
+  ].join('\n');
+  let workerSrc = fs.readFileSync(workerPath, 'utf8');
+  if (reRec.test(workerSrc)) {
+    fs.writeFileSync(workerPath, workerSrc.replace(reRec, workerGen), 'utf8');
+  }
+}
+
+console.log(`[glossary] 용어 ${terms.length}건, 권장 문구 ${phrases.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건, 예외 표기 ${keepSpellings.length}건 반영`);
+console.log(`[recommend] 추천 예시 ${validExamples.length}건 반영 (code.ts + worker.js)`);
