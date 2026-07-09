@@ -153,6 +153,17 @@ if (fs.existsSync(workerPath)) {
   if (reRec.test(workerSrc)) {
     fs.writeFileSync(workerPath, workerSrc.replace(reRec, workerGen), 'utf8');
   }
+
+  // Vercel 제보 앱(ux-writing-reports)의 api/recommend.js에도 주입 — 현재 실서버 (옆 폴더에 클론돼 있을 때만).
+  // 주입 후 그쪽 저장소에서 커밋+푸시해야 Vercel에 배포된다.
+  const vercelRecPath = path.join(root, '..', 'ux-writing-reports', 'api', 'recommend.js');
+  if (fs.existsSync(vercelRecPath)) {
+    const vercelSrc = fs.readFileSync(vercelRecPath, 'utf8');
+    if (reRec.test(vercelSrc)) {
+      fs.writeFileSync(vercelRecPath, vercelSrc.replace(reRec, workerGen), 'utf8');
+      console.log('[recommend] ux-writing-reports/api/recommend.js에도 반영 — 그쪽 저장소에서 커밋+푸시 필요');
+    }
+  }
 }
 
 console.log(`[glossary] 용어 ${terms.length}건, 권장 문구 ${phrases.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건, 예외 표기 ${keepSpellings.length}건 반영`);

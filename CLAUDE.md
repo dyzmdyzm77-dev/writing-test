@@ -32,7 +32,14 @@
 - 검토 사유는 키워드 칩(맞춤법/띄어쓰기/해요체/간결하게/용어 통일 등 10종)으로 표시
 - **코멘트는 현재 네이티브 어노테이션 프로토타입** (node.annotations — 클릭해도 크기 배지 안 뜸). 초록 말풍선 복귀: `git revert b365c35` (createCommentFrame 보존돼 있음). 크기 배지를 숨기는 API는 없음(확정)
 
+## 서버 구조 (2026-07 이사)
+
+- 심부름꾼 서버는 **Vercel 제보 앱(ux-writing-reports 저장소, report-admin-weld.vercel.app)에 통합** — `GET /api/passport`(맞춤법 열쇠), `POST /api/recommend`, `POST /api/translate`. 이사 이유: 사내 보안 프록시가 workers.dev를 '1회성 사용' 안내 페이지로 가로채 플러그인 fetch가 `Failed to fetch`로 실패 (vercel.app은 통과)
+- 구 Cloudflare Worker(naver-passport-proxy/worker.js)는 **롤백용으로 유지** — 되돌리려면 code.ts NAVER_PROXY_URL을 워커 주소로 바꾸고 passport 경로 결합부 수정
+- `npm run build`는 recommend-examples.md를 code.ts + worker.js + **옆 폴더의 ux-writing-reports/api/recommend.js**(있을 때만)에 주입 — 주입 후 그쪽 저장소에서 커밋+푸시해야 실서버 반영
+- 서버 배포 = ux-writing-reports 저장소에 git push (Vercel 자동 배포). vercel.com 대시보드는 사내에서 차단이라 안 열리지만 배포에는 불필요
+
 ## 주의
 
-- 검토 시 텍스트가 외부(Cloudflare Worker + 네이버)로 전송됨 — 워커 주소는 code.ts의 NAVER_PROXY_URL, manifest.json allowedDomains와 함께 변경
+- 검토 시 텍스트가 외부(Vercel 서버 + 네이버)로 전송됨 — 서버 주소는 code.ts의 NAVER_PROXY_URL, manifest.json allowedDomains와 함께 변경
 - 네이버 SpellerProxy는 비공식 API (passportKey 방식) — 깨지면 로컬 규칙만으로 동작

@@ -1132,10 +1132,15 @@ let naverPassportKey: string | null = null;
 let naverDiag = ''; // 실패 원인 진단용 (토스트/콘솔로 노출)
 let naverOkCount = 0; // 이번 검토에서 SpellerProxy 정상 응답 건수
 
-// passportKey 심부름꾼 서버 주소. 검색페이지는 CORS가 막혀 플러그인에서 직접 못 긁으므로
-// Cloudflare Worker(naver-passport-proxy/worker.js)가 서버에서 대신 긁어 CORS 허용해서 돌려준다.
-// ↓ 배포 후 본인 워커 주소로 교체할 것 (manifest.json allowedDomains에도 같은 도메인 추가)
-const NAVER_PROXY_URL = 'https://writingtest.dyzmdyzm77.workers.dev/';
+// 심부름꾼 서버 주소 (passportKey 긁기 + AI 추천/번역).
+// 검색페이지는 CORS가 막혀 플러그인에서 직접 못 긁으므로 서버가 대신 긁어 CORS 허용해서 돌려준다.
+// 원래 Cloudflare Worker(naver-passport-proxy/worker.js)였지만 사내 프록시가 workers.dev를
+// 차단해서(1회성 사용 안내 페이지) 제보 앱과 같은 Vercel(ux-writing-reports)로 이사함 — 2026-07.
+// 경로: GET {URL}passport / POST {URL}recommend / POST {URL}translate
+// ↓ 주소를 바꾸면 manifest.json allowedDomains에도 같은 도메인 추가할 것.
+//   구 워커('https://writingtest.dyzmdyzm77.workers.dev/')는 롤백용으로 살아 있음 — 되돌리려면
+//   이 값을 워커 주소로 바꾸고 passport 경로를 ''로(워커는 루트가 passportKey).
+const NAVER_PROXY_URL = 'https://report-admin-weld.vercel.app/api/';
 
 // 오수정 제보 저장/열람은 별도 Vercel 앱(ux-writing-reports)에서 처리한다.
 // 저장 API: POST /api/report, 관리자 페이지: https://report-admin-weld.vercel.app/
@@ -1159,7 +1164,7 @@ function errStr(e: any): string {
   try { return JSON.stringify(e); } catch (_e) { return String(e); }
 }
 
-// ── AI 기능(문구 추천 / 번역) — 같은 워커의 다른 경로로 POST 요청 ──
+// ── AI 기능(문구 추천 / 번역) — 같은 서버의 다른 경로로 POST 요청 ──
 // NAVER_PROXY_URL은 끝에 '/'가 있으므로 경로를 그대로 이어 붙인다.
 async function postJsonWithTimeout(url: string, body: any, ms: number): Promise<Response> {
   return Promise.race([
@@ -1261,7 +1266,7 @@ async function getNaverPassportKey(force = false): Promise<string | null> {
 
 async function fetchNaverPassportKey(): Promise<string | null> {
   try {
-    const res = await fetchWithTimeout(NAVER_PROXY_URL, 8000);
+    const res = await fetchWithTimeout(NAVER_PROXY_URL + 'passport', 8000);
     if (!res.ok) { naverDiag = '프록시 HTTP ' + res.status; console.log('[UX-SPELL]', naverDiag); return null; }
     const data = await res.json();
     naverPassportKey = (data && typeof data.passportKey === 'string') ? data.passportKey : null;
