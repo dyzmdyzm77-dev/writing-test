@@ -89,6 +89,21 @@
       #recommendHeader .feature-input, #translateHeader .feature-input {
         flex: 1 1 auto;
       }
+      /* 추천 후 컴팩트 헤더: 큰 입력창·안내문은 숨기고
+         입력 내용(읽기 전용) + [다시 추천받기]만 상단에 고정 — 아래 추천 리스트만 스크롤 */
+      #recommendHeader.compact { min-height: 0; }
+      #recommendHeader.compact .hint,
+      #recommendHeader.compact #recommendInput { display: none; }
+      #recommendEntered { display: none; margin-bottom: 12px; }
+      #recommendHeader.compact #recommendEntered { display: block; }
+      #recommendEntered .entered-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+      #recommendEntered .result-label { margin: 0; }
+      #recommendEntered .result-original { max-height: 96px; overflow-y: auto; }
       /* 검토 빈 화면: 동일 높이 + 버튼 아래 구분선 숨김 + 예시 그래픽이 남는 공간을 채워 세로 가운데 */
       #topFixed.empty-review {
         min-height: 320px;
@@ -1211,6 +1226,14 @@
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
       </div>
+      <!-- 추천 후 컴팩트 모드: 보낸 문구를 읽기 전용으로 표시 (문구를 바꾸려면 [새로 입력]) -->
+      <div id="recommendEntered">
+        <div class="entered-head">
+          <div class="result-label">입력 내용</div>
+          <button id="recommendEdit" class="reset-btn visible" type="button">새로 입력</button>
+        </div>
+        <div id="recommendEnteredText" class="result-original"></div>
+      </div>
       <textarea id="recommendInput" class="feature-input" placeholder="예) 로그인이 필요합니다"></textarea>
       <button id="recommendRun" class="button-primary button-full-width">추천받기</button>
     </div>
@@ -1655,7 +1678,9 @@
         }
 
         if (event.data.pluginMessage.type === 'recommend-result') {
-          renderRecommend(event.data.pluginMessage.original || '', event.data.pluginMessage.suggestions || []);
+          const recOrig = event.data.pluginMessage.original || '';
+          renderRecommend(recOrig, event.data.pluginMessage.suggestions || []);
+          if (recOrig) setRecommendCompact(true, recOrig); // 결과가 오면 헤더를 컴팩트 모드로
         }
 
         if (event.data.pluginMessage.type === 'translate-result') {
@@ -2225,11 +2250,32 @@
       document.getElementById('tabHome').addEventListener('click', () => showView('home'));
 
       // ── 문구 추천 / 번역 실행 ──
-      // 추천받기: 입력창은 그대로 두고 결과만 아래에 표시 (수정 후 다시 눌러 재추천)
+      // 추천받기: 첫 실행 후 헤더가 컴팩트 모드로 바뀜 — 큰 입력창 대신
+      // '입력 내용'(읽기 전용) + [다시 추천받기]가 상단 고정, 추천 리스트만 스크롤.
+      // 문구를 바꾸려면 [새로 입력]으로 입력창 화면으로 복귀.
+      let lastRecommendText = ''; // 컴팩트 모드에서 [다시 추천받기]가 재사용할 원문
+      function setRecommendCompact(on, original) {
+        document.getElementById('recommendHeader').classList.toggle('compact', on);
+        if (on) {
+          lastRecommendText = original;
+          document.getElementById('recommendEnteredText').textContent = original;
+        }
+        document.getElementById('recommendRun').textContent = on ? '다시 추천받기' : '추천받기';
+        updateFeatureButtonState();
+        adjustTopPadding();
+      }
       document.getElementById('recommendRun').onclick = () => {
-        const text = document.getElementById('recommendInput').value.trim();
+        const compact = document.getElementById('recommendHeader').classList.contains('compact');
+        const text = compact ? lastRecommendText : document.getElementById('recommendInput').value.trim();
         if (!text) return;
         parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text } }, '*');
+      };
+      document.getElementById('recommendEdit').onclick = () => {
+        const el = document.getElementById('recommendInput');
+        // 캔버스 선택 등으로 이미 채워진 값이 있으면 보존, 없으면 직전 문구를 되살려 수정 시작점 제공
+        if (!el.value.trim()) el.value = lastRecommendText;
+        setRecommendCompact(false);
+        el.focus();
       };
       document.getElementById('translateRun').onclick = () => {
         const text = document.getElementById('translateInput').value.trim();
@@ -2240,7 +2286,9 @@
       function updateFeatureButtonState() {
         const rEl = document.getElementById('recommendInput');
         const rBtn = document.getElementById('recommendRun');
-        if (rEl && rBtn) rBtn.disabled = !rEl.value.trim();
+        // 컴팩트 모드에선 lastRecommendText로 재추천하므로 입력창이 비어도 활성 유지
+        const rCompact = document.getElementById('recommendHeader').classList.contains('compact');
+        if (rEl && rBtn) rBtn.disabled = rCompact ? false : !rEl.value.trim();
         const tEl = document.getElementById('translateInput');
         const tBtn = document.getElementById('translateRun');
         if (tEl && tBtn) tBtn.disabled = !tEl.value.trim();
@@ -2362,7 +2410,7 @@
       function renderRecommend(original, suggestions) {
         const list = document.getElementById('recommendList');
         if (!list) return;
-        // 원본은 입력창에 그대로 보이므로 결과에는 표시하지 않는다
+        // 원본은 상단 고정 '입력 내용' 박스에 보이므로 결과에는 표시하지 않는다
         let html = '';
         if (!suggestions.length) {
           html += '<div class="result-empty">추천 결과가 없어요. 다시 시도해 주세요.</div>';
