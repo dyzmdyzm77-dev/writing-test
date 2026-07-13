@@ -953,6 +953,9 @@
         font-weight: 500;
       }
       .feature-settings-btn:hover { color: #1D6CEB; border-color: #1D6CEB; background: #F7F9FF; }
+      /* 클로드 다리 켜짐 표시 — 초록 톤 */
+      #bridgeWakeBtn.bridge-on { color: #12805C; border-color: #A6E0C8; }
+      #bridgeWakeBtn.bridge-on:hover { color: #0E6B4D; border-color: #12805C; background: #F1FBF6; }
       /* 키가 저장돼 있으면 초록 톤 + 초록 체크(✓)로 '저장됨' 표시 */
       .feature-settings-btn.has-key { color: #12805C; border-color: #A6E0C8; }
       .feature-settings-btn.has-key:hover { color: #0E6B4D; border-color: #12805C; background: #F1FBF6; }
@@ -1221,7 +1224,7 @@
         <div class="title-row">
           <div class="title">문구 추천받기</div>
           <div class="title-actions">
-            <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" style="display:none" title="이 PC의 클로드 다리를 깨워요 (한 번은 클로드다리-원클릭연결 등록 필요)" aria-label="클로드 다리 켜기">🔌 클로드 켜기</button>
+            <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="클로드 다리 상태 — 꺼져 있으면 눌러서 켜기" aria-label="클로드 다리">클로드 확인 중…</button>
           </div>
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
@@ -1688,16 +1691,19 @@
         if (event.data.pluginMessage.type === 'bridge-status') {
           const bs = event.data.pluginMessage;
           if (bridgeWakeBtn) {
-            // 다리가 켜져 있으면 버튼을 숨긴다 — 추천받기 한 번에 클로드가 자동으로 답하므로 누를 게 없다.
-            // 꺼져 있을 때만 "🔌 클로드 켜기"로 노출. 켜는 중(폴링)에는 진행 표시를 위해 보인다.
+            // 버튼은 항상 보이고 상태를 색·글자로 표시한다.
+            // 켜짐(초록) "클로드 켜짐" — 추천받기 누르면 자동으로 클로드가 답함 / 꺼짐(회색) "클로드 꺼짐" — 눌러서 켜기
             if (bs.alive && bridgeWakePoll) {
-              // 방금 켜짐 — 폴링 종료 + 알림 후 숨김
+              // 방금 켜짐 — 폴링 종료 + 알림
               stopBridgeWakePoll();
               showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요 — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
             }
             if (!bridgeWakePoll) {
-              bridgeWakeBtn.style.display = bs.alive ? 'none' : '';
-              if (!bs.alive) bridgeWakeBtn.textContent = '🔌 클로드 켜기';
+              bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive);
+              bridgeWakeBtn.textContent = bs.alive ? '🟢 클로드 켜짐' : '⚫ 클로드 꺼짐';
+              bridgeWakeBtn.title = bs.alive
+                ? '클로드 다리 켜져 있음 — 추천받기를 누르면 클로드가 답해요'
+                : '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (한 번은 클로드다리-원클릭연결 등록 필요)';
             }
           }
         }
@@ -2351,7 +2357,6 @@
       // (클로드다리-원클릭연결.vbs로 한 번 등록된 PC에서만 실제로 켜짐 — 미등록이면 아무 일도 안 일어남)
       // 누르면 켜질 때까지 2초 간격으로 상태를 확인해 "켜졌어요" 피드백을 준다.
       const bridgeWakeBtn = document.getElementById('bridgeWakeBtn');
-      const BRIDGE_BTN_LABEL = '🔌 클로드 켜기';
       let bridgeWakePoll = null;   // 깨우는 중 상태 확인 타이머
       let bridgeWakeWaited = 0;
       function requestBridgeStatus() {
@@ -2359,10 +2364,11 @@
       }
       function stopBridgeWakePoll() {
         if (bridgeWakePoll) { clearInterval(bridgeWakePoll); bridgeWakePoll = null; }
-        if (bridgeWakeBtn) { bridgeWakeBtn.disabled = false; bridgeWakeBtn.textContent = BRIDGE_BTN_LABEL; }
+        if (bridgeWakeBtn) { bridgeWakeBtn.disabled = false; requestBridgeStatus(); } // 끝난 뒤 최신 상태로 라벨 갱신
       }
       if (bridgeWakeBtn) {
         bridgeWakeBtn.onclick = () => {
+          if (bridgeWakeBtn.classList.contains('bridge-on')) { showToast('클로드가 켜져 있어요. 추천받기를 누르면 바로 답해요.'); return; }
           window.open('claudebridge://start');
           bridgeWakeBtn.disabled = true;
           bridgeWakeBtn.textContent = '켜는 중…';
