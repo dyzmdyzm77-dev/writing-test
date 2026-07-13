@@ -1300,6 +1300,8 @@
 
     <script>
       let previewData = [];
+      let elapsedTimer = null; // AI 추천 로딩의 경과 시간 타이머 (진행률을 알 수 없어 초 단위로 표시)
+      function stopElapsedTimer() { if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; } }
       let lastSelectionText = ''; // 캔버스에서 마지막으로 선택한 영역의 텍스트 (추천/번역 입력창 자동 채움용)
       let hasApiKey = false;      // 개인 Gemini 키 저장 여부
       let lastUsage = null;       // { used, limit, remaining } — 오늘 사용량
@@ -1789,24 +1791,29 @@
         }
 
         if (event.data.pluginMessage.type === 'show-loading') {
+          const m = event.data.pluginMessage;
           const loadingOverlay = document.getElementById('loadingOverlay');
           const loadingProgress = document.getElementById('loadingProgress');
           const loadingStatus = document.getElementById('loadingStatus');
-          if (loadingOverlay) {
-            loadingOverlay.classList.add('active');
-          }
-          if (loadingProgress) {
+          if (loadingOverlay) loadingOverlay.classList.add('active');
+          if (loadingStatus) loadingStatus.textContent = m.status || '준비 중...';
+          stopElapsedTimer();
+          if (m.indeterminate) {
+            // 진행률을 알 수 없는 작업(AI 추천) — 가짜 %가 아니라 경과 시간을 센다
+            const t0 = Date.now();
+            if (loadingProgress) loadingProgress.textContent = '0초';
+            elapsedTimer = setInterval(() => {
+              if (loadingProgress) loadingProgress.textContent = Math.round((Date.now() - t0) / 1000) + '초';
+            }, 500);
+          } else if (loadingProgress) {
             loadingProgress.textContent = '0%';
           }
-          if (loadingStatus) {
-            loadingStatus.textContent = '준비 중...';
-          }
         }
-        
+
         if (event.data.pluginMessage.type === 'update-progress') {
           const loadingProgress = document.getElementById('loadingProgress');
           const loadingStatus = document.getElementById('loadingStatus');
-          if (loadingProgress) {
+          if (loadingProgress && !elapsedTimer) { // 경과 시간 모드일 땐 %로 덮어쓰지 않음
             const progress = event.data.pluginMessage.progress || 0;
             loadingProgress.textContent = Math.round(progress) + '%';
           }
@@ -1816,6 +1823,7 @@
         }
         
         if (event.data.pluginMessage.type === 'hide-loading') {
+          stopElapsedTimer();
           const loadingOverlay = document.getElementById('loadingOverlay');
           if (loadingOverlay) {
             loadingOverlay.classList.remove('active');

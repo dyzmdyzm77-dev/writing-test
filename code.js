@@ -3809,8 +3809,8 @@ figma.ui.onmessage = async (msg) => {
             postRecommendFallback(text, '');
             return;
         }
-        figma.ui.postMessage({ type: 'show-loading' });
-        figma.ui.postMessage({ type: 'update-progress', progress: 30, status: bridge ? '클로드가 문구를 다듬는 중… (보통 5~10초)' : 'AI 문구 추천 받는 중...' });
+        // AI 추천은 진행률을 알 수 없다(다 만들어지면 한 번에 옴) → 가짜 %가 아니라 경과 시간으로 표시.
+        figma.ui.postMessage({ type: 'show-loading', indeterminate: true, status: bridge ? '클로드가 문구를 다듬는 중이에요' : 'AI가 문구를 다듬는 중이에요' });
         try {
             const suggestions = await fetchAiSuggestions(text, apiKey, bridge, msg.model);
             figma.ui.postMessage({ type: 'hide-loading' });
