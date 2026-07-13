@@ -979,6 +979,9 @@
         font-weight: 500;
       }
       .feature-settings-btn:hover { color: #1D6CEB; border-color: #1D6CEB; background: #F7F9FF; }
+      /* 클로드 다리 켜짐 표시 — API 키 버튼의 has-key와 같은 초록 톤 */
+      #bridgeWakeBtn.bridge-on { color: #12805C; border-color: #A6E0C8; }
+      #bridgeWakeBtn.bridge-on:hover { color: #0E6B4D; border-color: #12805C; background: #F1FBF6; }
       /* 키가 저장돼 있으면 초록 톤 + 초록 체크(✓)로 '저장됨' 표시 */
       .feature-settings-btn.has-key { color: #12805C; border-color: #A6E0C8; }
       .feature-settings-btn.has-key:hover { color: #0E6B4D; border-color: #12805C; background: #F1FBF6; }
@@ -1384,6 +1387,7 @@
       }
       function showView(name) {
         currentView = name;
+        if (name === 'recommend') requestBridgeStatus(); // 추천 화면 열 때마다 다리 상태 갱신
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
         document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'flex' : 'none';
@@ -1722,6 +1726,21 @@
             canAskAi: !!recMsg.canAskAi,   // 사전 답안 카드 밑에 [AI 추천 더 받기] 버튼 노출
           });
           if (recOrig) setRecommendCompact(true, recOrig); // 결과가 오면 헤더를 컴팩트 모드로
+        }
+
+        // 클로드 다리 상태 — [🔌 클로드] 버튼에 표시하고, 깨우는 중이었다면 "켜졌어요" 알림
+        if (event.data.pluginMessage.type === 'bridge-status') {
+          const bs = event.data.pluginMessage;
+          if (bridgeWakeBtn) {
+            bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive);
+            bridgeWakeBtn.title = bs.alive
+              ? (bs.ready ? '클로드 다리 켜져 있음 — 추천이 클로드로 동작해요' : '클로드 다리 준비 중…')
+              : '이 PC의 클로드 다리를 깨워요 (한 번은 클로드다리-원클릭연결 등록 필요)';
+            if (bs.alive && bridgeWakePoll) {
+              stopBridgeWakePoll();
+              showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천이 클로드로 동작해요.' : '클로드 다리가 켜졌어요 — 준비 중이라 첫 추천은 조금 걸릴 수 있어요.');
+            }
+          }
         }
 
         // 사전 답안 직후 AI 제안을 자동으로 이어받는 중 — 버튼을 '받는 중' 상태로
@@ -2378,13 +2397,34 @@
       };
       // [🔌 클로드] — claudebridge:// 주소를 열어 이 PC의 다리를 깨운다.
       // (클로드다리-원클릭연결.vbs로 한 번 등록된 PC에서만 실제로 켜짐 — 미등록이면 아무 일도 안 일어남)
+      // 누르면 켜질 때까지 2초 간격으로 상태를 확인해 "켜졌어요" 피드백을 준다.
       const bridgeWakeBtn = document.getElementById('bridgeWakeBtn');
+      const BRIDGE_BTN_LABEL = '🔌 클로드';
+      let bridgeWakePoll = null;   // 깨우는 중 상태 확인 타이머
+      let bridgeWakeWaited = 0;
+      function requestBridgeStatus() {
+        parent.postMessage({ pluginMessage: { type: 'CHECK_BRIDGE' } }, '*');
+      }
+      function stopBridgeWakePoll() {
+        if (bridgeWakePoll) { clearInterval(bridgeWakePoll); bridgeWakePoll = null; }
+        if (bridgeWakeBtn) { bridgeWakeBtn.disabled = false; bridgeWakeBtn.textContent = BRIDGE_BTN_LABEL; }
+      }
       if (bridgeWakeBtn) {
         bridgeWakeBtn.onclick = () => {
+          if (bridgeWakeBtn.classList.contains('bridge-on')) { showToast('클로드 다리가 이미 켜져 있어요.'); return; }
           window.open('claudebridge://start');
-          showToast('클로드 다리를 깨우는 중이에요 — 10초쯤 뒤에 추천받기를 눌러 보세요.');
           bridgeWakeBtn.disabled = true;
-          setTimeout(() => { bridgeWakeBtn.disabled = false; }, 5000);
+          bridgeWakeBtn.textContent = '켜는 중…';
+          bridgeWakeWaited = 0;
+          if (bridgeWakePoll) clearInterval(bridgeWakePoll);
+          bridgeWakePoll = setInterval(() => {
+            bridgeWakeWaited += 2;
+            requestBridgeStatus();
+            if (bridgeWakeWaited >= 40) { // 40초 넘게 안 켜지면 포기
+              stopBridgeWakePoll();
+              showToast('다리가 켜지지 않았어요. 클로드다리-원클릭연결.vbs를 먼저 등록했는지 확인해 주세요.');
+            }
+          }, 2000);
         };
       }
 
@@ -2427,8 +2467,8 @@
         document.querySelectorAll('.usage-settings-link').forEach((a) => {
           a.onclick = (e) => { e.preventDefault(); openApiKeyModal(); };
         });
-        // 키 저장 여부를 'API 키' 버튼에 표시 (초록 점)
-        document.querySelectorAll('.feature-settings-btn').forEach((b) => {
+        // 키 저장 여부를 'API 키' 버튼에 표시 (초록 점) — [🔌 클로드] 버튼은 제외
+        document.querySelectorAll('.feature-settings-btn.js-open-apikey').forEach((b) => {
           b.classList.toggle('has-key', hasApiKey);
           b.title = hasApiKey ? 'API 키 저장됨 — 변경하려면 클릭' : '개인 Gemini API 키 설정';
         });
@@ -2442,8 +2482,9 @@
         }
       }
 
-      // 최초 로드 시 저장된 키 상태 + 오늘 사용량 요청
+      // 최초 로드 시 저장된 키 상태 + 오늘 사용량 + 클로드 다리 상태 요청
       parent.postMessage({ pluginMessage: { type: 'GET_API_KEY_STATUS' } }, '*');
+      requestBridgeStatus();
 
       // ── 결과 렌더링 ──
       function escapeHtml(s) {

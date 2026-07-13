@@ -1351,16 +1351,22 @@ const REPORT_URL = 'https://report-admin-weld.vercel.app/api/report';
 // 우선순위: 예시 사전 → 클로드 다리 → Gemini(개인 키) → 로컬 폴백(유사 예시+규칙).
 // manifest.json allowedDomains에 http://localhost:11888 등록돼 있음.
 const CLAUDE_BRIDGE_URL = 'http://localhost:11888';
-async function isBridgeAlive() {
+async function bridgeHealth() {
     try {
         // 피그마의 네트워크 중계가 첫 요청에 느릴 수 있어 여유 있게 (다리 없으면 연결 거부라 즉시 실패함)
         const res = await fetchWithTimeout(CLAUDE_BRIDGE_URL + '/health', 3000);
-        return res.ok;
+        if (!res.ok)
+            return { alive: false, ready: false };
+        const d = await res.json().catch(() => ({}));
+        return { alive: true, ready: !!(d && d.ready) };
     }
     catch (e) {
         console.log('[BRIDGE] 다리 확인 실패 (꺼져 있거나 접근 불가):', errStr(e));
-        return false;
+        return { alive: false, ready: false };
     }
+}
+async function isBridgeAlive() {
+    return (await bridgeHealth()).alive;
 }
 // 타임아웃 있는 fetch — 한 요청이 멈춰도 그 슬롯이 영원히 막히지 않게 한다.
 // Figma 플러그인 런타임엔 AbortController가 없어 Promise.race로 구현 (느린 fetch는 버려지고 슬롯만 푼다).
@@ -3969,6 +3975,12 @@ figma.ui.onmessage = async (msg) => {
         catch (_e) { /* 무시 */ }
         figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true, aiOn: await isAiRecommendOn() });
         postUsage(await readUsage());
+        return;
+    }
+    // 클로드 다리 상태 조회 — UI의 [🔌 클로드] 버튼 표시/깨우기 피드백용
+    if (msg.type === "CHECK_BRIDGE") {
+        const h = await bridgeHealth();
+        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready });
         return;
     }
     // 추천 AI 사용 토글 — 끄면 키가 있어도 추천은 로컬(예시 사전+규칙)만 쓴다
