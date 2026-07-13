@@ -1435,13 +1435,13 @@ const REPORT_URL = 'https://report-admin-weld.vercel.app/api/report';
 // 우선순위: 예시 사전 → 클로드 다리 → Gemini(개인 키) → 로컬 폴백(유사 예시+규칙).
 // manifest.json allowedDomains에 http://localhost:11888 등록돼 있음.
 const CLAUDE_BRIDGE_URL = 'http://localhost:11888';
-async function bridgeHealth(): Promise<{ alive: boolean; ready: boolean; model?: string }> {
+async function bridgeHealth(): Promise<{ alive: boolean; ready: boolean; model?: string; problem?: string }> {
   try {
     // 피그마의 네트워크 중계가 첫 요청에 느릴 수 있어 여유 있게 (다리 없으면 연결 거부라 즉시 실패함)
     const res = await fetchWithTimeout(CLAUDE_BRIDGE_URL + '/health', 3000);
     if (!res.ok) return { alive: false, ready: false };
     const d = await res.json().catch(() => ({} as any));
-    return { alive: true, ready: !!(d && d.ready), model: d && d.model };
+    return { alive: true, ready: !!(d && d.ready), model: d && d.model, problem: d && d.problem };
   } catch (e) {
     console.log('[BRIDGE] 다리 확인 실패 (꺼져 있거나 접근 불가):', errStr(e));
     return { alive: false, ready: false };
@@ -3952,7 +3952,7 @@ figma.ui.onmessage = async (msg: any) => {
   // 클로드 다리 상태 조회 — UI의 [🔌 클로드] 버튼 표시/깨우기 피드백용
   if (msg.type === "CHECK_BRIDGE") {
     const h = await bridgeHealth();
-    figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model });
+    figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem });
     return;
   }
   if (msg.type === "CLEAR_API_KEY") {

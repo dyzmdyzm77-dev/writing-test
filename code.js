@@ -1358,7 +1358,7 @@ async function bridgeHealth() {
         if (!res.ok)
             return { alive: false, ready: false };
         const d = await res.json().catch(() => ({}));
-        return { alive: true, ready: !!(d && d.ready), model: d && d.model };
+        return { alive: true, ready: !!(d && d.ready), model: d && d.model, problem: d && d.problem };
     }
     catch (e) {
         console.log('[BRIDGE] 다리 확인 실패 (꺼져 있거나 접근 불가):', errStr(e));
@@ -3934,7 +3934,7 @@ figma.ui.onmessage = async (msg) => {
     // 클로드 다리 상태 조회 — UI의 [🔌 클로드] 버튼 표시/깨우기 피드백용
     if (msg.type === "CHECK_BRIDGE") {
         const h = await bridgeHealth();
-        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model });
+        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem });
         return;
     }
     if (msg.type === "CLEAR_API_KEY") {

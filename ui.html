@@ -1710,9 +1710,13 @@
             // 버튼은 항상 보이고 상태를 색·글자로 표시한다.
             // 켜짐(초록) "클로드 켜짐" — 추천받기 누르면 자동으로 클로드가 답함 / 꺼짐(회색) "클로드 꺼짐" — 눌러서 켜기
             if (bs.alive && bridgeWakePoll) {
-              // 방금 켜짐 — 폴링 종료 + 알림
+              // 방금 켜짐 — 폴링 종료 + 알림. 단 Claude Code가 없으면 켜져도 추천이 안 되니 그걸 안내.
               stopBridgeWakePoll();
-              showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요 — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
+              if (bs.problem === 'claude-missing') {
+                showToast('다리는 켜졌지만 Claude Code가 없어요. 터미널에서 claude --version 이 되는지(설치·로그인) 확인해 주세요.');
+              } else {
+                showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요 — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
+              }
             }
             // 다리가 보고한 현재 모델로 드롭다운을 맞춘다 (사용자가 아직 안 건드렸을 때만)
             if (bs.alive && bs.model && modelSelect && !modelSelect.dataset.userPicked) {
@@ -2401,9 +2405,9 @@
           bridgeWakePoll = setInterval(() => {
             bridgeWakeWaited += 2;
             requestBridgeStatus();
-            if (bridgeWakeWaited >= 40) { // 40초 넘게 안 켜지면 포기
+            if (bridgeWakeWaited >= 20) { // 20초 넘게 안 켜지면 설치 안내 (다리가 살아 있으면 그 전에 상태 메시지로 폴링 종료됨)
               stopBridgeWakePoll();
-              showToast('다리가 켜지지 않았어요. 클로드다리-원클릭연결.vbs를 먼저 등록했는지 확인해 주세요.');
+              showToast('클로드가 안 켜졌어요. 처음이라면 폴더의 [클로드다리-원클릭연결]을 한 번 실행하고, Node.js + Claude Code(터미널에서 claude --version)가 설치·로그인돼 있는지 확인해 주세요.');
             }
           }, 2000);
         };
