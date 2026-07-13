@@ -28,8 +28,10 @@ const CLAUDE_ENV = Object.assign({}, process.env, {
 });
 
 const PORT = 11888;
-// 짧은 문구 다듬기 용도라 빠른 모델 (품질이 아쉬우면 BRIDGE_MODEL=sonnet 으로 실행)
-const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'haiku';
+// 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
+// haiku=빠름/가벼움, sonnet=권장(품질↑), opus=최고품질/느림
+const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'sonnet';
+const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
 const TURN_TIMEOUT_MS = 90000;   // 요청 1건 제한시간
 const MAX_TURNS = 30;            // 이만큼 쓰면 세션 재시작 (대화 누적 방지)
 
@@ -93,6 +95,7 @@ let waiter = null;        // 현재 턴의 { resolve, reject, timer }
 let queue = Promise.resolve(); // 요청 직렬화 (동시 요청은 순서대로)
 let turns = 0;
 let warmedUp = false;
+let currentModel = CLAUDE_MODEL; // 지금 세션이 물고 있는 모델 (요청이 다른 모델을 지정하면 세션 재시작)
 // 처리 현황 — /health로 노출해 "정말 클로드가 답했는지" 밖에서 확인할 수 있게 한다
 const stats = { served: 0, lastAt: '', lastText: '', lastSec: '' };
 
@@ -107,8 +110,9 @@ function startProc() {
   killProc();
   lineBuf = '';
   turns = 0;
-  console.log('[bridge] 클로드 세션 시동 중… (모델: ' + CLAUDE_MODEL + ')');
-  proc = spawn('claude', ['-p', '--model', CLAUDE_MODEL, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], { shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV });
+  console.log('[bridge] 클로드 세션 시동 중… (모델: ' + currentModel + ')');
+  const thisProc = spawn('claude', ['-p', '--model', currentModel, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], { shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV });
+  proc = thisProc;
   proc.stdout.on('data', (d) => {
     lineBuf += d.toString('utf8');
     let idx;
@@ -132,6 +136,8 @@ function startProc() {
     if (s && !s.includes('DeprecationWarning')) console.log('[bridge] claude stderr:', s.slice(0, 200));
   });
   proc.on('close', (code) => {
+    // 이미 새 세션으로 교체된 뒤 옛 세션이 닫힌 거면 무시 (모델 전환 시 새 세션을 죽이지 않게)
+    if (proc !== thisProc) return;
     console.log('[bridge] 클로드 세션 종료 (code ' + code + ') — 다음 요청 때 다시 시동합니다.');
     killProc();
   });
@@ -154,9 +160,15 @@ function sendTurn(text) {
 // (안 그러면 클로드가 성실하게 같은 답을 또 내서 [AI 추천 더 받기]가 무의미해진다)
 const askedCount = new Map();
 
-// 세션 준비(시동+지시문 주입)를 보장한 뒤 문구 요청 — 모든 호출은 queue로 직렬화
-function askClaude(text) {
+// 세션 준비(시동+지시문 주입)를 보장한 뒤 문구 요청 — 모든 호출은 queue로 직렬화.
+// model을 주면 그 모델로 (다르면 세션 재시작). 한 모델을 계속 쓰면 재시작은 최초 1회뿐.
+function askClaude(text, model) {
   const job = queue.then(async () => {
+    if (model && ALLOWED_MODELS.indexOf(model) !== -1 && model !== currentModel) {
+      console.log('[bridge] 모델 변경: ' + currentModel + ' → ' + model);
+      currentModel = model;
+      startProc(); // 새 모델로 세션 재시작 (다음 워밍업에서 지시문 재주입)
+    }
     if (turns >= MAX_TURNS || !proc) startProc();
     if (!warmedUp) {
       const t0 = Date.now();
@@ -219,7 +231,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') {
     return json(res, 200, {
-      ok: true, engine: 'claude', model: CLAUDE_MODEL, examples: EXAMPLES.length, ready: warmedUp,
+      ok: true, engine: 'claude', model: currentModel, models: ALLOWED_MODELS, examples: EXAMPLES.length, ready: warmedUp,
       served: stats.served, lastAt: stats.lastAt, lastText: stats.lastText, lastSec: stats.lastSec,
     });
   }
@@ -232,12 +244,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'POST' && req.url === '/recommend') {
-    const { text } = await readBody(req);
+    const { text, model } = await readBody(req);
     if (!text || !String(text).trim()) return json(res, 400, { error: '추천받을 문구가 비어 있습니다.' });
     const started = Date.now();
-    console.log('[bridge] 추천 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…');
+    console.log('[bridge] 추천 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…', model ? '(모델: ' + model + ')' : '');
     try {
-      const raw = await askClaude(String(text).trim());
+      const raw = await askClaude(String(text).trim(), model);
       const suggestions = parseSuggestions(raw);
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!suggestions.length) {

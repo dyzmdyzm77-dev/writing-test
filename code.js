@@ -581,11 +581,11 @@ function localFallbackRecommend(text) {
 let serverSharedKeyMissing = false;
 // AI 제안 가져오기 — 클로드 다리(켜져 있으면) → Gemini(개인 키, 없으면 서버 공용 키) 순서로 시도.
 // 성공하면 {text, reason} 배열, 모두 실패하면 사유 메시지를 담은 Error를 던진다 (공용 키 미등록이면 err.noKey=true).
-async function fetchAiSuggestions(text, apiKey, bridge) {
+async function fetchAiSuggestions(text, apiKey, bridge, model) {
     let bridgeFail = '';
     if (bridge) {
         try {
-            const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/recommend', { text }, 130000);
+            const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/recommend', { text, model }, 130000);
             const data = await res.json();
             if (res.ok && data && data.suggestions && data.suggestions.length)
                 return data.suggestions;
@@ -1358,7 +1358,7 @@ async function bridgeHealth() {
         if (!res.ok)
             return { alive: false, ready: false };
         const d = await res.json().catch(() => ({}));
-        return { alive: true, ready: !!(d && d.ready) };
+        return { alive: true, ready: !!(d && d.ready), model: d && d.model };
     }
     catch (e) {
         console.log('[BRIDGE] 다리 확인 실패 (꺼져 있거나 접근 불가):', errStr(e));
@@ -3812,7 +3812,7 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({ type: 'show-loading' });
         figma.ui.postMessage({ type: 'update-progress', progress: 30, status: bridge ? '클로드가 문구를 다듬는 중… (보통 5~10초)' : 'AI 문구 추천 받는 중...' });
         try {
-            const suggestions = await fetchAiSuggestions(text, apiKey, bridge);
+            const suggestions = await fetchAiSuggestions(text, apiKey, bridge, msg.model);
             figma.ui.postMessage({ type: 'hide-loading' });
             // forceAi([AI 추천 더 받기])면 기존 결과 아래에 덧붙이고, 아니면 새로 표시
             figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions, appendAi: !!msg.forceAi });
@@ -3934,7 +3934,7 @@ figma.ui.onmessage = async (msg) => {
     // 클로드 다리 상태 조회 — UI의 [🔌 클로드] 버튼 표시/깨우기 피드백용
     if (msg.type === "CHECK_BRIDGE") {
         const h = await bridgeHealth();
-        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready });
+        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model });
         return;
     }
     if (msg.type === "CLEAR_API_KEY") {
