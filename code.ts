@@ -11,9 +11,8 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'SET_API_KEY' | 'GET_API_KEY_STATUS' | 'CLEAR_API_KEY' | 'SET_AI_TOGGLE' | 'CHECK_BRIDGE' | 'GET_USAGE' | 'LIKE_SUGGESTION';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'SET_API_KEY' | 'GET_API_KEY_STATUS' | 'CLEAR_API_KEY' | 'CHECK_BRIDGE' | 'GET_USAGE' | 'LIKE_SUGGESTION';
   text?: string;
-  on?: boolean;      // SET_AI_TOGGLE: 추천에 AI 사용 여부
   forceAi?: boolean; // RECOMMEND: 사전 매칭을 건너뛰고 AI로 새 제안 받기 ([AI 추천 더 받기])
   data?: PreviewItem[];
   nodeId?: string;
@@ -1492,19 +1491,6 @@ async function getStoredApiKey(): Promise<string> {
     return '';
   }
 }
-// ── 추천 AI 사용 토글 ─────────────────────────────────────────
-// 키를 저장해 두고도 추천은 로컬(예시 사전+규칙)만 쓰고 싶을 때 끈다.
-// 저장 값은 "꺼짐 여부"(aiRecommendOff) — 값이 없으면(신규 사용자) 켜짐이 기본.
-// 번역은 로컬 대체가 없어 이 토글의 영향을 받지 않는다.
-const AI_TOGGLE_STORAGE = 'aiRecommendOff';
-async function isAiRecommendOn(): Promise<boolean> {
-  try {
-    return !(await figma.clientStorage.getAsync(AI_TOGGLE_STORAGE));
-  } catch (_e) {
-    return true;
-  }
-}
-
 // 키 일부만 노출 (앞4 + 뒤4) — 설정 화면 표시용
 function maskApiKey(k: string): string {
   if (!k) return '';
@@ -3839,20 +3825,19 @@ figma.ui.onmessage = async (msg: any) => {
       return;
     }
     const apiKey = await getStoredApiKey();
-    const aiOn = await isAiRecommendOn();
-    // AI 엔진 후보: ① 클로드 다리(로컬) ② Gemini(개인 키, 없으면 서버 공용 키). 토글이 꺼져 있으면 전부 안 쓴다.
-    const bridge = aiOn ? await isBridgeAlive() : false;
-    const canAi = aiOn && (bridge || !!apiKey || !serverSharedKeyMissing);
+    // AI 엔진 후보: ① 클로드 다리(로컬) ② Gemini(개인 키, 없으면 서버 공용 키). AI는 항상 시도한다.
+    const bridge = await isBridgeAlive();
+    const canAi = bridge || !!apiKey || !serverSharedKeyMissing;
     // forceAi: 사전 답안 카드의 [AI 추천 더 받기] — 사전을 건너뛰고 AI로 새 제안을 받는다
     if (msg.forceAi && !canAi) {
-      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천을 쓰려면 클로드 다리(npm run bridge)를 켜거나 API 키를 등록하고, [AI 추천] 스위치를 켜 주세요.' });
+      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천을 쓰려면 [🔌 클로드] 버튼으로 다리를 켜거나, 관리자가 서버 공용 키를 등록해야 해요.' });
       return;
     }
     if (!msg.forceAi) {
       const local = localRecommend(text);
       if (local.length) {
         // 예시 사전의 더미 값(이름·번호·인원수)을 입력의 실제 값으로 각색해서 먼저 즉시 보여주고,
-        // AI를 쓸 수 있으면(스위치 켜짐 + 다리/키) 자동으로 AI 제안을 이어받아 아래에 추가한다.
+        // AI를 쓸 수 있으면(다리/키) 자동으로 AI 제안을 이어받아 아래에 추가한다.
         figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local.map((s) => adaptSuggestionToInput(s, text)), canAskAi: canAi });
         if (canAi) {
           figma.ui.postMessage({ type: 'ai-more-loading' }); // [AI 추천 더 받기] 버튼을 '받는 중' 상태로
@@ -3867,11 +3852,7 @@ figma.ui.onmessage = async (msg: any) => {
         }
         return;
       }
-      // 예시 사전에 없으면 AI 호출 — 엔진이 없거나 AI 토글이 꺼져 있으면 로컬 폴백(유사 예시+규칙)으로 대신한다
-      if (!aiOn) {
-        postRecommendFallback(text, '', '예시·규칙으로 다듬을 곳을 찾지 못했어요. 상단의 [AI 추천] 스위치를 켜면 AI가 새 문장을 제안해요.');
-        return;
-      }
+      // 예시 사전에 없고 AI도 못 쓰면 로컬 폴백(유사 예시+규칙)으로 대신한다
       if (!canAi) {
         postRecommendFallback(text, '');
         return;
@@ -3982,14 +3963,14 @@ figma.ui.onmessage = async (msg: any) => {
   // ── 개인 Gemini API 키 관리 + 사용량 조회 ──
   if (msg.type === "GET_API_KEY_STATUS") {
     const k = await getStoredApiKey();
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), aiOn: await isAiRecommendOn() });
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k) });
     postUsage(await readUsage());
     return;
   }
   if (msg.type === "SET_API_KEY") {
     const k = (msg.text || '').trim();
     try { await figma.clientStorage.setAsync(API_KEY_STORAGE, k); } catch (_e) { /* 무시 */ }
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true, aiOn: await isAiRecommendOn() });
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true });
     postUsage(await readUsage());
     return;
   }
@@ -3997,12 +3978,6 @@ figma.ui.onmessage = async (msg: any) => {
   if (msg.type === "CHECK_BRIDGE") {
     const h = await bridgeHealth();
     figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready });
-    return;
-  }
-  // 추천 AI 사용 토글 — 끄면 키가 있어도 추천은 로컬(예시 사전+규칙)만 쓴다
-  if (msg.type === "SET_AI_TOGGLE") {
-    try { await figma.clientStorage.setAsync(AI_TOGGLE_STORAGE, !msg.on); } catch (_e) { /* 무시 */ }
-    figma.ui.postMessage({ type: 'show-toast', message: msg.on ? 'AI 추천을 켰어요.' : 'AI 추천을 껐어요 — 예시·규칙만으로 추천해요.' });
     return;
   }
   if (msg.type === "CLEAR_API_KEY") {

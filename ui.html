@@ -910,33 +910,7 @@
         padding-top: 16px;
         border-top: 1px solid #EEEEEE;
       }
-      /* 추천 AI 사용 토글 (추천 화면 제목줄 — 끄면 예시·규칙만으로 추천) */
       .title-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-      .ai-inline-toggle { display: flex; align-items: center; gap: 5px; cursor: pointer; }
-      .ai-inline-label { font-size: 12px; color: #757575; font-weight: 500; }
-      .ai-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
-      .ai-switch input { opacity: 0; width: 0; height: 0; }
-      .ai-slider {
-        position: absolute;
-        inset: 0;
-        background: #CCCCCC;
-        border-radius: 10px;
-        transition: background 0.15s;
-        cursor: pointer;
-      }
-      .ai-slider::before {
-        content: '';
-        position: absolute;
-        width: 16px;
-        height: 16px;
-        left: 2px;
-        top: 2px;
-        background: #FFFFFF;
-        border-radius: 50%;
-        transition: transform 0.15s;
-      }
-      .ai-switch input:checked + .ai-slider { background: #111111; }
-      .ai-switch input:checked + .ai-slider::before { transform: translateX(16px); }
       .usage-big { font-size: 20px; font-weight: 600; color: #111111; }
       .usage-sub { font-size: 12px; color: #757575; margin-top: 4px; }
       /* 홈 우상단 설정 아이콘 (홈에서만 보임 — homeView가 숨겨지면 같이 숨음) */
@@ -1250,18 +1224,7 @@
         <div class="title-row">
           <div class="title">문구 추천받기</div>
           <div class="title-actions">
-            <div class="ai-inline-toggle" title="끄면 키가 있어도 예시·규칙만으로 추천해요 (Gemini 한도 소모 없음). 번역은 항상 AI를 써요.">
-              <span class="ai-inline-label">AI 추천</span>
-              <label class="ai-switch">
-                <input type="checkbox" id="aiToggle" checked />
-                <span class="ai-slider"></span>
-              </label>
-            </div>
             <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="이 PC의 클로드 다리를 깨워요 (한 번은 클로드다리-원클릭연결 등록 필요)" aria-label="클로드 다리 켜기">🔌 클로드</button>
-            <button class="feature-settings-btn js-open-apikey" title="개인 Gemini API 키 설정" aria-label="API 키 설정">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="15" r="4.5" stroke="currentColor" stroke-width="1.7"/><path d="M11 12l8-8M17 4l3 3M15 6l2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              API 키
-            </button>
           </div>
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
@@ -1287,10 +1250,6 @@
       <div class="title-section">
         <div class="title-row">
           <div class="title">번역하기</div>
-          <button class="feature-settings-btn js-open-apikey" title="개인 Gemini API 키 설정" aria-label="API 키 설정">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="15" r="4.5" stroke="currentColor" stroke-width="1.7"/><path d="M11 12l8-8M17 4l3 3M15 6l2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            API 키
-          </button>
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[번역하기]</b> 버튼을 눌러주세요.</div>
       </div>
@@ -1759,9 +1718,6 @@
           hasApiKey = !!m.hasKey;
           const statusEl = document.getElementById('apiKeyStatus');
           if (statusEl) statusEl.textContent = hasApiKey ? ('저장된 키: ' + (m.masked || '••••')) : '저장된 키 없음';
-          // 추천 AI 토글 상태 반영 (justSaved 등 aiOn이 없는 응답에서는 유지)
-          const aiToggleEl = document.getElementById('aiToggle');
-          if (aiToggleEl && typeof m.aiOn === 'boolean') aiToggleEl.checked = m.aiOn;
           if (m.justSaved) {
             const inp = document.getElementById('apiKeyInput');
             if (inp) inp.value = '';
@@ -2390,10 +2346,6 @@
       document.getElementById('apiKeyClear').onclick = () => {
         document.getElementById('apiKeyInput').value = '';
         parent.postMessage({ pluginMessage: { type: 'CLEAR_API_KEY' } }, '*');
-      };
-      // 추천 AI 사용 토글 — 끄면 키가 있어도 예시·규칙만으로 추천 (저장은 플러그인 쪽 clientStorage)
-      document.getElementById('aiToggle').onchange = (e) => {
-        parent.postMessage({ pluginMessage: { type: 'SET_AI_TOGGLE', on: !!e.target.checked } }, '*');
       };
       // [🔌 클로드] — claudebridge:// 주소를 열어 이 PC의 다리를 깨운다.
       // (클로드다리-원클릭연결.vbs로 한 번 등록된 PC에서만 실제로 켜짐 — 미등록이면 아무 일도 안 일어남)
