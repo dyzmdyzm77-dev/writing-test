@@ -11,8 +11,10 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'SET_API_KEY' | 'GET_API_KEY_STATUS' | 'CLEAR_API_KEY' | 'GET_USAGE' | 'LIKE_SUGGESTION';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'SET_API_KEY' | 'GET_API_KEY_STATUS' | 'CLEAR_API_KEY' | 'SET_AI_TOGGLE' | 'GET_USAGE' | 'LIKE_SUGGESTION';
   text?: string;
+  on?: boolean;      // SET_AI_TOGGLE: 추천에 AI 사용 여부
+  forceAi?: boolean; // RECOMMEND: 사전 매칭을 건너뛰고 AI로 새 제안 받기 ([AI 추천 더 받기])
   data?: PreviewItem[];
   nodeId?: string;
   changedNodeIds?: string[];
@@ -389,22 +391,124 @@ const RECOMMEND_EXAMPLES: Array<{ input: string; suggestions: string[] }> = [
   { input: "진행하던 작업이 있습니다. 계속하시겠습니까?", suggestions: ["진행 중인 내역이 있어요.\n이어서 진행할까요?"] },
   { input: "공유 요청을 취소하면 요청 내역이 삭제됩니다. 취소하시겠습니까?", suggestions: ["취소할 경우 요청 내역도 삭제돼요.\n공유 요청을 취소할까요?"] },
   { input: "기기를 찾지 못했습니다. QR코드를 다시 스캔하세요.", suggestions: ["기기를 찾을 수 없어요.\nQR코드를 다시 스캔해 주세요."] },
-  { input: "보호자가 허락하기 전에는 가입할 수 없어요", suggestions: ["보호자가 허락해야 가입할 수 있어요"] },
-  { input: "지금 버전에서는 쓸 수 없어요. 생체 인증을 쓰려면 앱을 최신 버전으로 업데이트 해주세요.", suggestions: ["앱을 업데이트해주세요.\n생체 인증을 쓰려면 최신 버전이 필요해요."] },
+  { input: "보호자가 허락하기 전에는 가입할 수 없어요", suggestions: ["보호자가 허락해야 가입할 수 있어요."] },
+  { input: "지금 버전에서는 쓸 수 없어요. 생체 인증을 쓰려면 앱을 최신 버전으로 업데이트 해주세요.", suggestions: ["앱을 업데이트해 주세요.\n생체 인증을 쓰려면 최신 버전이 필요해요."] },
   { input: "어떤 목적으로 대출받으시나요?", suggestions: ["대출 목적이 무엇인가요?"] },
   { input: "어떤 이유로 신고하시나요?", suggestions: ["신고 이유를 선택해 주세요."] },
-  { input: "잔액 부족으로 구매하지 못했어요", suggestions: ["잔액이 부족해서 구매하지 못했어요"] },
+  { input: "잔액 부족으로 구매하지 못했어요", suggestions: ["잔액이 부족해서 구매하지 못했어요."] },
   { input: "홍*동(010-1234-5678) 외 2명에게 권한 삭제 알림톡을 전송할까요?", suggestions: ["권한 삭제 알림톡을 보내려고 해요.\n홍*동(010-1234-5678) 님 외 2명에게 보낼까요?","홍*동(010-1234-5678) 님 외 2명에게 권한 삭제 알림톡을 보낼까요?","권한 삭제 알림톡을 홍*동(010-1234-5678) 님 외 2명에게 보낼까요?"] },
+  { input: "정말 삭제하시겠습니까? 삭제된 데이터는 복구할 수 없습니다.", suggestions: ["삭제하면 다시 되돌릴 수 없어요.\n정말 삭제할까요?"] },
+  { input: "변경사항이 저장되지 않았습니다. 나가시겠습니까?", suggestions: ["아직 저장하지 않은 내용이 있어요.\n저장하지 않고 나갈까요?"] },
+  { input: "로그아웃 하시겠습니까?", suggestions: ["로그아웃할까요?"] },
+  { input: "앱을 종료하시겠습니까?", suggestions: ["앱을 종료할까요?"] },
+  { input: "한 번 변경하면 다시 변경할 수 없습니다. 계속하시겠습니까?", suggestions: ["한 번 바꾸면 다시 바꿀 수 없어요.\n계속할까요?"] },
+  { input: "입력한 내용이 모두 삭제됩니다. 초기화하시겠습니까?", suggestions: ["입력한 내용이 모두 삭제돼요.\n초기화할까요?"] },
+  { input: "네트워크 연결에 실패했습니다. 다시 시도하십시오.", suggestions: ["네트워크에 연결할 수 없어요.\n연결 상태를 확인하고 다시 시도해 주세요."] },
+  { input: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주십시오.", suggestions: ["일시적인 오류가 생겼어요.\n잠시 후 다시 시도해 주세요."] },
+  { input: "아이디 또는 비밀번호가 일치하지 않습니다.", suggestions: ["아이디 또는 비밀번호가 맞지 않아요.\n다시 확인해 주세요."] },
+  { input: "인증번호가 일치하지 않습니다.", suggestions: ["인증번호가 맞지 않아요.\n다시 입력해 주세요."] },
+  { input: "인증 시간이 초과되었습니다. 인증번호를 재발송하십시오.", suggestions: ["인증 시간이 지났어요.\n인증번호를 다시 받아 주세요."] },
+  { input: "검색 결과가 없습니다.", suggestions: ["검색 결과가 없어요.\n다른 검색어로 다시 찾아보세요."] },
+  { input: "정보를 불러오지 못했습니다. 다시 시도해 주십시오.", suggestions: ["정보를 불러올 수 없어요.\n잠시 후 다시 시도해 주세요."] },
+  { input: "파일 업로드에 실패했습니다.", suggestions: ["파일을 올리지 못했어요.\n다시 시도해 주세요."] },
+  { input: "서비스 점검 중입니다. 이용에 불편을 드려 죄송합니다.", suggestions: ["지금은 서비스를 점검하고 있어요.\n점검이 끝나면 다시 이용할 수 있어요."] },
+  { input: "필수 입력 항목입니다.", suggestions: ["꼭 입력해야 하는 항목이에요."] },
+  { input: "카메라 접근 권한이 없습니다. 설정에서 권한을 허용하십시오.", suggestions: ["카메라 권한이 필요해요.\n설정에서 카메라 접근을 허용해 주세요."] },
+  { input: "알림 권한이 거부되어 알림을 받을 수 없습니다.", suggestions: ["알림 권한을 허용하면 소식을 받을 수 있어요.\n설정에서 알림을 켜 주세요."] },
+  { input: "위치 정보 이용에 동의하지 않아 일부 기능이 제한됩니다.", suggestions: ["위치 정보를 허용하면 모든 기능을 쓸 수 있어요.\n설정에서 위치 접근을 허용해 주세요."] },
+  { input: "저장되었습니다.", suggestions: ["저장했어요."] },
+  { input: "변경사항이 적용되었습니다.", suggestions: ["변경 내용을 적용했어요."] },
+  { input: "전송이 완료되었습니다.", suggestions: ["보냈어요."] },
+  { input: "등록이 완료되었습니다.", suggestions: ["등록을 마쳤어요."] },
+  { input: "삭제되었습니다.", suggestions: ["삭제했어요."] },
+  { input: "클립보드에 복사되었습니다.", suggestions: ["복사했어요."] },
+  { input: "요청을 처리 중입니다. 잠시만 기다려 주십시오.", suggestions: ["요청을 처리하고 있어요.\n잠시만 기다려 주세요."] },
+  { input: "새로운 버전이 출시되었습니다. 업데이트 후 이용 가능합니다.", suggestions: ["새 버전이 나왔어요.\n업데이트하면 새 기능을 쓸 수 있어요."] },
+  { input: "서비스 이용을 위해 약관 동의가 필요합니다.", suggestions: ["약관에 동의하면 서비스를 시작할 수 있어요."] },
+  { input: "장시간 미사용으로 자동 로그아웃 되었습니다. 다시 로그인하십시오.", suggestions: ["오랫동안 사용하지 않아 로그아웃됐어요.\n다시 로그인해 주세요."] },
+  { input: "보안을 위해 비밀번호를 변경해 주시기 바랍니다.", suggestions: ["안전한 사용을 위해 비밀번호를 바꿔 주세요."] },
+  { input: "경비를 개시하시겠습니까?", suggestions: ["경비를 시작할까요?"] },
+  { input: "경비를 해제하시겠습니까?", suggestions: ["경비를 해제할까요?"] },
+  { input: "기기가 오프라인 상태입니다. 네트워크 연결을 확인하십시오.", suggestions: ["기기가 네트워크에 연결돼 있지 않아요.\n기기의 연결 상태를 확인해 주세요."] },
+  { input: "영상을 불러오는 중입니다. 잠시만 기다려 주십시오.", suggestions: ["영상을 불러오고 있어요.\n잠시만 기다려 주세요."] },
+  { input: "권한 신청을 취소하시겠습니까? 취소하실 경우 신청하신 내용은 저장되지 않습니다.", suggestions: ["취소하면 신청한 내용이 저장되지 않아요.\n권한 신청을 취소할까요?","권한 신청을 취소할까요?\n취소하면 입력한 내용이 사라져요."] },
+  { input: "자동차를 가지고 계시나요?", suggestions: ["자동차가 있나요?"] },
+  { input: "매달 보험료를 얼마씩 내고 계시나요?", suggestions: ["매달 보험료는 얼마인가요?"] },
+  { input: "안전한 개통을 위해 몇 가지 다시 여쭤볼게요.", suggestions: ["안전한 개통을 위해 몇 가지 다시 확인할게요."] },
+  { input: "카드를 해지하시겠어요?", suggestions: ["카드를 해지할까요?"] },
+  { input: "시작하시는 분에게 5,000원을 드려요.", suggestions: ["시작하면 5,000원을 드려요."] },
+  { input: "이자 환불을 받았어요.", suggestions: ["이자를 돌려받았어요."] },
+  { input: "오늘의 퀴즈가 곧 종료돼요.", suggestions: ["오늘의 퀴즈가 곧 끝나요."] },
+  { input: "금일까지 미납 시 연체 처리됩니다. 후불결제 금액을 납부하시기 바랍니다.", suggestions: ["오늘까지 내지 않으면 연체돼요.\n후불결제 금액을 내주세요."] },
+  { input: "점검 기간에는 서비스 이용이 불가합니다.", suggestions: ["점검 기간 동안 서비스를 이용할 수 없어요."] },
+  { input: "신분증 확인 전에는 송금 및 결제가 불가합니다.", suggestions: ["신분증 확인되기 전까지 송금과 결제를 할 수 없어요."] },
+  { input: "변경 시 캐시백 재지급은 불가합니다.", suggestions: ["한 번 바꾸면 캐시백은 다시 받을 수 없어요."] },
+  { input: "상담 품질 향상을 위해 통화 내용이 녹음됩니다.", suggestions: ["더 좋은 상담을 위해 통화 내용은 녹음돼요."] },
+  { input: "고객님의 개인정보 이용 내역은 기록 관리됩니다.", suggestions: ["이제부터 개인정보 이용 내역이 기록돼요."] },
+  { input: "청소년은 서비스 가입이 불가합니다.", suggestions: ["지금은 가입할 수 없어요.\n청소년을 위한 서비스는 아직 준비 중이에요."] },
+  { input: "아이디 또는 비밀번호를 5회 이상 잘못 입력하여 계정이 잠금 처리되었습니다.", suggestions: ["비밀번호를 5회 잘못 입력해서 계정이 잠겼어요.\n비밀번호를 재설정하면 다시 이용할 수 있어요."] },
+  { input: "이미 사용 중인 아이디입니다.", suggestions: ["이미 쓰고 있는 아이디예요.\n다른 아이디를 입력해 주세요."] },
+  { input: "사용할 수 없는 비밀번호입니다. 영문, 숫자, 특수문자를 포함하여 8자 이상 입력하십시오.", suggestions: ["영문, 숫자, 특수문자를 포함해 8자 이상 입력해 주세요."] },
+  { input: "입력 가능한 글자 수를 초과하였습니다.", suggestions: ["입력할 수 있는 글자 수를 넘었어요.\n내용을 조금 줄여 주세요."] },
+  { input: "파일 용량이 초과되었습니다. 10MB 이하의 파일만 업로드 가능합니다.", suggestions: ["10MB 이하 파일만 올릴 수 있어요.\n파일 용량을 확인해 주세요."] },
+  { input: "다운로드가 완료되었습니다.", suggestions: ["다운로드를 마쳤어요."] },
+  { input: "결제에 실패하였습니다. 다시 시도해 주시기 바랍니다.", suggestions: ["결제하지 못했어요.\n결제 수단을 확인하고 다시 시도해 주세요."] },
+  { input: "저장 공간이 부족하여 설치할 수 없습니다.", suggestions: ["저장 공간이 부족해서 설치할 수 없어요.\n공간을 확보한 뒤 다시 시도해 주세요."] },
+  { input: "서비스 준비 중입니다.", suggestions: ["준비하고 있는 기능이에요.\n조금만 기다려 주세요."] },
+  { input: "등록 가능한 최대 개수를 초과하였습니다.", suggestions: ["더 등록하려면 기존 항목을 삭제해 주세요."] },
+  { input: "출동 요청이 접수되었습니다. 잠시만 기다려 주십시오.", suggestions: ["출동 요청을 접수했어요.\n잠시만 기다려 주세요."] },
+  { input: "경비 상태를 확인할 수 없습니다. 잠시 후 다시 시도하십시오.", suggestions: ["경비 상태를 확인할 수 없어요.\n잠시 후 다시 시도해 주세요."] },
+  { input: "외출 모드로 전환하시겠습니까?", suggestions: ["외출 모드로 바꿀까요?"] },
+  { input: "방문 예약이 완료되었습니다.", suggestions: ["방문 예약을 마쳤어요."] },
+  { input: "비밀번호 5회 오류로 계정이 잠금 처리되었습니다.", suggestions: ["비밀번호를 5회 잘못 입력해서 계정이 잠겼어요.\n비밀번호를 재설정하면 다시 이용할 수 있어요."] },
+  { input: "본인 인증을 하지 않으면 서비스를 이용할 수 없습니다.", suggestions: ["본인 인증을 하면 모든 서비스를 이용할 수 있어요."] },
+  { input: "이메일 인증 전에는 로그인할 수 없습니다.", suggestions: ["이메일 인증을 마치면 로그인할 수 있어요."] },
+  { input: "쿠폰은 로그인 후에만 사용 가능합니다.", suggestions: ["로그인하면 쿠폰을 쓸 수 있어요."] },
+  { input: "미성년자는 보호자 동의 없이 결제할 수 없습니다.", suggestions: ["보호자가 동의하면 결제할 수 있어요."] },
+  { input: "프로필을 등록하지 않으면 이용이 제한됩니다.", suggestions: ["프로필을 등록하면 모든 기능을 쓸 수 있어요."] },
+  { input: "앱 버전이 낮아 일부 기능이 제한됩니다.", suggestions: ["앱을 업데이트하면 모든 기능을 쓸 수 있어요."] },
+  { input: "블루투스가 꺼져 있어 기기를 연결할 수 없습니다.", suggestions: ["블루투스를 켜면 기기를 연결할 수 있어요."] },
+  { input: "비상 연락처가 등록되지 않았습니다.", suggestions: ["비상 연락처를 등록하면 긴급할 때 빠르게 연락드릴 수 있어요."] },
+  { input: "출입 카드가 등록되지 않아 사용할 수 없습니다.", suggestions: ["출입 카드를 등록하면 바로 쓸 수 있어요."] },
+  { input: "회원가입이 완료되었습니다.", suggestions: ["가입을 마쳤어요."] },
+  { input: "예약이 취소되었습니다.", suggestions: ["예약을 취소했어요."] },
+  { input: "문의가 접수되었습니다. 순차적으로 답변드리겠습니다.", suggestions: ["문의를 접수했어요.\n순서대로 답변드릴게요."] },
+  { input: "설정이 초기화되었습니다.", suggestions: ["설정을 초기화했어요."] },
+  { input: "비밀번호가 변경되었습니다.", suggestions: ["비밀번호를 바꿨어요."] },
+  { input: "인증이 완료되었습니다.", suggestions: ["인증을 마쳤어요."] },
+  { input: "언제 방문하시겠습니까?", suggestions: ["방문 날짜를 선택해 주세요."] },
+  { input: "어떤 방법으로 인증하시겠습니까?", suggestions: ["인증 방법을 선택해 주세요."] },
+  { input: "결제하실 카드를 선택해 주십시오.", suggestions: ["결제할 카드를 선택해 주세요."] },
+  { input: "원하시는 서비스를 선택하세요.", suggestions: ["원하는 서비스를 선택해 주세요."] },
+  { input: "주소를 알고 계신가요?", suggestions: ["주소를 알고 있나요?"] },
+  { input: "기간 만료로 이용이 중지되었습니다.", suggestions: ["이용 기간이 끝나서 지금은 쓸 수 없어요."] },
+  { input: "용량 부족으로 저장에 실패했습니다.", suggestions: ["저장 공간이 부족해서 저장하지 못했어요."] },
+  { input: "통신 오류로 요청이 실패하였습니다.", suggestions: ["통신이 원활하지 않아 요청을 처리하지 못했어요.\n잠시 후 다시 시도해 주세요."] },
+  { input: "권한 부족으로 접근이 거부되었습니다.", suggestions: ["접근 권한이 없어요.\n관리자에게 권한을 요청해 주세요."] },
+  { input: "입력하신 주소를 찾을 수 없습니다. 다시 확인 바랍니다.", suggestions: ["주소를 찾을 수 없어요.\n다시 확인해 주세요."] },
+  { input: "요청하신 페이지를 찾을 수 없습니다.", suggestions: ["페이지를 찾을 수 없어요.\n주소를 확인하거나 홈으로 이동해 주세요."] },
+  { input: "동일한 요청이 처리 중입니다. 잠시 후 확인해 주십시오.", suggestions: ["같은 요청을 처리하고 있어요.\n잠시 후 확인해 주세요."] },
+  { input: "이벤트가 종료되었습니다.", suggestions: ["이벤트가 끝났어요."] },
+  { input: "탈퇴 시 모든 데이터가 삭제되며 복구할 수 없습니다.", suggestions: ["탈퇴하면 모든 데이터가 삭제되고 다시 되돌릴 수 없어요.\n정말 탈퇴할까요?"] },
+  { input: "부재 중 방문자가 감지되었습니다.", suggestions: ["부재 중에 방문자가 있었어요.\n영상을 확인해 보세요."] },
+  { input: "경비 해제 권한이 없습니다.", suggestions: ["경비 해제 권한이 필요해요.\n관리자에게 요청해 주세요."] },
+  { input: "화재 감지기 배터리가 부족합니다.", suggestions: ["화재 감지기 배터리가 얼마 없어요.\n배터리를 교체해 주세요."] },
+  { input: "모임지원금 없이 모임통장을 만들까요? 지금 받지 않으면 모임지원금을 받을 수 없어요.", suggestions: ["약관에 동의하면 모임지원금을 받을 수 있어요."] },
+  { input: "혜택 없이 가입할까요? 지금 신청하지 않으면 웰컴 혜택을 받을 수 없어요.", suggestions: ["지금 신청하면 웰컴 혜택을 받을 수 있어요."] },
+  { input: "쿠폰 없이 결제할까요? 지금 받지 않으면 할인 쿠폰을 받을 수 없어요.", suggestions: ["쿠폰을 받으면 더 저렴하게 결제할 수 있어요."] },
+  { input: "알림 없이 시작할까요? 알림을 켜지 않으면 중요한 소식을 받을 수 없어요.", suggestions: ["알림을 켜면 중요한 소식을 바로 받을 수 있어요."] },
+  { input: "자동이체를 등록하지 않고 넘어갈까요? 등록하지 않으면 할인을 받을 수 없어요.", suggestions: ["자동이체를 등록하면 할인을 받을 수 있어요."] },
 ];
 // ===== RECOMMEND:END =====
 
 // 문구 추천 — 예시 사전 기반 (서버 없이 로컬에서 동작).
 // 입력을 정규화한 뒤 recommend-examples.md의 원본과
 // ① 완전히 같거나 ② 서로 포함하면 그 예시의 추천안을 돌려준다. 없으면 빈 배열.
-// 정규화 시 마스킹된 이름(홍*동)·숫자(전화번호, "외 2명" 등)·공백·문장부호를 무시하므로
-// 이름/수량/번호만 다른 가변 문구도 같은 예시로 매칭된다.
+// 정규화 시 마스킹된 이름(홍*동)·"이름(번호)" 묶음(홍길동(010-… / ***) 포함)·숫자·공백·문장부호를
+// 무시하므로 이름/수량/번호만 다른 가변 문구도 같은 예시로 매칭된다.
 function normalizeForMatch(s: string): string {
   return s
+    .replace(/[가-힣][가-힣*]{1,3}\s*\([*0-9\-\s]*\)/g, '') // 이름(전화번호/마스킹) 묶음 — 실명도 커버
     .replace(/[가-힣]\*[가-힣]+/g, '') // 마스킹된 이름 (홍*동) — 문장부호 제거 전에 먼저
     .replace(/[0-9]+/g, '')            // 숫자 (전화번호·수량·버전 등)
     .replace(/[\s\p{P}]/gu, '')
@@ -424,6 +528,125 @@ function localRecommend(text: string): string[] {
     .filter((ex) => { const n = normalizeForMatch(ex.input); return n.length >= 5 && (q.includes(n) || n.includes(q)); })
     .sort((a, b) => normalizeForMatch(b.input).length - normalizeForMatch(a.input).length);
   return contains.length ? contains[0].suggestions : [];
+}
+
+// ── 키 없이 동작하는 로컬 추천 폴백 ──────────────────────────
+// 개인 Gemini 키가 없거나 AI 호출이 실패해도(프록시 차단 등) 추천이 비지 않게 한다.
+// ① 유사 예시: 예시 사전과 완전 일치는 아니어도 충분히 비슷하면 그 예시의 추천안을 제시
+// ② 규칙 기반: 검토 규칙(해요체·용어 통일 등)으로 다듬은 문장을 추천으로 제시
+function bigramSet(s: string): Set<string> {
+  const set = new Set<string>();
+  for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+  return set;
+}
+// 두 문자열의 바이그램(연속 2글자 조각) Dice 유사도: 0(다름)~1(같음)
+function diceSimilarity(a: string, b: string): number {
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+  const A = bigramSet(a);
+  const B = bigramSet(b);
+  let inter = 0;
+  A.forEach((g) => { if (B.has(g)) inter++; });
+  return (2 * inter) / (A.size + B.size);
+}
+// 문장 끝 어미(습니다/할까요/해주세요 등) — 유사도 비교 전에 잘라내는 보조 정규화용.
+// 어미 차이("~하시겠습니까?" vs "~할까요?")는 추천 관점에선 같은 문장인데 바이그램 점수를
+// 크게 깎아서, 어미를 뗀 몸통끼리도 한 번 더 비교한다. 긴 어미가 먼저 매칭되도록 순서 유지.
+const SENTENCE_ENDING_RE = /(해 주시기 바랍니다|주시기 바랍니다|하시겠습니까|하시겠어요|시겠습니까|시겠어요|되었습니다|하였습니다|였습니다|았습니다|었습니다|했습니다|됐습니다|바랍니다|해주십시오|하십시오|해주세요|해 주세요|입니다|합니다|됩니다|습니다|습니까|합니까|할까요|될까요|주세요|십시오|하세요|이에요|예요|세요|어요|아요|해요|돼요|네요|죠)\s*$/;
+function normalizeForSimilarity(s: string): string {
+  return s
+    // 같은 뜻의 다른 표현을 한 형태로 통일 — "이용이 불가합니다" ↔ "이용할 수 없습니다"가
+    // 같은 문장으로 비교되게 한다 (유사도 비교 전용 — 완전 일치 매칭에는 영향 없음)
+    .replace(/불가능합니다|불가능해요|불가합니다|불가해요/g, '할 수 없습니다')
+    .replace(/가능합니다|가능해요/g, '할 수 있습니다')
+    .replace(/하시/g, '하') // 경어 '시' 무시 (하시면→하면)
+    .replace(/([가-힣])\s+시\s+/g, '$1하면 ') // "탈퇴 시" ↔ "탈퇴하면" (숫자+시(時)는 공백 조건 때문에 안 걸림)
+    .split(/[.!?…\n\u2028\u2029]+/)                            // 문장 단위로 쪼개서
+    .map((seg) => seg.trim().replace(SENTENCE_ENDING_RE, ''))  // 각 문장의 끝 어미 제거
+    .join(' ')
+    .replace(/[가-힣][가-힣*]{1,3}\s*\([*0-9\-\s]*\)/g, '') // 이름(전화번호/마스킹) 묶음 — normalizeForMatch와 동일
+    .replace(/[가-힣]\*[가-힣]+/g, '')
+    .replace(/[0-9]+/g, '')
+    .replace(/[\s\p{P}]/gu, '')
+    .toLowerCase();
+}
+// 전체 비교는 0.75, 어미 뗀 몸통 비교는 0.8 이상이어야 같은 문장으로 취급.
+// (몸통 비교는 정보가 줄어든 상태라 문턱을 더 높게 잡아 오매칭을 막는다)
+const FUZZY_RECOMMEND_THRESHOLD = 0.75;
+const FUZZY_STRIPPED_THRESHOLD = 0.8;
+function fuzzyRecommend(text: string): string[] {
+  const q = normalizeForMatch(text);
+  if (q.length < 8) return []; // 짧은 문장은 우연히 비슷해질 확률이 높아 제외
+  const qs = normalizeForSimilarity(text);
+  let best: { input: string; suggestions: string[] } | null = null;
+  let bestScore = 0;
+  for (const ex of RECOMMEND_EXAMPLES) {
+    const n = normalizeForMatch(ex.input);
+    if (n.length < 8) continue;
+    const full = diceSimilarity(q, n);
+    let stripped = 0;
+    if (qs.length >= 5) {
+      const ns = normalizeForSimilarity(ex.input);
+      if (ns.length >= 5) stripped = diceSimilarity(qs, ns);
+    }
+    const qualifies = full >= FUZZY_RECOMMEND_THRESHOLD || stripped >= FUZZY_STRIPPED_THRESHOLD;
+    const score = Math.max(full, stripped);
+    if (qualifies && score > bestScore) { bestScore = score; best = ex; }
+  }
+  return best ? best.suggestions : [];
+}
+// 예시 추천안을 입력 문구의 실제 값으로 각색한다.
+// 예시 사전의 더미 값("홍*동(…)", "외 2명")이 그대로 노출되지 않도록,
+// 입력에서 같은 유형의 토큰을 찾아 순서대로 끼워 넣는다 (입력에 없으면 예시 값 유지).
+const NAME_PHONE_RE = /[가-힣][가-힣*]{1,3}\s*\(\s*[*0-9\-\s]+\s*\)/g; // 이름(전화번호/마스킹)
+const PERSON_COUNT_RE = /외\s*[0-9]+\s*명/g;                            // 외 N명
+function adaptSuggestionToInput(suggestion: string, input: string): string {
+  let out = suggestion;
+  const names = input.match(NAME_PHONE_RE);
+  if (names && names.length) {
+    let i = 0;
+    out = out.replace(NAME_PHONE_RE, () => names[Math.min(i++, names.length - 1)]);
+  }
+  const counts = input.match(PERSON_COUNT_RE);
+  if (counts && counts.length) {
+    let j = 0;
+    out = out.replace(PERSON_COUNT_RE, () => counts[Math.min(j++, counts.length - 1)]);
+  }
+  return out;
+}
+
+// 검토 규칙으로 다듬은 문장을 추천 카드 형태로 — 바뀐 곳이 없으면 빈 배열
+function ruleBasedRecommend(text: string): Array<{ text: string; reason: string }> {
+  try {
+    const s = suggestFriendlyKorean(text, false);
+    if (s.length && s[0].after && s[0].after !== text) {
+      return [{ text: s[0].after, reason: '규칙 기반 다듬기 — ' + s[0].reason }];
+    }
+  } catch (e) {
+    console.log('[RECOMMEND] 규칙 기반 추천 실패', e);
+  }
+  return [];
+}
+// 유사 예시 + 규칙 기반을 합친 로컬 폴백 (같은 문장 중복 제거)
+function localFallbackRecommend(text: string): Array<{ text: string; reason: string }> {
+  const out: Array<{ text: string; reason: string }> = [];
+  for (const s of fuzzyRecommend(text)) out.push({ text: adaptSuggestionToInput(s, text), reason: '비슷한 예시 기반' });
+  for (const r of ruleBasedRecommend(text)) {
+    if (!out.some((o) => o.text === r.text)) out.push(r);
+  }
+  return out;
+}
+// 폴백 결과를 UI로 전송. failNote가 있으면(AI 실패) 토스트로 함께 알린다.
+// emptyNote: 폴백 결과도 없을 때 보여줄 안내 (기본은 키 등록 안내)
+function postRecommendFallback(text: string, failNote: string, emptyNote?: string): void {
+  const fallback = localFallbackRecommend(text);
+  if (fallback.length) {
+    figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: fallback });
+    if (failNote) figma.ui.postMessage({ type: 'show-toast', message: failNote + ' — 예시·규칙 기반 추천으로 대신했어요.' });
+  } else if (failNote) {
+    figma.ui.postMessage({ type: 'show-toast', message: failNote });
+  } else {
+    figma.ui.postMessage({ type: 'show-toast', message: emptyNote || '예시·규칙으로 다듬을 곳을 찾지 못했어요. AI 추천은 설정에서 Gemini API 키를 등록하면 쓸 수 있어요.' });
+  }
 }
 
 // ===============================
@@ -907,6 +1130,13 @@ const REWRITE_RULES: FixRule[] = [
     reason: "해요체",
     tags: ["tone"],
   },
+  // ~하실 경우 → ~하면 (캐주얼한 경어 + 간결하게: "취소하실 경우" → "취소하면")
+  {
+    pattern: /하실 경우/g,
+    replacement: "하면",
+    reason: "간결하게",
+    tags: ["shorten"],
+  },
   // ~하실 수 있습니다 → ~하실 수 있어요
   {
     pattern: /하실 수 있습니다/g,
@@ -931,6 +1161,7 @@ const REWRITE_RULES: FixRule[] = [
     tags: ["tone"],
   },
   { pattern: /아닙니다/g, replacement: "아니에요", reason: "해요체", tags: ["tone"] },
+  { pattern: /않습니다/g, replacement: "않아요", reason: "해요체", tags: ["tone"] },
   { pattern: /없습니다/g, replacement: "없어요", reason: "해요체", tags: ["tone"] },
   { pattern: /같습니다/g, replacement: "같아요", reason: "해요체", tags: ["tone"] },
   { pattern: /좋습니다/g, replacement: "좋아요", reason: "해요체", tags: ["tone"] },
@@ -1188,6 +1419,19 @@ async function getStoredApiKey(): Promise<string> {
     return '';
   }
 }
+// ── 추천 AI 사용 토글 ─────────────────────────────────────────
+// 키를 저장해 두고도 추천은 로컬(예시 사전+규칙)만 쓰고 싶을 때 끈다.
+// 저장 값은 "꺼짐 여부"(aiRecommendOff) — 값이 없으면(신규 사용자) 켜짐이 기본.
+// 번역은 로컬 대체가 없어 이 토글의 영향을 받지 않는다.
+const AI_TOGGLE_STORAGE = 'aiRecommendOff';
+async function isAiRecommendOn(): Promise<boolean> {
+  try {
+    return !(await figma.clientStorage.getAsync(AI_TOGGLE_STORAGE));
+  } catch (_e) {
+    return true;
+  }
+}
+
 // 키 일부만 노출 (앞4 + 뒤4) — 설정 화면 표시용
 function maskApiKey(k: string): string {
   if (!k) return '';
@@ -3521,16 +3765,31 @@ figma.ui.onmessage = async (msg: any) => {
       figma.ui.postMessage({ type: 'show-toast', message: '문구를 입력하거나 텍스트를 선택해주세요.' });
       return;
     }
-    const local = localRecommend(text);
-    if (local.length) {
-      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local });
+    const apiKey = await getStoredApiKey();
+    const aiOn = await isAiRecommendOn();
+    const canAi = !!apiKey && aiOn;
+    // forceAi: 사전 답안 카드의 [AI 추천 더 받기] — 사전을 건너뛰고 AI로 새 제안을 받는다
+    if (msg.forceAi && !canAi) {
+      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천을 쓰려면 API 키 등록과 [AI 추천] 스위치가 필요해요.' });
       return;
     }
-    // 예시 사전에 없으면 AI 호출 — 개인 키 필요
-    const apiKey = await getStoredApiKey();
-    if (!apiKey) {
-      figma.ui.postMessage({ type: 'need-api-key' });
-      return;
+    if (!msg.forceAi) {
+      const local = localRecommend(text);
+      if (local.length) {
+        // 예시 사전의 더미 값(이름·번호·인원수)을 입력의 실제 값으로 각색해서 보여준다.
+        // canAskAi: AI를 쓸 수 있으면 결과 밑에 [AI 추천 더 받기] 버튼을 노출 (사전 답안은 고정이라 다양성은 AI가 담당)
+        figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local.map((s) => adaptSuggestionToInput(s, text)), canAskAi: canAi });
+        return;
+      }
+      // 예시 사전에 없으면 AI 호출 — 키가 없거나 AI 토글이 꺼져 있으면 로컬 폴백(유사 예시+규칙)으로 대신한다
+      if (!apiKey) {
+        postRecommendFallback(text, '');
+        return;
+      }
+      if (!aiOn) {
+        postRecommendFallback(text, '', '예시·규칙으로 다듬을 곳을 찾지 못했어요. 상단의 [AI 추천] 스위치를 켜면 AI가 새 문장을 제안해요.');
+        return;
+      }
     }
     figma.ui.postMessage({ type: 'show-loading' });
     figma.ui.postMessage({ type: 'update-progress', progress: 30, status: 'AI 문구 추천 받는 중...' });
@@ -3541,13 +3800,18 @@ figma.ui.onmessage = async (msg: any) => {
       // 워커가 usage를 실어 보내면 Gemini가 실제 호출된 것 → 오늘 사용량 +1
       if (data && data.usage) { postUsage(await bumpUsage()); }
       if (!res.ok || data.error || !data.suggestions || !data.suggestions.length) {
-        figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
+        const failNote = 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status));
+        // [AI 추천 더 받기] 실패 시엔 폴백을 또 보여주면 사전 카드와 중복 — 안내만 한다
+        if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: failNote });
+        else postRecommendFallback(text, failNote);
         return;
       }
-      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: data.suggestions });
+      // appendAi: 사전 카드 아래에 AI 카드를 덧붙이라는 표시 (기존 결과를 지우지 않음)
+      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: data.suggestions, appendAi: !!msg.forceAi });
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
-      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + errStr(e) });
+      if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + errStr(e) });
+      else postRecommendFallback(text, 'AI 추천 실패: ' + errStr(e));
     }
     return;
   }
@@ -3633,15 +3897,21 @@ figma.ui.onmessage = async (msg: any) => {
   // ── 개인 Gemini API 키 관리 + 사용량 조회 ──
   if (msg.type === "GET_API_KEY_STATUS") {
     const k = await getStoredApiKey();
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k) });
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), aiOn: await isAiRecommendOn() });
     postUsage(await readUsage());
     return;
   }
   if (msg.type === "SET_API_KEY") {
     const k = (msg.text || '').trim();
     try { await figma.clientStorage.setAsync(API_KEY_STORAGE, k); } catch (_e) { /* 무시 */ }
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true });
+    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true, aiOn: await isAiRecommendOn() });
     postUsage(await readUsage());
+    return;
+  }
+  // 추천 AI 사용 토글 — 끄면 키가 있어도 추천은 로컬(예시 사전+규칙)만 쓴다
+  if (msg.type === "SET_AI_TOGGLE") {
+    try { await figma.clientStorage.setAsync(AI_TOGGLE_STORAGE, !msg.on); } catch (_e) { /* 무시 */ }
+    figma.ui.postMessage({ type: 'show-toast', message: msg.on ? 'AI 추천을 켰어요.' : 'AI 추천을 껐어요 — 예시·규칙만으로 추천해요.' });
     return;
   }
   if (msg.type === "CLEAR_API_KEY") {

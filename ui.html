@@ -910,6 +910,33 @@
         padding-top: 16px;
         border-top: 1px solid #EEEEEE;
       }
+      /* 추천 AI 사용 토글 (추천 화면 제목줄 — 끄면 예시·규칙만으로 추천) */
+      .title-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+      .ai-inline-toggle { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+      .ai-inline-label { font-size: 12px; color: #757575; font-weight: 500; }
+      .ai-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+      .ai-switch input { opacity: 0; width: 0; height: 0; }
+      .ai-slider {
+        position: absolute;
+        inset: 0;
+        background: #CCCCCC;
+        border-radius: 10px;
+        transition: background 0.15s;
+        cursor: pointer;
+      }
+      .ai-slider::before {
+        content: '';
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        left: 2px;
+        top: 2px;
+        background: #FFFFFF;
+        border-radius: 50%;
+        transition: transform 0.15s;
+      }
+      .ai-switch input:checked + .ai-slider { background: #111111; }
+      .ai-switch input:checked + .ai-slider::before { transform: translateX(16px); }
       .usage-big { font-size: 20px; font-weight: 600; color: #111111; }
       .usage-sub { font-size: 12px; color: #757575; margin-top: 4px; }
       /* 홈 우상단 설정 아이콘 (홈에서만 보임 — homeView가 숨겨지면 같이 숨음) */
@@ -1219,10 +1246,19 @@
       <div class="title-section">
         <div class="title-row">
           <div class="title">문구 추천받기</div>
-          <button class="feature-settings-btn js-open-apikey" title="개인 Gemini API 키 설정" aria-label="API 키 설정">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="15" r="4.5" stroke="currentColor" stroke-width="1.7"/><path d="M11 12l8-8M17 4l3 3M15 6l2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            API 키
-          </button>
+          <div class="title-actions">
+            <div class="ai-inline-toggle" title="끄면 키가 있어도 예시·규칙만으로 추천해요 (Gemini 한도 소모 없음). 번역은 항상 AI를 써요.">
+              <span class="ai-inline-label">AI 추천</span>
+              <label class="ai-switch">
+                <input type="checkbox" id="aiToggle" checked />
+                <span class="ai-slider"></span>
+              </label>
+            </div>
+            <button class="feature-settings-btn js-open-apikey" title="개인 Gemini API 키 설정" aria-label="API 키 설정">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="15" r="4.5" stroke="currentColor" stroke-width="1.7"/><path d="M11 12l8-8M17 4l3 3M15 6l2 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              API 키
+            </button>
+          </div>
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
       </div>
@@ -1678,8 +1714,12 @@
         }
 
         if (event.data.pluginMessage.type === 'recommend-result') {
-          const recOrig = event.data.pluginMessage.original || '';
-          renderRecommend(recOrig, event.data.pluginMessage.suggestions || []);
+          const recMsg = event.data.pluginMessage;
+          const recOrig = recMsg.original || '';
+          renderRecommend(recOrig, recMsg.suggestions || [], {
+            appendAi: !!recMsg.appendAi,   // [AI 추천 더 받기] 결과 — 기존 카드 아래에 덧붙임
+            canAskAi: !!recMsg.canAskAi,   // 사전 답안 카드 밑에 [AI 추천 더 받기] 버튼 노출
+          });
           if (recOrig) setRecommendCompact(true, recOrig); // 결과가 오면 헤더를 컴팩트 모드로
         }
 
@@ -1693,6 +1733,9 @@
           hasApiKey = !!m.hasKey;
           const statusEl = document.getElementById('apiKeyStatus');
           if (statusEl) statusEl.textContent = hasApiKey ? ('저장된 키: ' + (m.masked || '••••')) : '저장된 키 없음';
+          // 추천 AI 토글 상태 반영 (justSaved 등 aiOn이 없는 응답에서는 유지)
+          const aiToggleEl = document.getElementById('aiToggle');
+          if (aiToggleEl && typeof m.aiOn === 'boolean') aiToggleEl.checked = m.aiOn;
           if (m.justSaved) {
             const inp = document.getElementById('apiKeyInput');
             if (inp) inp.value = '';
@@ -1764,6 +1807,12 @@
           const loadingOverlay = document.getElementById('loadingOverlay');
           if (loadingOverlay) {
             loadingOverlay.classList.remove('active');
+          }
+          // [AI 추천 더 받기]가 실패로 끝났으면 버튼을 원상 복구 (성공 시엔 appendAi 렌더링이 버튼을 제거함)
+          const askBtn = document.getElementById('askAiMore');
+          if (askBtn && askBtn.disabled) {
+            askBtn.disabled = false;
+            askBtn.textContent = 'AI 추천 더 받기 ✨';
           }
           // 검토가 완전히 끝난 시점에 예약된 스크롤 확정
           if (pendingScroll) {
@@ -2252,8 +2301,8 @@
       // ── 문구 추천 / 번역 실행 ──
       // 추천받기: 첫 실행 후 헤더가 컴팩트 모드로 바뀜 — 큰 입력창 대신
       // '입력 내용'(읽기 전용) + [다시 추천받기]가 상단 고정, 추천 리스트만 스크롤.
-      // 문구를 바꾸려면 [새로 입력]으로 입력창 화면으로 복귀.
-      let lastRecommendText = ''; // 컴팩트 모드에서 [다시 추천받기]가 재사용할 원문
+      // [다시 추천받기] = 초기 화면 복귀(결과·입력 비움). [새로 입력] = 직전 문구를 살려 수정 시작.
+      let lastRecommendText = ''; // [새로 입력]이 수정 시작점으로 되살릴 직전 원문
       function setRecommendCompact(on, original) {
         document.getElementById('recommendHeader').classList.toggle('compact', on);
         if (on) {
@@ -2266,7 +2315,16 @@
       }
       document.getElementById('recommendRun').onclick = () => {
         const compact = document.getElementById('recommendHeader').classList.contains('compact');
-        const text = compact ? lastRecommendText : document.getElementById('recommendInput').value.trim();
+        if (compact) {
+          // [다시 추천받기] = 초기 화면으로 복귀 — 결과 비우고 새 문구 입력부터
+          document.getElementById('recommendList').innerHTML = '';
+          document.getElementById('recommendInput').value = '';
+          setRecommendCompact(false);
+          window.scrollTo({ top: 0, behavior: 'auto' });
+          document.getElementById('recommendInput').focus();
+          return;
+        }
+        const text = document.getElementById('recommendInput').value.trim();
         if (!text) return;
         parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text } }, '*');
       };
@@ -2286,7 +2344,7 @@
       function updateFeatureButtonState() {
         const rEl = document.getElementById('recommendInput');
         const rBtn = document.getElementById('recommendRun');
-        // 컴팩트 모드에선 lastRecommendText로 재추천하므로 입력창이 비어도 활성 유지
+        // 컴팩트 모드의 [다시 추천받기]는 초기 화면 복귀 버튼이라 입력창이 비어도 활성 유지
         const rCompact = document.getElementById('recommendHeader').classList.contains('compact');
         if (rEl && rBtn) rBtn.disabled = rCompact ? false : !rEl.value.trim();
         const tEl = document.getElementById('translateInput');
@@ -2306,6 +2364,10 @@
       document.getElementById('apiKeyClear').onclick = () => {
         document.getElementById('apiKeyInput').value = '';
         parent.postMessage({ pluginMessage: { type: 'CLEAR_API_KEY' } }, '*');
+      };
+      // 추천 AI 사용 토글 — 끄면 키가 있어도 예시·규칙만으로 추천 (저장은 플러그인 쪽 clientStorage)
+      document.getElementById('aiToggle').onchange = (e) => {
+        parent.postMessage({ pluginMessage: { type: 'SET_AI_TOGGLE', on: !!e.target.checked } }, '*');
       };
 
       // ── API 키 입력 팝업 열기/닫기 ──
@@ -2407,18 +2469,20 @@
         }
         return html;
       }
-      function renderRecommend(original, suggestions) {
+      function renderRecommend(original, suggestions, opts) {
+        opts = opts || {};
         const list = document.getElementById('recommendList');
         if (!list) return;
         // 원본은 상단 고정 '입력 내용' 박스에 보이므로 결과에는 표시하지 않는다
         let html = '';
         if (!suggestions.length) {
+          if (opts.appendAi) return; // 덧붙일 게 없으면 기존 카드 유지
           html += '<div class="result-empty">추천 결과가 없어요. 다시 시도해 주세요.</div>';
           list.innerHTML = html;
           adjustTopPadding();
           return;
         }
-        html += '<div class="result-label">추천 문구</div>';
+        html += '<div class="result-label">' + (opts.appendAi ? 'AI 추천' : '추천 문구') + '</div>';
         suggestions.forEach((s) => {
           // 문자열(예시 사전) 또는 {text, reason}(AI) 둘 다 지원
           const item = (typeof s === 'string') ? { text: s, reason: '' } : { text: s.text || '', reason: s.reason || '' };
@@ -2432,7 +2496,26 @@
             '<button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(item.text) + '">' + COPY_ICON + '</button>' +
             '</div></div>';
         });
-        list.innerHTML = html;
+        if (opts.appendAi) {
+          // [AI 추천 더 받기] 결과 — 사전 답안 카드를 지우지 않고 아래에 덧붙인다
+          const oldBtn = document.getElementById('askAiMore');
+          if (oldBtn) oldBtn.remove();
+          list.insertAdjacentHTML('beforeend', html);
+        } else {
+          // 사전 답안은 고정이라, AI를 쓸 수 있으면 새 제안을 더 받을 길을 열어준다
+          if (opts.canAskAi) {
+            html += '<button id="askAiMore" class="button-secondary button-full-width" type="button">AI 추천 더 받기 ✨</button>';
+          }
+          list.innerHTML = html;
+          const askBtn = document.getElementById('askAiMore');
+          if (askBtn) {
+            askBtn.onclick = () => {
+              askBtn.disabled = true;
+              askBtn.textContent = 'AI 추천 받는 중…';
+              parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text: original, forceAi: true } }, '*');
+            };
+          }
+        }
         wireCopyButtons(list);
         wireLikeButtons(list);
         adjustTopPadding();

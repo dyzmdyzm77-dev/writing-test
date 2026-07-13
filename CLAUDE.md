@@ -30,6 +30,7 @@
 - **동기 getNodeById 금지** (dynamic-page에서 throw) → getNodeByIdAsync
 - '해 주세요' 띄어쓰기: 동작 명사(glossary.md 목록)면 '확인해 주세요', 부사면 '같이 해주세요'
 - 검토 사유는 키워드 칩(맞춤법/띄어쓰기/해요체/간결하게/용어 통일 등 10종)으로 표시
+- **추천은 Gemini 키 없이도 동작**: 예시 사전(완전/포함 일치) → 유사 예시(바이그램 Dice ≥ 0.75, 또는 어미 뗀 몸통 비교 ≥ 0.8) → 규칙 기반 다듬기(suggestFriendlyKorean) 순 폴백. AI는 키가 있을 때만 호출하고, AI 실패(프록시 차단 등) 시에도 같은 폴백으로 응답. 키 설정 팝업의 [추천에 AI 사용] 토글(clientStorage 'aiRecommendOff')을 끄면 키가 있어도 추천은 로컬만 사용. 번역만 키 필수(토글 무관). 예시 사전의 추천안은 검토 규칙과 모순되면 안 됨(마침표·'해 주세요' 띄어쓰기 포함) — vm 샌드박스로 suggestFriendlyKorean(추천안)이 무변경인지 확인
 - **코멘트는 현재 네이티브 어노테이션 프로토타입** (node.annotations — 클릭해도 크기 배지 안 뜸). 초록 말풍선 복귀: `git revert b365c35` (createCommentFrame 보존돼 있음). 크기 배지를 숨기는 API는 없음(확정)
 
 ## 서버 구조 (2026-07 이사)
