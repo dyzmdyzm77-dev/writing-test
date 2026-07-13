@@ -645,6 +645,47 @@ function localFallbackRecommend(text: string): Array<{ text: string; reason: str
   }
   return out;
 }
+// 서버에 공용 키(GEMINI_API_KEY 환경변수)가 없다고 확인된 세션 표시 —
+// 키 없는 사용자가 요청마다 헛걸음(서버 왕복)하지 않게 한 번 확인되면 재시도하지 않는다.
+let serverSharedKeyMissing = false;
+
+// AI 제안 가져오기 — 클로드 다리(켜져 있으면) → Gemini(개인 키, 없으면 서버 공용 키) 순서로 시도.
+// 성공하면 {text, reason} 배열, 모두 실패하면 사유 메시지를 담은 Error를 던진다 (공용 키 미등록이면 err.noKey=true).
+async function fetchAiSuggestions(text: string, apiKey: string, bridge: boolean): Promise<Array<{ text: string; reason: string }>> {
+  let bridgeFail = '';
+  if (bridge) {
+    try {
+      const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/recommend', { text }, 130000);
+      const data = await res.json();
+      if (res.ok && data && data.suggestions && data.suggestions.length) return data.suggestions;
+      bridgeFail = '클로드 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status));
+    } catch (e) {
+      bridgeFail = '클로드 추천 실패: ' + errStr(e);
+    }
+    // 개인 키가 없어도 서버 공용 키가 있을 수 있으므로 Gemini로 이어서 시도한다
+    if (!apiKey && serverSharedKeyMissing) throw new Error(bridgeFail);
+  }
+  try {
+    const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text, apiKey }, 20000);
+    const data = await res.json();
+    // 개인 키로 호출됐을 때만 개인 사용량 집계 (공용 키 사용은 개인 카운터와 무관)
+    if (data && data.usage && apiKey) { postUsage(await bumpUsage()); }
+    if (!res.ok || data.error || !data.suggestions || !data.suggestions.length) {
+      if (data && data.noKey) {
+        serverSharedKeyMissing = true;
+        const e: any = new Error(bridgeFail || ('AI 추천 실패: ' + data.error));
+        e.noKey = true;
+        throw e;
+      }
+      throw new Error((bridgeFail ? bridgeFail + ' / ' : '') + 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)));
+    }
+    return data.suggestions;
+  } catch (e) {
+    if (e instanceof Error && (e.message.indexOf('AI 추천 실패') >= 0 || e.message.indexOf('클로드 추천 실패') >= 0)) throw e;
+    throw new Error((bridgeFail ? bridgeFail + ' / ' : '') + 'AI 추천 실패: ' + errStr(e));
+  }
+}
+
 // 폴백 결과를 UI로 전송. failNote가 있으면(AI 실패) 토스트로 함께 알린다.
 // emptyNote: 폴백 결과도 없을 때 보여줄 안내 (기본은 키 등록 안내)
 // canAskAi: true면 카드 밑에 [AI 추천 더 받기] 버튼 노출 (AI 실패 후 재시도용)
@@ -656,7 +697,7 @@ function postRecommendFallback(text: string, failNote: string, emptyNote?: strin
   } else if (failNote) {
     figma.ui.postMessage({ type: 'show-toast', message: failNote });
   } else {
-    figma.ui.postMessage({ type: 'show-toast', message: emptyNote || '예시·규칙으로 다듬을 곳을 찾지 못했어요. AI 추천은 설정에서 Gemini API 키를 등록하면 쓸 수 있어요.' });
+    figma.ui.postMessage({ type: 'show-toast', message: emptyNote || '예시·규칙으로 다듬을 곳을 찾지 못했어요. AI 추천을 쓰려면 클로드 다리(클로드다리-켜기.bat)를 켜거나 Gemini 키를 등록해 주세요.' });
   }
 }
 
@@ -1388,6 +1429,22 @@ const NAVER_PROXY_URL = 'https://report-admin-weld.vercel.app/api/';
 // 저장 API: POST /api/report, 관리자 페이지: https://report-admin-weld.vercel.app/
 // (manifest.json allowedDomains에도 이 도메인 추가)
 const REPORT_URL = 'https://report-admin-weld.vercel.app/api/report';
+
+// ── 클로드 다리 (같은 PC의 Claude Code 브리지 — scripts/claude-bridge.js) ──
+// `npm run bridge`로 켜두면 Gemini 키 없이도 클로드가 AI 추천을 만든다.
+// 우선순위: 예시 사전 → 클로드 다리 → Gemini(개인 키) → 로컬 폴백(유사 예시+규칙).
+// manifest.json allowedDomains에 http://localhost:11888 등록돼 있음.
+const CLAUDE_BRIDGE_URL = 'http://localhost:11888';
+async function isBridgeAlive(): Promise<boolean> {
+  try {
+    // 피그마의 네트워크 중계가 첫 요청에 느릴 수 있어 여유 있게 (다리 없으면 연결 거부라 즉시 실패함)
+    const res = await fetchWithTimeout(CLAUDE_BRIDGE_URL + '/health', 3000);
+    return res.ok;
+  } catch (e) {
+    console.log('[BRIDGE] 다리 확인 실패 (꺼져 있거나 접근 불가):', errStr(e));
+    return false;
+  }
+}
 
 // 타임아웃 있는 fetch — 한 요청이 멈춰도 그 슬롯이 영원히 막히지 않게 한다.
 // Figma 플러그인 런타임엔 AbortController가 없어 Promise.race로 구현 (느린 fetch는 버려지고 슬롯만 푼다).
@@ -3778,51 +3835,57 @@ figma.ui.onmessage = async (msg: any) => {
     }
     const apiKey = await getStoredApiKey();
     const aiOn = await isAiRecommendOn();
-    const canAi = !!apiKey && aiOn;
+    // AI 엔진 후보: ① 클로드 다리(로컬) ② Gemini(개인 키, 없으면 서버 공용 키). 토글이 꺼져 있으면 전부 안 쓴다.
+    const bridge = aiOn ? await isBridgeAlive() : false;
+    const canAi = aiOn && (bridge || !!apiKey || !serverSharedKeyMissing);
     // forceAi: 사전 답안 카드의 [AI 추천 더 받기] — 사전을 건너뛰고 AI로 새 제안을 받는다
     if (msg.forceAi && !canAi) {
-      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천을 쓰려면 API 키 등록과 [AI 추천] 스위치가 필요해요.' });
+      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천을 쓰려면 클로드 다리(npm run bridge)를 켜거나 API 키를 등록하고, [AI 추천] 스위치를 켜 주세요.' });
       return;
     }
     if (!msg.forceAi) {
       const local = localRecommend(text);
       if (local.length) {
-        // 예시 사전의 더미 값(이름·번호·인원수)을 입력의 실제 값으로 각색해서 보여준다.
-        // canAskAi: AI를 쓸 수 있으면 결과 밑에 [AI 추천 더 받기] 버튼을 노출 (사전 답안은 고정이라 다양성은 AI가 담당)
+        // 예시 사전의 더미 값(이름·번호·인원수)을 입력의 실제 값으로 각색해서 먼저 즉시 보여주고,
+        // AI를 쓸 수 있으면(스위치 켜짐 + 다리/키) 자동으로 AI 제안을 이어받아 아래에 추가한다.
         figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local.map((s) => adaptSuggestionToInput(s, text)), canAskAi: canAi });
+        if (canAi) {
+          figma.ui.postMessage({ type: 'ai-more-loading' }); // [AI 추천 더 받기] 버튼을 '받는 중' 상태로
+          try {
+            const suggestions = await fetchAiSuggestions(text, apiKey, bridge);
+            figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions, appendAi: true });
+          } catch (e) {
+            figma.ui.postMessage({ type: 'hide-loading' }); // 버튼 원상 복구
+            // 공용 키 미등록은 정상 상황(사전 카드는 이미 보여줌) — 조용히 넘어간다
+            if (!(e as any).noKey) figma.ui.postMessage({ type: 'show-toast', message: errStr(e) });
+          }
+        }
         return;
       }
-      // 예시 사전에 없으면 AI 호출 — 키가 없거나 AI 토글이 꺼져 있으면 로컬 폴백(유사 예시+규칙)으로 대신한다
-      if (!apiKey) {
-        postRecommendFallback(text, '');
-        return;
-      }
+      // 예시 사전에 없으면 AI 호출 — 엔진이 없거나 AI 토글이 꺼져 있으면 로컬 폴백(유사 예시+규칙)으로 대신한다
       if (!aiOn) {
         postRecommendFallback(text, '', '예시·규칙으로 다듬을 곳을 찾지 못했어요. 상단의 [AI 추천] 스위치를 켜면 AI가 새 문장을 제안해요.');
         return;
       }
-    }
-    figma.ui.postMessage({ type: 'show-loading' });
-    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: 'AI 문구 추천 받는 중...' });
-    try {
-      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text, apiKey }, 20000);
-      const data = await res.json();
-      figma.ui.postMessage({ type: 'hide-loading' });
-      // 워커가 usage를 실어 보내면 Gemini가 실제 호출된 것 → 오늘 사용량 +1
-      if (data && data.usage) { postUsage(await bumpUsage()); }
-      if (!res.ok || data.error || !data.suggestions || !data.suggestions.length) {
-        const failNote = 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status));
-        // [AI 추천 더 받기] 실패 시엔 폴백을 또 보여주면 사전 카드와 중복 — 안내만 한다
-        if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: failNote });
-        else postRecommendFallback(text, failNote, undefined, true); // AI 사용 가능 상태였으니 재시도 버튼 노출
+      if (!canAi) {
+        postRecommendFallback(text, '');
         return;
       }
-      // appendAi: 사전 카드 아래에 AI 카드를 덧붙이라는 표시 (기존 결과를 지우지 않음)
-      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: data.suggestions, appendAi: !!msg.forceAi });
+    }
+    // 사전에 없는 새 문구 (또는 [AI 추천 더 받기]) — 로딩을 띄우고 AI에게
+    figma.ui.postMessage({ type: 'show-loading' });
+    figma.ui.postMessage({ type: 'update-progress', progress: 30, status: bridge ? '클로드가 문구를 다듬는 중… (보통 5~10초)' : 'AI 문구 추천 받는 중...' });
+    try {
+      const suggestions = await fetchAiSuggestions(text, apiKey, bridge);
+      figma.ui.postMessage({ type: 'hide-loading' });
+      // appendAi: 기존 카드 아래에 AI 카드를 덧붙이라는 표시 (기존 결과를 지우지 않음)
+      figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions, appendAi: !!msg.forceAi });
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
-      if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + errStr(e) });
-      else postRecommendFallback(text, 'AI 추천 실패: ' + errStr(e), undefined, true); // 재시도 버튼 노출
+      // [AI 추천 더 받기] 실패 시엔 폴백을 또 보여주면 기존 카드와 중복 — 안내만 한다
+      if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: errStr(e) });
+      else if ((e as any).noKey) postRecommendFallback(text, ''); // 공용 키 미등록 → 키 안내 폴백 (재시도 버튼 없이)
+      else postRecommendFallback(text, errStr(e), undefined, true); // AI 사용 가능 상태였으니 재시도 버튼 노출
     }
     return;
   }
@@ -3836,7 +3899,8 @@ figma.ui.onmessage = async (msg: any) => {
         return;
       }
       const apiKey = await getStoredApiKey();
-      if (!apiKey) {
+      // 개인 키가 없어도 서버 공용 키로 시도한다 — 공용 키도 없다고 확인된 세션이면 바로 키 안내
+      if (!apiKey && serverSharedKeyMissing) {
         figma.ui.postMessage({ type: 'need-api-key' });
         return;
       }
@@ -3845,9 +3909,14 @@ figma.ui.onmessage = async (msg: any) => {
       const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'translate', { text, apiKey }, 20000);
       const data = await res.json();
       figma.ui.postMessage({ type: 'hide-loading' });
-      // 워커가 usage를 실어 보내면 Gemini가 실제 호출된 것 → 오늘 사용량 +1
-      if (data && data.usage) { postUsage(await bumpUsage()); }
+      // 개인 키로 호출됐을 때만 개인 사용량 집계
+      if (data && data.usage && apiKey) { postUsage(await bumpUsage()); }
       if (!res.ok || data.error) {
+        if (data && data.noKey) {
+          serverSharedKeyMissing = true;
+          figma.ui.postMessage({ type: 'need-api-key' });
+          return;
+        }
         figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
         return;
       }

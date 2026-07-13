@@ -15,6 +15,9 @@
       "https://m.search.naver.com",
       "https://writingtest.dyzmdyzm77.workers.dev",
       "https://report-admin-weld.vercel.app"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:11888"
     ]
   }
 }

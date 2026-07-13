@@ -9,9 +9,9 @@
 //   1) 네이버 검색페이지는 CORS 헤더가 없어 플러그인에서 직접 못 긁는다 → 여기서 대신 긁는다.
 //   2) Gemini는 CORS 때문에 플러그인에서 직접 호출이 불안정 → 워커가 대신 호출한다.
 //
-// ★ API 키 정책: 개인 키 방식.
-//   추천/번역 요청 본문에 각 사용자의 Gemini 키(apiKey)가 실려 오고, 워커는 그 키로 호출만 한다(저장 안 함).
-//   → 워커에 공유 GEMINI_API_KEY를 둘 필요가 없다. 무료 할당량도 사용자별로 각자 소모된다.
+// ★ API 키 정책: 개인 키 우선 + 서버 공용 키 폴백.
+//   추천/번역 요청 본문에 개인 Gemini 키(apiKey)가 있으면 그 키로 호출(저장 안 함),
+//   없으면 환경변수 GEMINI_API_KEY(팀 공용 키)로 호출 — 키 없는 팀원도 플러그인만 켜면 AI를 쓴다.
 //   무료 키 발급: https://aistudio.google.com/apikey (구글 계정 로그인 → Create API key)
 //
 // ※ "오수정 제보" 저장/열람은 이 워커가 아니라 별도 Vercel 앱(ux-writing-reports)에서 처리한다.
@@ -77,7 +77,7 @@ async function handlePassportKey() {
 // 성공 시 { text, usage } 반환 — usage는 Gemini usageMetadata(토큰 수), 플러그인이 사용량 표시에 씀.
 async function callGemini(apiKey, prompt, schema) {
   if (!apiKey) {
-    return { error: 'Gemini API 키가 없어요. 플러그인 설정에서 개인 키를 넣어주세요.' };
+    return { error: 'AI 키가 없어요. 관리자가 서버에 공용 키를 등록하기 전까지는 개인 키를 설정에 넣어 주세요.', noKey: true };
   }
   const first = await callGeminiModel(apiKey, GEMINI_MODEL, prompt, schema);
   if (!first.retryable) return first;
@@ -150,7 +150,7 @@ async function readBody(request) {
 }
 
 // ── 번역 (한국어 ↔ 영어 자동) ────────────────────────────────
-async function handleTranslate(request, _env) {
+async function handleTranslate(request, env) {
   const { text: rawText, apiKey } = await readBody(request);
   const text = rawText.trim();
   if (!text) {
@@ -164,9 +164,9 @@ async function handleTranslate(request, _env) {
     'Return ONLY the translated text.\n\n' +
     'Input:\n' +
     text;
-  const out = await callGemini(apiKey, prompt);
+  const out = await callGemini(apiKey || (env && env.GEMINI_API_KEY) || '', prompt);
   if (out.error) {
-    return Response.json({ error: out.error }, { status: 502, headers: CORS });
+    return Response.json({ error: out.error, noKey: !!out.noKey }, { status: 502, headers: CORS });
   }
   // 한글 포함 여부로 방향 라벨만 붙여줌 (표시용)
   const hadKorean = /[가-힣]/.test(text);
@@ -321,7 +321,7 @@ const RECOMMEND_SCHEMA = {
   },
 };
 
-async function handleRecommend(request, _env) {
+async function handleRecommend(request, env) {
   const { text: rawText, apiKey } = await readBody(request);
   const text = rawText.trim();
   if (!text) {
@@ -348,9 +348,9 @@ async function handleRecommend(request, _env) {
     'reason examples: "딱딱한 한자어를 풀어 썼어요 (잠금 처리→잠겼어요)", "과도한 경어를 뺐어요 (~하시겠어요?→~할까요?)", "상황을 먼저 알리고 행동을 묻는 구조로 바꿨어요".\n\n' +
     'Text:\n' +
     text;
-  const out = await callGemini(apiKey, prompt, RECOMMEND_SCHEMA);
+  const out = await callGemini(apiKey || (env && env.GEMINI_API_KEY) || '', prompt, RECOMMEND_SCHEMA);
   if (out.error) {
-    return Response.json({ error: out.error }, { status: 502, headers: CORS });
+    return Response.json({ error: out.error, noKey: !!out.noKey }, { status: 502, headers: CORS });
   }
   // 안전망: 원본과 같은 제안·중복 제안은 걸러낸다 (모델이 "고칠 게 없다"며 원본을 반납하는 경우)
   const normalize = (s) => s.replace(/\s+/g, ' ').trim();
