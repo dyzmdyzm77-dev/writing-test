@@ -3817,61 +3817,35 @@ figma.ui.onmessage = async (msg: any) => {
 
   // 문구 추천 — 직접 입력이 있으면 그걸, 없으면 선택 영역 텍스트를 대상으로 한다
   if (msg.type === "RECOMMEND") {
-    // 하이브리드 추천: ① 예시 사전(recommend-examples.md) 로컬 매칭 → 즉시 응답
-    //               ② 없으면 워커(AI)가 스타일 기준+예시(few-shot)로 새 문장을 제안 (워커 미배포면 안내만)
+    // 추천 = AI 추천 하나로 통일. AI를 쓸 수 있으면 AI 결과만 띄우고,
+    // AI를 못 쓸 때만(다리 꺼짐 + 키·공용키 없음) 예시·규칙 폴백으로 빈손을 면한다.
+    // 예시 사전은 화면 카드로는 안 나오지만 AI 프롬프트의 톤 교재(few-shot)로 계속 쓰인다.
     const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
     if (!text) {
       figma.ui.postMessage({ type: 'show-toast', message: '문구를 입력하거나 텍스트를 선택해주세요.' });
       return;
     }
     const apiKey = await getStoredApiKey();
-    // AI 엔진 후보: ① 클로드 다리(로컬) ② Gemini(개인 키, 없으면 서버 공용 키). AI는 항상 시도한다.
+    // AI 엔진 후보: ① 클로드 다리(로컬) ② Gemini(개인 키, 없으면 서버 공용 키).
     const bridge = await isBridgeAlive();
     const canAi = bridge || !!apiKey || !serverSharedKeyMissing;
-    // forceAi: 사전 답안 카드의 [AI 추천 더 받기] — 사전을 건너뛰고 AI로 새 제안을 받는다
-    if (msg.forceAi && !canAi) {
-      figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천을 쓰려면 [🔌 클로드] 버튼으로 다리를 켜거나, 관리자가 서버 공용 키를 등록해야 해요.' });
+    if (!canAi) {
+      // AI를 전혀 못 쓰는 상태 — 예시·규칙 폴백 (forceAi여도 폴백이라도 보여준다)
+      postRecommendFallback(text, '');
       return;
     }
-    if (!msg.forceAi) {
-      const local = localRecommend(text);
-      if (local.length) {
-        // 예시 사전의 더미 값(이름·번호·인원수)을 입력의 실제 값으로 각색해서 먼저 즉시 보여주고,
-        // AI를 쓸 수 있으면(다리/키) 자동으로 AI 제안을 이어받아 아래에 추가한다.
-        figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: local.map((s) => adaptSuggestionToInput(s, text)), canAskAi: canAi });
-        if (canAi) {
-          figma.ui.postMessage({ type: 'ai-more-loading' }); // [AI 추천 더 받기] 버튼을 '받는 중' 상태로
-          try {
-            const suggestions = await fetchAiSuggestions(text, apiKey, bridge);
-            figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions, appendAi: true });
-          } catch (e) {
-            figma.ui.postMessage({ type: 'hide-loading' }); // 버튼 원상 복구
-            // 공용 키 미등록은 정상 상황(사전 카드는 이미 보여줌) — 조용히 넘어간다
-            if (!(e as any).noKey) figma.ui.postMessage({ type: 'show-toast', message: errStr(e) });
-          }
-        }
-        return;
-      }
-      // 예시 사전에 없고 AI도 못 쓰면 로컬 폴백(유사 예시+규칙)으로 대신한다
-      if (!canAi) {
-        postRecommendFallback(text, '');
-        return;
-      }
-    }
-    // 사전에 없는 새 문구 (또는 [AI 추천 더 받기]) — 로딩을 띄우고 AI에게
     figma.ui.postMessage({ type: 'show-loading' });
     figma.ui.postMessage({ type: 'update-progress', progress: 30, status: bridge ? '클로드가 문구를 다듬는 중… (보통 5~10초)' : 'AI 문구 추천 받는 중...' });
     try {
       const suggestions = await fetchAiSuggestions(text, apiKey, bridge);
       figma.ui.postMessage({ type: 'hide-loading' });
-      // appendAi: 기존 카드 아래에 AI 카드를 덧붙이라는 표시 (기존 결과를 지우지 않음)
+      // forceAi([AI 추천 더 받기])면 기존 결과 아래에 덧붙이고, 아니면 새로 표시
       figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions, appendAi: !!msg.forceAi });
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
-      // [AI 추천 더 받기] 실패 시엔 폴백을 또 보여주면 기존 카드와 중복 — 안내만 한다
       if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: errStr(e) });
-      else if ((e as any).noKey) postRecommendFallback(text, ''); // 공용 키 미등록 → 키 안내 폴백 (재시도 버튼 없이)
-      else postRecommendFallback(text, errStr(e), undefined, true); // AI 사용 가능 상태였으니 재시도 버튼 노출
+      else if ((e as any).noKey) postRecommendFallback(text, ''); // 공용 키 미등록 → 예시·규칙 폴백
+      else postRecommendFallback(text, errStr(e), undefined, true); // AI 실패 → 폴백 + 재시도 버튼
     }
     return;
   }
