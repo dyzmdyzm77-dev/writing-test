@@ -574,12 +574,14 @@ function normalizeForSimilarity(s: string): string {
 // (몸통 비교는 정보가 줄어든 상태라 문턱을 더 높게 잡아 오매칭을 막는다)
 const FUZZY_RECOMMEND_THRESHOLD = 0.75;
 const FUZZY_STRIPPED_THRESHOLD = 0.8;
+// 문턱을 넘는 예시를 유사도 순으로 최대 3개까지 모아 그 추천안들을 합쳐 돌려준다
+// (1개만 꺼내면 새 문장에 카드가 1~2장뿐이라 제안이 빈약해짐 — 다양성 확보)
+const FUZZY_MAX_EXAMPLES = 3;
 function fuzzyRecommend(text: string): string[] {
   const q = normalizeForMatch(text);
   if (q.length < 8) return []; // 짧은 문장은 우연히 비슷해질 확률이 높아 제외
   const qs = normalizeForSimilarity(text);
-  let best: { input: string; suggestions: string[] } | null = null;
-  let bestScore = 0;
+  const hits: Array<{ score: number; suggestions: string[] }> = [];
   for (const ex of RECOMMEND_EXAMPLES) {
     const n = normalizeForMatch(ex.input);
     if (n.length < 8) continue;
@@ -589,11 +591,18 @@ function fuzzyRecommend(text: string): string[] {
       const ns = normalizeForSimilarity(ex.input);
       if (ns.length >= 5) stripped = diceSimilarity(qs, ns);
     }
-    const qualifies = full >= FUZZY_RECOMMEND_THRESHOLD || stripped >= FUZZY_STRIPPED_THRESHOLD;
-    const score = Math.max(full, stripped);
-    if (qualifies && score > bestScore) { bestScore = score; best = ex; }
+    if (full >= FUZZY_RECOMMEND_THRESHOLD || stripped >= FUZZY_STRIPPED_THRESHOLD) {
+      hits.push({ score: Math.max(full, stripped), suggestions: ex.suggestions });
+    }
   }
-  return best ? best.suggestions : [];
+  hits.sort((a, b) => b.score - a.score);
+  const out: string[] = [];
+  for (const h of hits.slice(0, FUZZY_MAX_EXAMPLES)) {
+    for (const s of h.suggestions) {
+      if (out.indexOf(s) === -1) out.push(s);
+    }
+  }
+  return out;
 }
 // 예시 추천안을 입력 문구의 실제 값으로 각색한다.
 // 예시 사전의 더미 값("홍*동(…)", "외 2명")이 그대로 노출되지 않도록,
@@ -638,10 +647,11 @@ function localFallbackRecommend(text: string): Array<{ text: string; reason: str
 }
 // 폴백 결과를 UI로 전송. failNote가 있으면(AI 실패) 토스트로 함께 알린다.
 // emptyNote: 폴백 결과도 없을 때 보여줄 안내 (기본은 키 등록 안내)
-function postRecommendFallback(text: string, failNote: string, emptyNote?: string): void {
+// canAskAi: true면 카드 밑에 [AI 추천 더 받기] 버튼 노출 (AI 실패 후 재시도용)
+function postRecommendFallback(text: string, failNote: string, emptyNote?: string, canAskAi?: boolean): void {
   const fallback = localFallbackRecommend(text);
   if (fallback.length) {
-    figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: fallback });
+    figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions: fallback, canAskAi: !!canAskAi });
     if (failNote) figma.ui.postMessage({ type: 'show-toast', message: failNote + ' — 예시·규칙 기반 추천으로 대신했어요.' });
   } else if (failNote) {
     figma.ui.postMessage({ type: 'show-toast', message: failNote });
@@ -3804,7 +3814,7 @@ figma.ui.onmessage = async (msg: any) => {
         const failNote = 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status));
         // [AI 추천 더 받기] 실패 시엔 폴백을 또 보여주면 사전 카드와 중복 — 안내만 한다
         if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: failNote });
-        else postRecommendFallback(text, failNote);
+        else postRecommendFallback(text, failNote, undefined, true); // AI 사용 가능 상태였으니 재시도 버튼 노출
         return;
       }
       // appendAi: 사전 카드 아래에 AI 카드를 덧붙이라는 표시 (기존 결과를 지우지 않음)
@@ -3812,7 +3822,7 @@ figma.ui.onmessage = async (msg: any) => {
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
       if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: 'AI 추천 실패: ' + errStr(e) });
-      else postRecommendFallback(text, 'AI 추천 실패: ' + errStr(e));
+      else postRecommendFallback(text, 'AI 추천 실패: ' + errStr(e), undefined, true); // 재시도 버튼 노출
     }
     return;
   }
