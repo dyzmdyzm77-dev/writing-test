@@ -17,7 +17,8 @@
       "https://report-admin-weld.vercel.app"
     ],
     "devAllowedDomains": [
-      "http://localhost:11888"
+      "http://localhost:11888",
+      "http://localhost:11889"
     ]
   }
 }

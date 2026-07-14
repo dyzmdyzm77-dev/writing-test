@@ -143,6 +143,8 @@ src = src.replace(reRec, recGen);
 // %LOCALAPPDATA%\ClaudeBridge에 설치 + claudebridge:// 등록 + node/claude 점검 + 다리 켜기까지 전부 한다.
 const bridgeBytes = fs.readFileSync(path.join(root, 'scripts', 'claude-bridge.js'));
 const launcherBytes = fs.readFileSync(path.join(root, 'claude-bridge-silent.vbs')); // UTF-16LE 바이트 그대로
+const watcherBytes = fs.readFileSync(path.join(root, 'scripts', 'bridge-watcher.js'));
+const watcherVbsBytes = fs.readFileSync(path.join(root, 'claude-watcher-silent.vbs'));
 // 설치 로직 (PowerShell, bat 안에 base64로 내장). 마커 문자열은 자기 자신과 매칭되지 않게 조각내서 만든다.
 const psScript = [
   "$ErrorActionPreference = 'Stop'",
@@ -160,7 +162,13 @@ const psScript = [
   "[IO.File]::WriteAllBytes((Join-Path $dir 'scripts\\claude-bridge.js'), (Part 'BRIDGE' 'EXAMPLES'))",
   "[IO.File]::WriteAllBytes((Join-Path $dir 'recommend-examples.md'), (Part 'EXAMPLES' 'LAUNCHER'))",
   "$launcher = Join-Path $dir 'claude-bridge-silent.vbs'",
-  "[IO.File]::WriteAllBytes($launcher, (Part 'LAUNCHER' 'END'))",
+  "[IO.File]::WriteAllBytes($launcher, (Part 'LAUNCHER' 'WATCHER'))",
+  "[IO.File]::WriteAllBytes((Join-Path $dir 'scripts\\bridge-watcher.js'), (Part 'WATCHER' 'WSILENT'))",
+  "$wvbs = Join-Path $dir 'claude-watcher-silent.vbs'",
+  "[IO.File]::WriteAllBytes($wvbs, (Part 'WSILENT' 'END'))",
+  "# 감시자: 로그인 자동시작 + 지금 기동 (플러그인 fetch가 다리를 켤 수 있게 — 피그마가 프로토콜 열기를 막는 버전 대응)",
+  "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'ClaudeBridgeWatcher' -Value ('wscript.exe \"' + $wvbs + '\"')",
+  "Start-Process -FilePath 'wscript.exe' -ArgumentList ('\"' + $wvbs + '\"')",
   "New-Item -Path 'HKCU:\\Software\\Classes\\claudebridge\\shell\\open\\command' -Force | Out-Null",
   "Set-ItemProperty -Path 'HKCU:\\Software\\Classes\\claudebridge' -Name '(default)' -Value 'URL:Claude Bridge'",
   "Set-ItemProperty -Path 'HKCU:\\Software\\Classes\\claudebridge' -Name 'URL Protocol' -Value ''",
@@ -198,6 +206,10 @@ const batContent = [
   b64lines(Buffer.from(recMd, 'utf8')),
   '::LAUNCHER::',
   b64lines(launcherBytes),
+  '::WATCHER::',
+  b64lines(watcherBytes),
+  '::WSILENT::',
+  b64lines(watcherVbsBytes),
   '::END::',
   '',
 ].join('\r\n');
