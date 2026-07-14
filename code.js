@@ -3937,6 +3937,22 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem });
         return;
     }
+    // 클로드 다리 끄기 — [🟢 클로드 켜짐] 버튼을 다시 누르면 호출 (다리의 자기 종료 API)
+    if (msg.type === "STOP_BRIDGE") {
+        try {
+            await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/shutdown', {}, 3000);
+        }
+        catch (_e) { /* 이미 꺼져 있으면 무시 */ }
+        // 다리는 응답 후 스스로 종료(약 200ms) — 잠깐 기다렸다 실제로 꺼졌는지 확인해 회신
+        await new Promise((r) => setTimeout(r, 700));
+        let h = await bridgeHealth();
+        if (h.alive) {
+            await new Promise((r) => setTimeout(r, 800));
+            h = await bridgeHealth();
+        }
+        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem, stopped: !h.alive });
+        return;
+    }
     if (msg.type === "CLEAR_API_KEY") {
         try {
             await figma.clientStorage.deleteAsync(API_KEY_STORAGE);

@@ -1710,9 +1710,16 @@
         if (event.data.pluginMessage.type === 'bridge-status') {
           const bs = event.data.pluginMessage;
           // 추천 화면 진입 직후의 상태 응답 — 꺼져 있고 켜는 중도 아니면 자동으로 한 번 켠다
+          // (단, 사용자가 버튼으로 직접 껐다면 존중해서 안 켬)
           if (pendingAutoWake) {
             pendingAutoWake = false;
-            if (!bs.alive && !bridgeWakePoll) startBridge(true);
+            if (!bs.alive && !bridgeWakePoll && !userTurnedOff) startBridge(true);
+          }
+          // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내
+          if (bridgeStopping) {
+            bridgeStopping = false;
+            if (bridgeWakeBtn) bridgeWakeBtn.disabled = false;
+            showToast(bs.alive ? '클로드를 끄지 못했어요 — 다리가 아직 응답해요.' : '클로드를 껐어요. 다시 켜려면 이 버튼을 누르세요.');
           }
           if (bridgeWakeBtn) {
             // 버튼은 항상 보이고 상태를 색·글자로 표시한다.
@@ -1734,7 +1741,7 @@
               bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive);
               bridgeWakeBtn.textContent = bs.alive ? '🟢 클로드 켜짐' : '⚫ 클로드 꺼짐';
               bridgeWakeBtn.title = bs.alive
-                ? '클로드 다리 켜져 있음 — 추천받기를 누르면 클로드가 답해요'
+                ? '클로드 다리 켜져 있음 — 누르면 끄기'
                 : '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (한 번은 클로드다리-원클릭연결 등록 필요)';
             }
           }
@@ -2409,6 +2416,8 @@
       const bridgeWakeBtn = document.getElementById('bridgeWakeBtn');
       let bridgeWakePoll = null;   // 깨우는 중 상태 확인 타이머
       let pendingAutoWake = false; // 추천 화면 진입 → 다리 꺼져 있으면 한 번 자동으로 켠다(상태 응답 도착 시 판단)
+      let bridgeStopping = false;  // [클로드 켜짐] 재클릭으로 끄는 중 — 상태 응답 오면 결과 안내
+      let userTurnedOff = false;   // 사용자가 직접 껐음 — 화면 진입 자동 켜기를 건너뜀 (직접 켜면 해제)
       let bridgeWakeWaited = 0;
       function requestBridgeStatus() {
         parent.postMessage({ pluginMessage: { type: 'CHECK_BRIDGE' } }, '*');
@@ -2436,7 +2445,16 @@
       }
       if (bridgeWakeBtn) {
         bridgeWakeBtn.onclick = () => {
-          if (bridgeWakeBtn.classList.contains('bridge-on')) { showToast('클로드가 켜져 있어요. 추천받기를 누르면 바로 답해요.'); return; }
+          if (bridgeWakeBtn.classList.contains('bridge-on')) {
+            // 켜진 상태에서 다시 누르면 끄기 (다리의 자기 종료 API 호출)
+            bridgeStopping = true;
+            userTurnedOff = true; // 직접 껐으니 화면 진입 자동 켜기는 건너뜀
+            bridgeWakeBtn.disabled = true;
+            bridgeWakeBtn.textContent = '끄는 중…';
+            parent.postMessage({ pluginMessage: { type: 'STOP_BRIDGE' } }, '*');
+            return;
+          }
+          userTurnedOff = false; // 직접 켜면 자동 켜기 다시 허용
           startBridge(false);
         };
       }
