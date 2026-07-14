@@ -284,6 +284,15 @@ const server = http.createServer(async (req, res) => {
   return json(res, 404, { error: 'Not found' });
 });
 
+// 이미 다리가 떠 있는데 또 켜기가 들어오면(제스처 자동 켜기 중복 등) 조용히 종료 — 돌던 다리는 그대로 유지
+server.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE') {
+    console.log('[bridge] 이미 켜져 있어요(포트 ' + PORT + ' 사용 중) — 이 인스턴스는 종료합니다.');
+    process.exit(0);
+  }
+  console.log('[bridge] 서버 오류:', e && e.message);
+  process.exit(1);
+});
 server.listen(PORT, '127.0.0.1', () => {
   console.log('──────────────────────────────────────────────');
   console.log(' 클로드 다리 켜짐 — http://localhost:' + PORT);

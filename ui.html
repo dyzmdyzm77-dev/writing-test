@@ -1365,7 +1365,7 @@
       }
       function showView(name) {
         currentView = name;
-        if (name === 'recommend') { pendingAutoWake = true; requestBridgeStatus(); } // 추천 화면 열 때 상태 확인 → 꺼져 있으면 자동으로 켬
+        if (name === 'recommend') requestBridgeStatus(); // 추천 화면 열 때 상태 갱신 (자동 켜기는 클릭 제스처의 ensureBridgeFromGesture가 담당)
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
         document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'flex' : 'none';
@@ -1709,12 +1709,7 @@
         // 클로드 다리 상태 — [🔌 클로드] 버튼에 표시하고, 깨우는 중이었다면 "켜졌어요" 알림
         if (event.data.pluginMessage.type === 'bridge-status') {
           const bs = event.data.pluginMessage;
-          // 추천 화면 진입 직후의 상태 응답 — 꺼져 있고 켜는 중도 아니면 자동으로 한 번 켠다
-          // (단, 사용자가 버튼으로 직접 껐다면 존중해서 안 켬)
-          if (pendingAutoWake) {
-            pendingAutoWake = false;
-            if (!bs.alive && !bridgeWakePoll && !userTurnedOff) startBridge(true);
-          }
+          bridgeKnownAlive = !!bs.alive; // 최신 생존 상태 기억 (제스처에서 또 켤지 판단용)
           // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내
           if (bridgeStopping) {
             bridgeStopping = false;
@@ -2324,8 +2319,12 @@
       }
 
       // ── 홈 메뉴 / 뒤로가기 버튼 연결 ──
+      // 추천으로 가는 클릭이면, 이 제스처 안에서 다리를 바로 켠다(팝업 차단 방지) → 이후 showView
       document.querySelectorAll('[data-go]').forEach((btn) => {
-        btn.addEventListener('click', () => showView(btn.dataset.go));
+        btn.addEventListener('click', () => {
+          if (btn.dataset.go === 'recommend') ensureBridgeFromGesture();
+          showView(btn.dataset.go);
+        });
       });
       document.querySelectorAll('[data-back]').forEach((btn) => {
         btn.addEventListener('click', () => showView('home'));
@@ -2333,7 +2332,10 @@
 
       // ── 상단 탭 바 연결 (탭 전환 / 홈 버튼) ──
       document.querySelectorAll('.tab-btn').forEach((btn) => {
-        btn.addEventListener('click', () => showView(btn.dataset.tab));
+        btn.addEventListener('click', () => {
+          if (btn.dataset.tab === 'recommend') ensureBridgeFromGesture();
+          showView(btn.dataset.tab);
+        });
       });
       document.getElementById('tabHome').addEventListener('click', () => showView('home'));
 
@@ -2415,9 +2417,9 @@
       if (modelSelect) modelSelect.onchange = () => { modelSelect.dataset.userPicked = '1'; }; // 사용자가 고르면 다리 보고값으로 덮어쓰지 않음
       const bridgeWakeBtn = document.getElementById('bridgeWakeBtn');
       let bridgeWakePoll = null;   // 깨우는 중 상태 확인 타이머
-      let pendingAutoWake = false; // 추천 화면 진입 → 다리 꺼져 있으면 한 번 자동으로 켠다(상태 응답 도착 시 판단)
       let bridgeStopping = false;  // [클로드 켜짐] 재클릭으로 끄는 중 — 상태 응답 오면 결과 안내
       let userTurnedOff = false;   // 사용자가 직접 껐음 — 화면 진입 자동 켜기를 건너뜀 (직접 켜면 해제)
+      let bridgeKnownAlive = false; // 마지막으로 확인된 다리 생존 여부 (제스처에서 또 켤지 판단)
       let bridgeWakeWaited = 0;
       function requestBridgeStatus() {
         parent.postMessage({ pluginMessage: { type: 'CHECK_BRIDGE' } }, '*');
@@ -2426,22 +2428,29 @@
         if (bridgeWakePoll) { clearInterval(bridgeWakePoll); bridgeWakePoll = null; }
         if (bridgeWakeBtn) { bridgeWakeBtn.disabled = false; requestBridgeStatus(); } // 끝난 뒤 최신 상태로 라벨 갱신
       }
-      // 다리 켜기 — 버튼 클릭(수동) / 추천 화면 진입 시 자동(auto=true) 공용.
-      // auto일 땐 "켜는 중" 토스트로 조용히 알리고, 실패 시엔 설치 안내를 띄운다.
-      function startBridge(auto) {
-        if (bridgeWakePoll) return; // 이미 켜는 중이면 중복 실행 안 함
-        window.open('claudebridge://start');
+      // claudebridge:// 열기 — 반드시 클릭(제스처) 스택 안에서 동기로 불러야 팝업 차단에 안 막힘.
+      // 비동기 응답을 기다린 뒤 열면 제스처가 만료돼 브라우저/Figma가 프로토콜 실행을 막는다.
+      function openBridgeProtocol() { try { window.open('claudebridge://start'); } catch (_e) { /* 무시 */ } }
+      // 켜는 중 상태 폴링 시작 (window.open은 호출부에서 이미 제스처로 실행함).
+      // auto=true(화면 진입 자동): 실패해도 조용히 / auto=false(버튼 수동): 실패 시 설치 안내
+      function startBridgePoll(auto) {
+        if (bridgeWakePoll) return;
         if (bridgeWakeBtn) { bridgeWakeBtn.disabled = true; bridgeWakeBtn.textContent = '켜는 중…'; }
-        if (auto) showToast('클로드를 켜는 중이에요… (첫 켜기는 준비까지 조금 걸려요)');
         bridgeWakeWaited = 0;
         bridgeWakePoll = setInterval(() => {
           bridgeWakeWaited += 2;
           requestBridgeStatus();
-          if (bridgeWakeWaited >= 20) { // 20초 넘게 안 켜지면 설치 안내 (다리가 살아 있으면 그 전에 상태 메시지로 폴링 종료됨)
+          if (bridgeWakeWaited >= 20) { // 20초 안에 안 켜지면 종료. 수동일 때만 설치 안내
             stopBridgeWakePoll();
-            showToast('클로드가 안 켜졌어요. 처음이라면 폴더의 [클로드다리-원클릭연결]을 한 번 실행하고, Node.js + Claude Code(터미널에서 claude --version)가 설치·로그인돼 있는지 확인해 주세요.');
+            if (!auto) showToast('클로드가 안 켜졌어요. 처음이라면 폴더의 [클로드다리-원클릭연결]을 한 번 실행하고, Node.js + Claude Code(터미널에서 claude --version)가 설치·로그인돼 있는지 확인해 주세요.');
           }
         }, 2000);
+      }
+      // 추천 화면 진입(제스처) 시 호출 — 다리가 꺼진 걸로 알면 그 자리에서 바로 켠다
+      function ensureBridgeFromGesture() {
+        if (bridgeKnownAlive || bridgeWakePoll || userTurnedOff) return; // 켜짐/켜는중/직접꺼둠이면 안 함
+        openBridgeProtocol();   // ← 제스처 안에서 동기 실행 (차단 방지)
+        startBridgePoll(true);  // 켜질 때까지 상태 폴링 (조용히)
       }
       if (bridgeWakeBtn) {
         bridgeWakeBtn.onclick = () => {
@@ -2454,8 +2463,9 @@
             parent.postMessage({ pluginMessage: { type: 'STOP_BRIDGE' } }, '*');
             return;
           }
-          userTurnedOff = false; // 직접 켜면 자동 켜기 다시 허용
-          startBridge(false);
+          userTurnedOff = false;    // 직접 켜면 자동 켜기 다시 허용
+          openBridgeProtocol();     // 제스처 안에서 동기 실행
+          startBridgePoll(false);   // 수동: 실패 시 설치 안내
         };
       }
 
