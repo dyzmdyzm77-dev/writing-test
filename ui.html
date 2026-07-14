@@ -1300,7 +1300,8 @@
 
     <script>
       let previewData = [];
-      let elapsedTimer = null; // AI 추천 로딩의 경과 시간 타이머 (진행률을 알 수 없어 초 단위로 표시)
+      let elapsedTimer = null; // AI 추천 로딩의 % 추정 타이머 (진행률을 알 수 없어 경과 시간으로 추정)
+      let aiProgress = 0;
       function stopElapsedTimer() { if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; } }
       let lastSelectionText = ''; // 캔버스에서 마지막으로 선택한 영역의 텍스트 (추천/번역 입력창 자동 채움용)
       let hasApiKey = false;      // 개인 Gemini 키 저장 여부
@@ -1799,12 +1800,15 @@
           if (loadingStatus) loadingStatus.textContent = m.status || '준비 중...';
           stopElapsedTimer();
           if (m.indeterminate) {
-            // 진행률을 알 수 없는 작업(AI 추천) — 가짜 %가 아니라 경과 시간을 센다
+            // 진행률을 알 수 없는 작업(AI 추천) — 경과 시간으로 %를 추정해 채운다.
+            // 실제 경과 시간 기준(타이머 빈도에 무관): 처음엔 빠르게, 뒤로 갈수록 99%로 감속 수렴.
+            // tau≈3.3s → 약 8초에 90% 부근. 결과가 오면 hide에서 100%로 마무리.
             const t0 = Date.now();
-            if (loadingProgress) loadingProgress.textContent = '0초';
+            if (loadingProgress) loadingProgress.textContent = '0%';
             elapsedTimer = setInterval(() => {
-              if (loadingProgress) loadingProgress.textContent = Math.round((Date.now() - t0) / 1000) + '초';
-            }, 500);
+              const pct = 99 * (1 - Math.exp(-((Date.now() - t0) / 1000) / 3.3));
+              if (loadingProgress) loadingProgress.textContent = Math.round(pct) + '%';
+            }, 200);
           } else if (loadingProgress) {
             loadingProgress.textContent = '0%';
           }
@@ -1823,7 +1827,10 @@
         }
         
         if (event.data.pluginMessage.type === 'hide-loading') {
+          const wasAi = !!elapsedTimer;
           stopElapsedTimer();
+          const loadingProgress = document.getElementById('loadingProgress');
+          if (wasAi && loadingProgress) loadingProgress.textContent = '100%'; // 결과 도착 — 마무리
           const loadingOverlay = document.getElementById('loadingOverlay');
           if (loadingOverlay) {
             loadingOverlay.classList.remove('active');
