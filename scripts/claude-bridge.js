@@ -173,9 +173,9 @@ function sendTurn(text) {
 // (안 그러면 클로드가 성실하게 같은 답을 또 내서 [AI 추천 더 받기]가 무의미해진다)
 const askedCount = new Map();
 
-// 세션 준비(시동+지시문 주입)를 보장한 뒤 문구 요청 — 모든 호출은 queue로 직렬화.
+// 세션 준비(시동+지시문 주입)를 보장한 뒤 한 턴 실행 — 모든 호출은 queue로 직렬화.
 // model을 주면 그 모델로 (다르면 세션 재시작). 한 모델을 계속 쓰면 재시작은 최초 1회뿐.
-function askClaude(text, model) {
+function runTurn(buildAsk, model) {
   const job = queue.then(async () => {
     if (model && ALLOWED_MODELS.indexOf(model) !== -1 && model !== currentModel) {
       console.log('[bridge] 모델 변경: ' + currentModel + ' → ' + model);
@@ -191,17 +191,48 @@ function askClaude(text, model) {
       console.log('[bridge] 세션 준비 완료 (' + ((Date.now() - t0) / 1000).toFixed(1) + 's) — 이후 요청은 빨라요.');
     }
     turns++;
-    const attempt = (askedCount.get(text) || 0) + 1;
-    askedCount.set(text, attempt);
-    if (askedCount.size > 200) askedCount.clear(); // 무한히 쌓이지 않게
-    const ask = attempt > 1
-      ? '같은 문구를 다시 요청한다. 이 세션에서 이전에 제안했던 것들과 겹치지 않는, 구조나 어휘가 확실히 다른 새로운 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text)
-      : '다음 UI 문구의 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text);
-    return sendTurn(ask);
+    return sendTurn(buildAsk());
   });
   // 한 요청이 실패해도 다음 요청이 이어지도록 큐는 항상 성공으로 정리
   queue = job.catch(() => {});
   return job;
+}
+
+// 문구 추천 턴
+function askClaude(text, model) {
+  return runTurn(() => {
+    const attempt = (askedCount.get(text) || 0) + 1;
+    askedCount.set(text, attempt);
+    if (askedCount.size > 200) askedCount.clear(); // 무한히 쌓이지 않게
+    return attempt > 1
+      ? '같은 문구를 다시 요청한다. 이 세션에서 이전에 제안했던 것들과 겹치지 않는, 구조나 어휘가 확실히 다른 새로운 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text)
+      : '다음 UI 문구의 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text);
+  }, model);
+}
+
+// 번역 턴 — 같은 세션을 쓰되, 이번 턴만 추천 형식(JSON 배열) 대신 번역 형식(JSON 객체)을 요구한다
+function askTranslate(text, model) {
+  return runTurn(() => (
+    '이번 요청은 번역 작업이다 (문구 다듬기 아님 — 대안 3개 규칙은 이번 턴에 적용하지 않는다). ' +
+    '다음 UI 문구가 한국어면 자연스러운 영어로, 영어면 자연스러운 한국어로 번역하라. ' +
+    'UI 문구다운 간결한 표현을 쓰고, 이름·숫자·마스킹·플레이스홀더는 그대로 보존한다. ' +
+    '원문의 줄 수를 그대로 유지한다 — 원문이 한 줄이면 번역도 한 줄로, 줄바꿈을 임의로 추가하지 않는다. ' +
+    '답은 반드시 JSON 객체 하나만 출력한다. 마크다운·설명 금지: ' +
+    '{"translated": "번역문 (줄바꿈은 \\n)", "direction": "ko→en 또는 en→ko"}: ' + JSON.stringify(text)
+  ), model);
+}
+
+// 번역 응답에서 {translated, direction} 추출 (코드펜스·앞뒤 잡담 허용)
+function parseTranslate(raw) {
+  let s = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const m = s.match(/\{[\s\S]*\}/);
+  if (m) s = m[0];
+  try {
+    const o = JSON.parse(s);
+    const translated = String((o && o.translated) || '').trim();
+    if (translated) return { translated, direction: String((o && o.direction) || '').trim() };
+  } catch (_e) { /* 아래로 */ }
+  return null;
 }
 
 // 응답에서 {text, reason} 배열 추출 (코드펜스·앞뒤 잡담 허용)
@@ -279,6 +310,31 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       console.log('[bridge] 실패:', e.message);
       return json(res, 502, { error: '클로드 호출 실패: ' + e.message });
+    }
+  }
+  // 번역 — 한국어 ↔ 영어 자동 (추천과 같은 세션 사용)
+  if (req.method === 'POST' && req.url === '/translate') {
+    const { text, model } = await readBody(req);
+    if (!text || !String(text).trim()) return json(res, 400, { error: '번역할 문구가 비어 있습니다.' });
+    const started = Date.now();
+    console.log('[bridge] 번역 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…');
+    try {
+      const raw = await askTranslate(String(text).trim(), model);
+      const out = parseTranslate(raw);
+      const sec = ((Date.now() - started) / 1000).toFixed(1);
+      if (!out) {
+        console.log('[bridge] 번역 파싱 실패 (' + sec + 's):', String(raw).slice(0, 200));
+        return json(res, 502, { error: '클로드 번역 응답을 해석하지 못했어요.' });
+      }
+      console.log('[bridge] 번역 완료 (' + sec + 's, ' + (out.direction || '?') + ')');
+      stats.served++;
+      stats.lastAt = new Date().toLocaleTimeString('ko-KR');
+      stats.lastText = String(text).slice(0, 30);
+      stats.lastSec = sec;
+      return json(res, 200, { translated: out.translated, direction: out.direction, engine: 'claude' });
+    } catch (e) {
+      console.log('[bridge] 번역 실패:', e.message);
+      return json(res, 502, { error: '클로드 번역 실패: ' + e.message });
     }
   }
   return json(res, 404, { error: 'Not found' });

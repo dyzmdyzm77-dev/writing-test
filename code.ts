@@ -11,7 +11,7 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'SET_API_KEY' | 'GET_API_KEY_STATUS' | 'CLEAR_API_KEY' | 'CHECK_BRIDGE' | 'STOP_BRIDGE' | 'GET_USAGE' | 'LIKE_SUGGESTION';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'CHECK_BRIDGE' | 'STOP_BRIDGE' | 'LIKE_SUGGESTION';
   text?: string;
   forceAi?: boolean; // RECOMMEND: 사전 매칭을 건너뛰고 AI로 새 제안 받기 ([AI 추천 더 받기])
   model?: string;    // RECOMMEND: 클로드 다리에 쓸 모델 (haiku|sonnet|opus)
@@ -645,44 +645,17 @@ function localFallbackRecommend(text: string): Array<{ text: string; reason: str
   }
   return out;
 }
-// 서버에 공용 키(GEMINI_API_KEY 환경변수)가 없다고 확인된 세션 표시 —
-// 키 없는 사용자가 요청마다 헛걸음(서버 왕복)하지 않게 한 번 확인되면 재시도하지 않는다.
-let serverSharedKeyMissing = false;
-
-// AI 제안 가져오기 — 클로드 다리(켜져 있으면) → Gemini(개인 키, 없으면 서버 공용 키) 순서로 시도.
-// 성공하면 {text, reason} 배열, 모두 실패하면 사유 메시지를 담은 Error를 던진다 (공용 키 미등록이면 err.noKey=true).
-async function fetchAiSuggestions(text: string, apiKey: string, bridge: boolean, model?: string): Promise<Array<{ text: string; reason: string }>> {
-  let bridgeFail = '';
-  if (bridge) {
-    try {
-      const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/recommend', { text, model }, 130000);
-      const data = await res.json();
-      if (res.ok && data && data.suggestions && data.suggestions.length) return data.suggestions;
-      bridgeFail = '클로드 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status));
-    } catch (e) {
-      bridgeFail = '클로드 추천 실패: ' + errStr(e);
-    }
-    // 개인 키가 없어도 서버 공용 키가 있을 수 있으므로 Gemini로 이어서 시도한다
-    if (!apiKey && serverSharedKeyMissing) throw new Error(bridgeFail);
-  }
+// AI 제안 가져오기 — 클로드 다리 전용 (Gemini/API 키 경로 제거됨).
+// 성공하면 {text, reason} 배열, 실패하면 사유 메시지를 담은 Error를 던진다.
+async function fetchAiSuggestions(text: string, model?: string): Promise<Array<{ text: string; reason: string }>> {
   try {
-    const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'recommend', { text, apiKey }, 20000);
+    const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/recommend', { text, model }, 130000);
     const data = await res.json();
-    // 개인 키로 호출됐을 때만 개인 사용량 집계 (공용 키 사용은 개인 카운터와 무관)
-    if (data && data.usage && apiKey) { postUsage(await bumpUsage()); }
-    if (!res.ok || data.error || !data.suggestions || !data.suggestions.length) {
-      if (data && data.noKey) {
-        serverSharedKeyMissing = true;
-        const e: any = new Error(bridgeFail || ('AI 추천 실패: ' + data.error));
-        e.noKey = true;
-        throw e;
-      }
-      throw new Error((bridgeFail ? bridgeFail + ' / ' : '') + 'AI 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)));
-    }
-    return data.suggestions;
+    if (res.ok && data && data.suggestions && data.suggestions.length) return data.suggestions;
+    throw new Error('클로드 추천 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)));
   } catch (e) {
-    if (e instanceof Error && (e.message.indexOf('AI 추천 실패') >= 0 || e.message.indexOf('클로드 추천 실패') >= 0)) throw e;
-    throw new Error((bridgeFail ? bridgeFail + ' / ' : '') + 'AI 추천 실패: ' + errStr(e));
+    if (e instanceof Error && e.message.indexOf('클로드 추천 실패') >= 0) throw e;
+    throw new Error('클로드 추천 실패: ' + errStr(e));
   }
 }
 
@@ -697,7 +670,7 @@ function postRecommendFallback(text: string, failNote: string, emptyNote?: strin
   } else if (failNote) {
     figma.ui.postMessage({ type: 'show-toast', message: failNote });
   } else {
-    figma.ui.postMessage({ type: 'show-toast', message: emptyNote || '예시·규칙으로 다듬을 곳을 찾지 못했어요. AI 추천을 쓰려면 클로드 다리(클로드다리-켜기.bat)를 켜거나 Gemini 키를 등록해 주세요.' });
+    figma.ui.postMessage({ type: 'show-toast', message: emptyNote || '예시·규칙으로 다듬을 곳을 찾지 못했어요. AI 추천을 쓰려면 [클로드] 버튼으로 클로드를 켜 주세요.' });
   }
 }
 
@@ -1479,63 +1452,6 @@ async function postJsonWithTimeout(url: string, body: any, ms: number): Promise<
     }),
     new Promise<Response>((_resolve, reject) => setTimeout(() => reject(new Error('타임아웃 ' + ms + 'ms')), ms)),
   ]);
-}
-
-// ── 개인 Gemini API 키 (사용자별 clientStorage 저장) ──────────
-// 공유 키 없음: 각 사용자가 자기 키를 넣어 자기 무료 할당량을 쓴다.
-const API_KEY_STORAGE = 'geminiApiKey';
-async function getStoredApiKey(): Promise<string> {
-  try {
-    const k = await figma.clientStorage.getAsync(API_KEY_STORAGE);
-    return typeof k === 'string' ? k.trim() : '';
-  } catch (_e) {
-    return '';
-  }
-}
-// 키 일부만 노출 (앞4 + 뒤4) — 설정 화면 표시용
-function maskApiKey(k: string): string {
-  if (!k) return '';
-  if (k.length <= 8) return '••••';
-  return k.slice(0, 4) + '••••' + k.slice(-4);
-}
-
-// ── 일일 사용량 카운터 ────────────────────────────────────────
-// 개인 키 = 사용자 1명이므로 플러그인 로컬 집계가 곧 정확한 '내 사용량'.
-// GEMINI_DAILY_LIMIT: 무료 등급 gemini-2.5-flash 추정 일일 한도. Google이 수시로 바꾸고
-// "남은 양"을 API로 주지 않으므로 이 값은 추정 기준선일 뿐 — 실제 키 한도가 다르면 이 상수만 고치면 된다.
-const GEMINI_DAILY_LIMIT = 250;
-const USAGE_STORAGE = 'geminiUsageDaily';
-// 무료 할당량은 태평양시(PT) 자정에 리셋 → 카운터도 PT 날짜 기준으로 리셋해야 잔량 추정이 맞는다
-function todayKeyPT(): string {
-  try {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }); // YYYY-MM-DD
-  } catch (_e) {
-    return new Date().toISOString().slice(0, 10);
-  }
-}
-async function readUsage(): Promise<{ date: string; count: number }> {
-  const today = todayKeyPT();
-  let stored: any = null;
-  try { stored = await figma.clientStorage.getAsync(USAGE_STORAGE); } catch (_e) { /* 무시 */ }
-  if (stored && stored.date === today && typeof stored.count === 'number') {
-    return { date: today, count: stored.count };
-  }
-  return { date: today, count: 0 }; // 새 날짜면 0부터
-}
-async function bumpUsage(): Promise<{ date: string; count: number }> {
-  const cur = await readUsage();
-  const next = { date: cur.date, count: cur.count + 1 };
-  try { await figma.clientStorage.setAsync(USAGE_STORAGE, next); } catch (_e) { /* 무시 */ }
-  return next;
-}
-function postUsage(u: { date: string; count: number }): void {
-  figma.ui.postMessage({
-    type: 'usage-update',
-    used: u.count,
-    limit: GEMINI_DAILY_LIMIT,
-    remaining: Math.max(0, GEMINI_DAILY_LIMIT - u.count),
-    date: u.date,
-  });
 }
 
 // 현재 선택 영역 안의 모든 텍스트를 하나의 문자열로 모은다 (직접 입력이 없을 때 사용)
@@ -3826,32 +3742,30 @@ figma.ui.onmessage = async (msg: any) => {
       figma.ui.postMessage({ type: 'show-toast', message: '문구를 입력하거나 텍스트를 선택해주세요.' });
       return;
     }
-    const apiKey = await getStoredApiKey();
-    // AI 엔진 후보: ① 클로드 다리(로컬) ② Gemini(개인 키, 없으면 서버 공용 키).
+    // AI 엔진은 클로드 다리 하나 (API 키 경로 제거됨)
     const bridge = await isBridgeAlive();
-    const canAi = bridge || !!apiKey || !serverSharedKeyMissing;
-    if (!canAi) {
-      // AI를 전혀 못 쓰는 상태 — 예시·규칙 폴백 (forceAi여도 폴백이라도 보여준다)
+    if (!bridge) {
+      // 클로드를 못 쓰는 상태 — 예시·규칙 폴백 (forceAi여도 폴백이라도 보여준다)
       postRecommendFallback(text, '');
       return;
     }
-    // AI 추천은 진행률을 알 수 없다(다 만들어지면 한 번에 옴) → 가짜 %가 아니라 경과 시간으로 표시.
-    figma.ui.postMessage({ type: 'show-loading', indeterminate: true, status: bridge ? '클로드가 문구를 다듬는 중이에요' : 'AI가 문구를 다듬는 중이에요' });
+    // AI 추천은 진행률을 알 수 없다(다 만들어지면 한 번에 옴) → 가짜 %가 아니라 경과 시간 기반 표시.
+    figma.ui.postMessage({ type: 'show-loading', indeterminate: true, status: '클로드가 문구를 다듬는 중이에요' });
     try {
-      const suggestions = await fetchAiSuggestions(text, apiKey, bridge, msg.model);
+      const suggestions = await fetchAiSuggestions(text, msg.model);
       figma.ui.postMessage({ type: 'hide-loading' });
       // forceAi([AI 추천 더 받기])면 기존 결과 아래에 덧붙이고, 아니면 새로 표시
       figma.ui.postMessage({ type: 'recommend-result', original: text, suggestions, appendAi: !!msg.forceAi });
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
       if (msg.forceAi) figma.ui.postMessage({ type: 'show-toast', message: errStr(e) });
-      else if ((e as any).noKey) postRecommendFallback(text, ''); // 공용 키 미등록 → 예시·규칙 폴백
       else postRecommendFallback(text, errStr(e), undefined, true); // AI 실패 → 폴백 + 재시도 버튼
     }
     return;
   }
 
-  // 번역 — 한국어 ↔ 영어 자동 (직접 입력 우선, 없으면 선택 영역 텍스트)
+  // 번역 — 한국어 ↔ 영어 자동 (직접 입력 우선, 없으면 선택 영역 텍스트).
+  // 추천과 동일한 구조: 클로드 다리 전용, API 키 안 씀.
   if (msg.type === "TRANSLATE") {
     try {
       const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
@@ -3859,29 +3773,20 @@ figma.ui.onmessage = async (msg: any) => {
         figma.ui.postMessage({ type: 'show-toast', message: '번역할 문구를 입력하거나 텍스트를 선택해주세요.' });
         return;
       }
-      const apiKey = await getStoredApiKey();
-      // 개인 키가 없어도 서버 공용 키로 시도한다 — 공용 키도 없다고 확인된 세션이면 바로 키 안내
-      if (!apiKey && serverSharedKeyMissing) {
-        figma.ui.postMessage({ type: 'need-api-key' });
+      const bridge = await isBridgeAlive();
+      if (!bridge) {
+        figma.ui.postMessage({ type: 'show-toast', message: '번역하려면 클로드가 필요해요 — [클로드] 버튼으로 켜 주세요.' });
         return;
       }
-      figma.ui.postMessage({ type: 'show-loading' });
-      figma.ui.postMessage({ type: 'update-progress', progress: 30, status: '번역 중...' });
-      const res = await postJsonWithTimeout(NAVER_PROXY_URL + 'translate', { text, apiKey }, 20000);
+      figma.ui.postMessage({ type: 'show-loading', indeterminate: true, status: '클로드가 번역하는 중이에요' });
+      const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/translate', { text, model: msg.model }, 130000);
       const data = await res.json();
       figma.ui.postMessage({ type: 'hide-loading' });
-      // 개인 키로 호출됐을 때만 개인 사용량 집계
-      if (data && data.usage && apiKey) { postUsage(await bumpUsage()); }
-      if (!res.ok || data.error) {
-        if (data && data.noKey) {
-          serverSharedKeyMissing = true;
-          figma.ui.postMessage({ type: 'need-api-key' });
-          return;
-        }
+      if (!res.ok || data.error || !data.translated) {
         figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status)) });
         return;
       }
-      figma.ui.postMessage({ type: 'translate-result', original: text, translated: (data && data.translated) || '', direction: (data && data.direction) || '' });
+      figma.ui.postMessage({ type: 'translate-result', original: text, translated: data.translated, direction: data.direction || '' });
     } catch (e) {
       figma.ui.postMessage({ type: 'hide-loading' });
       figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + errStr(e) });
@@ -3935,20 +3840,6 @@ figma.ui.onmessage = async (msg: any) => {
     return;
   }
 
-  // ── 개인 Gemini API 키 관리 + 사용량 조회 ──
-  if (msg.type === "GET_API_KEY_STATUS") {
-    const k = await getStoredApiKey();
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k) });
-    postUsage(await readUsage());
-    return;
-  }
-  if (msg.type === "SET_API_KEY") {
-    const k = (msg.text || '').trim();
-    try { await figma.clientStorage.setAsync(API_KEY_STORAGE, k); } catch (_e) { /* 무시 */ }
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: !!k, masked: maskApiKey(k), justSaved: true });
-    postUsage(await readUsage());
-    return;
-  }
   // 클로드 다리 상태 조회 — UI의 [🔌 클로드] 버튼 표시/깨우기 피드백용
   if (msg.type === "CHECK_BRIDGE") {
     const h = await bridgeHealth();
@@ -3963,15 +3854,6 @@ figma.ui.onmessage = async (msg: any) => {
     let h = await bridgeHealth();
     if (h.alive) { await new Promise((r) => setTimeout(r, 800)); h = await bridgeHealth(); }
     figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem, stopped: !h.alive });
-    return;
-  }
-  if (msg.type === "CLEAR_API_KEY") {
-    try { await figma.clientStorage.deleteAsync(API_KEY_STORAGE); } catch (_e) { /* 무시 */ }
-    figma.ui.postMessage({ type: 'api-key-status', hasKey: false, masked: '', justCleared: true });
-    return;
-  }
-  if (msg.type === "GET_USAGE") {
-    postUsage(await readUsage());
     return;
   }
 };
