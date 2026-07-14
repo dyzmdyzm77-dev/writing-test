@@ -15,7 +15,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 // 클로드를 빈 폴더에서 실행 — 저장소에서 실행하면 프로젝트 맥락(CLAUDE.md 등)을
 // 매 턴 짊어져서 45초/턴까지 느려진다 (빈 폴더 + 부가기능 차단이면 ~3초/턴).
@@ -112,8 +112,31 @@ function checkClaudeAvailable() {
 // 처리 현황 — /health로 노출해 "정말 클로드가 답했는지" 밖에서 확인할 수 있게 한다
 const stats = { served: 0, lastAt: '', lastText: '', lastSec: '' };
 
+// ── 플러그인 생존 감지(심장박동) ─────────────────────────────
+// 플러그인이 떠 있는 동안 code.ts가 5초마다 POST /heartbeat를 보낸다.
+// 한 번이라도 받은 뒤 30초간 끊기면 플러그인(또는 피그마)이 닫힌 것 — 클로드까지 데리고 같이 꺼진다.
+// 아직 한 번도 못 받았으면(다리만 먼저 켠 상태, 자동시작 등) 계속 대기한다.
+const HEARTBEAT_DEAD_MS = 30000;
+let lastBeat = 0;
+setInterval(() => {
+  if (lastBeat && Date.now() - lastBeat > HEARTBEAT_DEAD_MS) {
+    console.log('[bridge] 플러그인 심장박동 끊김 — 피그마/플러그인이 닫힌 것으로 보고 같이 꺼집니다.');
+    process.exit(0); // exit 핸들러가 killProc으로 claude 트리를 정리한다
+  }
+}, 5000);
+
 function killProc() {
-  if (proc) { try { proc.kill(); } catch (_e) { /* 무시 */ } }
+  if (proc) {
+    try {
+      if (process.platform === 'win32') {
+        // shell:true로 띄워서 proc은 cmd 껍데기 — /T로 트리째 죽여야 진짜 claude가 고아로 안 남는다
+        // (고아 claude가 설치 파일을 물고 있으면 클로드 앱 업데이트가 "사용 중"으로 막힘)
+        spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        proc.kill();
+      }
+    } catch (_e) { /* 무시 */ }
+  }
   proc = null;
   warmedUp = false;
   if (waiter) { clearTimeout(waiter.timer); waiter.reject(new Error('클로드 세션이 종료됐어요.')); waiter = null; }
@@ -280,6 +303,11 @@ const server = http.createServer(async (req, res) => {
       served: stats.served, lastAt: stats.lastAt, lastText: stats.lastText, lastSec: stats.lastSec,
     });
   }
+  // 플러그인 심장박동 — 끊기면 위 감시 타이머가 다리를 끈다
+  if (req.method === 'POST' && req.url === '/heartbeat') {
+    lastBeat = Date.now();
+    return json(res, 200, { ok: true });
+  }
   // 자기 종료 — 클로드다리-끄기.bat이 호출한다 (로컬에서만 접근 가능하니 안전)
   if (req.method === 'POST' && req.url === '/shutdown') {
     json(res, 200, { ok: true });
@@ -349,6 +377,11 @@ server.on('error', (e) => {
   console.log('[bridge] 서버 오류:', e && e.message);
   process.exit(1);
 });
+// 어떤 경로로 죽든(심장박동 끊김, Ctrl+C, /shutdown, 오류) claude 자식을 남기지 않는다
+process.on('exit', () => killProc());
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log('──────────────────────────────────────────────');
   console.log(' 클로드 다리 켜짐 — http://localhost:' + PORT);

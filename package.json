@@ -4,7 +4,8 @@
   "description": "S1 UX Writing Assistant (Figma Plugin)",
   "main": "code.js",
   "scripts": {
-    "build": "node scripts/build-glossary.js && tsc -p tsconfig.json",
+    "build": "node scripts/build-glossary.js && node scripts/register-protocol.js && tsc -p tsconfig.json",
+    "postinstall": "node scripts/register-protocol.js",
     "glossary": "node scripts/build-glossary.js",
     "sync-feedback": "node --use-env-proxy scripts/sync-feedback.js",
     "bridge": "node scripts/claude-bridge.js",

@@ -1591,14 +1591,40 @@
                 showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요 — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
               }
             }
-            if (!bridgeWakePoll) {
+            if (bs.alive) installOffer = false; // 켜졌으면(설치 파일 실행 완료 등) 설치 제안 해제
+            if (!bridgeWakePoll && !installOffer) {
               bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive);
               bridgeWakeBtn.textContent = bs.alive ? '🟢 클로드 켜짐' : '⚫ 클로드 꺼짐';
               bridgeWakeBtn.title = bs.alive
                 ? '클로드 다리 켜져 있음 — 누르면 끄기'
-                : '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (한 번은 클로드다리-원클릭연결 등록 필요)';
+                : '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (처음이면 설치 파일 안내가 떠요)';
             }
           }
+        }
+
+        // 클로드다리 설치 파일 수신 — 다운로드로 내려준다 (새 PC 첫 설정)
+        if (event.data.pluginMessage.type === 'installer-file') {
+          try {
+            const b64 = event.data.pluginMessage.b64 || '';
+            if (!b64) {
+              showToast('설치 파일이 플러그인에 없어요 — npm run build 후 플러그인을 다시 실행해 주세요.');
+            } else {
+              const bin = atob(b64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+              const a = document.createElement('a');
+              a.href = url; a.download = '클로드다리-설치.bat';
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(() => URL.revokeObjectURL(url), 10000);
+              showToast('클로드다리-설치.bat을 받았어요! 받은 파일을 한 번 실행하면 설치·연결이 끝나요 — 그 다음 추천받기를 누르세요.');
+            }
+          } catch (_e) {
+            showToast('설치 파일 다운로드에 실패했어요 — 플러그인 폴더의 클로드다리-설치.bat을 직접 실행해 주세요.');
+          }
+          installOffer = false;
+          if (bridgeWakeBtn) bridgeWakeBtn.disabled = false;
+          requestBridgeStatus(); // 라벨 원복 (꺼짐 상태로)
         }
 
         // 사전 답안 직후 AI 제안을 자동으로 이어받는 중 — 버튼을 '받는 중' 상태로
@@ -2240,6 +2266,7 @@
       let userTurnedOff = false;   // 사용자가 직접 껐음 — 화면 진입 자동 켜기를 건너뜀 (직접 켜면 해제)
       let bridgeKnownAlive = false; // 마지막으로 확인된 다리 생존 여부 (제스처에서 또 켤지 판단)
       let bridgeWakeWaited = 0;
+      let installOffer = false;    // 켜기 실패 → 버튼이 [설치 파일 받기]로 바뀐 상태
       function requestBridgeStatus() {
         parent.postMessage({ pluginMessage: { type: 'CHECK_BRIDGE' } }, '*');
       }
@@ -2259,9 +2286,16 @@
         bridgeWakePoll = setInterval(() => {
           bridgeWakeWaited += 2;
           requestBridgeStatus();
-          if (bridgeWakeWaited >= 20) { // 20초 안에 안 켜지면 종료. 수동일 때만 설치 안내
+          if (bridgeWakeWaited >= 20) { // 20초 안에 안 켜지면 종료. 수동일 때만 설치 파일 제안
             stopBridgeWakePoll();
-            if (!auto) showToast('클로드가 안 켜졌어요. 처음이라면 폴더의 [클로드다리-원클릭연결]을 한 번 실행하고, Node.js + Claude Code(터미널에서 claude --version)가 설치·로그인돼 있는지 확인해 주세요.');
+            if (!auto) {
+              installOffer = true; // 버튼을 [설치 파일 받기]로 전환 — bridge-status 응답이 라벨을 덮지 않게 플래그로 유지
+              if (bridgeWakeBtn) {
+                bridgeWakeBtn.textContent = '🔧 클로드 설치 파일 받기';
+                bridgeWakeBtn.title = '이 PC에서 처음이에요 — 누르면 설치 파일을 받아요. 받은 파일을 한 번 실행하면 다음부턴 자동으로 켜져요.';
+              }
+              showToast('클로드가 아직 이 PC에 연결 안 됐어요. 버튼을 눌러 설치 파일을 받고, 받은 파일을 한 번만 실행해 주세요.');
+            }
           }
         }, 2000);
       }
@@ -2273,6 +2307,13 @@
       }
       if (bridgeWakeBtn) {
         bridgeWakeBtn.onclick = () => {
+          if (installOffer) {
+            // 켜기 실패 뒤 — 설치 파일을 다운로드로 내려준다 (클릭 제스처 안이라 다운로드 허용)
+            bridgeWakeBtn.disabled = true;
+            bridgeWakeBtn.textContent = '설치 파일 만드는 중…';
+            parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER' } }, '*');
+            return;
+          }
           if (bridgeWakeBtn.classList.contains('bridge-on')) {
             // 켜진 상태에서 다시 누르면 끄기 (다리의 자기 종료 API 호출)
             bridgeStopping = true;
