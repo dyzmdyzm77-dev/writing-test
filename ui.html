@@ -913,26 +913,6 @@
       .title-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
       .usage-big { font-size: 20px; font-weight: 600; color: #111111; }
       .usage-sub { font-size: 12px; color: #757575; margin-top: 4px; }
-      /* 홈 우상단 설정 아이콘 (홈에서만 보임 — homeView가 숨겨지면 같이 숨음) */
-      .home-settings {
-        position: fixed;
-        top: 14px;
-        right: 14px;
-        width: 32px !important;
-        height: 32px !important;
-        min-width: 0;
-        padding: 0;
-        margin: 0;
-        background: none;
-        color: #757575;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: normal !important;
-        z-index: 50;
-      }
-      .home-settings:hover { color: #1D6CEB; background: #F7F7F7; }
       /* 추천/번역 헤더 제목 오른쪽 'API 키' 버튼 (검토 화면 초기화 버튼과 같은 형태) */
       .feature-settings-btn {
         width: auto !important;
@@ -953,17 +933,6 @@
         font-weight: 500;
       }
       .feature-settings-btn:hover { color: #1D6CEB; border-color: #1D6CEB; background: #F7F9FF; }
-      /* 추천 모델 선택 드롭다운 */
-      .model-select {
-        height: 28px;
-        border: 1px solid #D9D9D9;
-        border-radius: 6px;
-        background: #FFFFFF;
-        color: #4A4A4A;
-        font-size: 12px;
-        padding: 0 6px;
-        cursor: pointer;
-      }
       /* 클로드 다리 켜짐 표시 — 초록 톤 */
       #bridgeWakeBtn.bridge-on { color: #12805C; border-color: #A6E0C8; }
       #bridgeWakeBtn.bridge-on:hover { color: #0E6B4D; border-color: #12805C; background: #F1FBF6; }
@@ -1127,9 +1096,6 @@
 
     <!-- 홈 화면: 작업 선택 메뉴 -->
     <div id="homeView">
-      <button class="home-settings js-open-apikey" title="API 키 설정" aria-label="API 키 설정">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 2.5v3M12 18.5v3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M2.5 12h3M18.5 12h3M5.1 18.9l2.1-2.1M16.8 7.2l2.1-2.1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-      </button>
       <div class="title">S1 UX Writing Assistant</div>
       <div class="hint">문구 검토부터 번역까지 도와드려요.</div>
       <button class="home-card" data-go="review">
@@ -1235,11 +1201,6 @@
         <div class="title-row">
           <div class="title">문구 추천받기</div>
           <div class="title-actions">
-            <select id="modelSelect" class="model-select" title="클로드 추천 모델 — opus 최고 품질(기본), sonnet 중간, haiku 빠름">
-              <option value="haiku">haiku · 빠름</option>
-              <option value="sonnet">sonnet · 중간</option>
-              <option value="opus" selected>opus · 권장</option>
-            </select>
             <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="클로드 다리 상태 — 꺼져 있으면 눌러서 켜기" aria-label="클로드 다리">클로드 확인 중…</button>
           </div>
         </div>
@@ -1727,10 +1688,6 @@
               } else {
                 showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요 — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
               }
-            }
-            // 다리가 보고한 현재 모델로 드롭다운을 맞춘다 (사용자가 아직 안 건드렸을 때만)
-            if (bs.alive && bs.model && modelSelect && !modelSelect.dataset.userPicked) {
-              if (Array.from(modelSelect.options).some((o) => o.value === bs.model)) modelSelect.value = bs.model;
             }
             if (!bridgeWakePoll) {
               bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive);
@@ -2412,9 +2369,7 @@
       // (클로드다리-원클릭연결.vbs로 한 번 등록된 PC에서만 실제로 켜짐 — 미등록이면 아무 일도 안 일어남)
       // 누르면 켜질 때까지 2초 간격으로 상태를 확인해 "켜졌어요" 피드백을 준다.
       // 추천 모델 선택 — RECOMMEND 요청에 실어 다리로 전달 (다리가 다른 모델이면 세션 재시작)
-      const modelSelect = document.getElementById('modelSelect');
-      function getSelectedModel() { return modelSelect ? modelSelect.value : 'opus'; }
-      if (modelSelect) modelSelect.onchange = () => { modelSelect.dataset.userPicked = '1'; }; // 사용자가 고르면 다리 보고값으로 덮어쓰지 않음
+      function getSelectedModel() { return 'opus'; } // 모델은 opus 고정 (선택 UI 없음)
       const bridgeWakeBtn = document.getElementById('bridgeWakeBtn');
       let bridgeWakePoll = null;   // 깨우는 중 상태 확인 타이머
       let bridgeStopping = false;  // [클로드 켜짐] 재클릭으로 끄는 중 — 상태 응답 오면 결과 안내
