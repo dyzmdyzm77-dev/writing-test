@@ -1235,10 +1235,10 @@
         <div class="title-row">
           <div class="title">문구 추천받기</div>
           <div class="title-actions">
-            <select id="modelSelect" class="model-select" title="클로드 추천 모델 — sonnet 권장, opus 최고 품질(느림), haiku 빠름">
+            <select id="modelSelect" class="model-select" title="클로드 추천 모델 — opus 최고 품질(기본), sonnet 중간, haiku 빠름">
               <option value="haiku">haiku · 빠름</option>
-              <option value="sonnet" selected>sonnet · 권장</option>
-              <option value="opus">opus · 고품질</option>
+              <option value="sonnet">sonnet · 중간</option>
+              <option value="opus" selected>opus · 권장</option>
             </select>
             <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="클로드 다리 상태 — 꺼져 있으면 눌러서 켜기" aria-label="클로드 다리">클로드 확인 중…</button>
           </div>
@@ -2411,7 +2411,7 @@
       // 누르면 켜질 때까지 2초 간격으로 상태를 확인해 "켜졌어요" 피드백을 준다.
       // 추천 모델 선택 — RECOMMEND 요청에 실어 다리로 전달 (다리가 다른 모델이면 세션 재시작)
       const modelSelect = document.getElementById('modelSelect');
-      function getSelectedModel() { return modelSelect ? modelSelect.value : 'sonnet'; }
+      function getSelectedModel() { return modelSelect ? modelSelect.value : 'opus'; }
       if (modelSelect) modelSelect.onchange = () => { modelSelect.dataset.userPicked = '1'; }; // 사용자가 고르면 다리 보고값으로 덮어쓰지 않음
       const bridgeWakeBtn = document.getElementById('bridgeWakeBtn');
       let bridgeWakePoll = null;   // 깨우는 중 상태 확인 타이머

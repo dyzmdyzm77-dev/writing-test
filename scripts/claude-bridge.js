@@ -29,8 +29,8 @@ const CLAUDE_ENV = Object.assign({}, process.env, {
 
 const PORT = 11888;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
-// haiku=빠름/가벼움, sonnet=권장(품질↑), opus=최고품질/느림
-const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'sonnet';
+// haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
+const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
 const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
 const TURN_TIMEOUT_MS = 90000;   // 요청 1건 제한시간
 const MAX_TURNS = 30;            // 이만큼 쓰면 세션 재시작 (대화 누적 방지)
