@@ -13,5 +13,8 @@ dist/
 # sync-feedback가 만드는 검토용 임시 파일 (커밋 금지 — 내용은 recommend-examples.md로 옮겨서 반영)
 feedback-candidates.md
 
+# Claude Code 로컬 설정 (PC별 임시 경로·개인 권한 — 커밋 금지)
+.claude/
+
 # macOS
 .DS_Store
