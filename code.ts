@@ -11,7 +11,7 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'CHECK_BRIDGE' | 'STOP_BRIDGE' | 'GET_INSTALLER' | 'LIKE_SUGGESTION';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'CHECK_BRIDGE' | 'STOP_BRIDGE' | 'GET_INSTALLER' | 'WAKE_BRIDGE' | 'LIKE_SUGGESTION';
   text?: string;
   forceAi?: boolean; // RECOMMEND: 사전 매칭을 건너뛰고 AI로 새 제안 받기 ([AI 추천 더 받기])
   model?: string;    // RECOMMEND: 클로드 다리에 쓸 모델 (haiku|sonnet|opus)
@@ -3873,6 +3873,11 @@ figma.ui.onmessage = async (msg: any) => {
   // 클로드다리 설치 파일 요청 — UI가 base64를 받아 다운로드로 내려준다 (새 PC 첫 설정용)
   if (msg.type === "GET_INSTALLER") {
     figma.ui.postMessage({ type: 'installer-file', b64: INSTALLER_B64 });
+    return;
+  }
+  // 다리 깨우기 3차 경로 — UI의 window.open/iframe이 막히는 피그마 버전 대비 (openExternal은 메인 스레드 전용)
+  if (msg.type === "WAKE_BRIDGE") {
+    try { figma.openExternal('claudebridge://start'); } catch (e) { console.log('[BRIDGE] openExternal 실패:', errStr(e)); }
     return;
   }
 };

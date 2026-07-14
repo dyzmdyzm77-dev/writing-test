@@ -3844,4 +3844,14 @@ figma.ui.onmessage = async (msg) => {
         figma.ui.postMessage({ type: 'installer-file', b64: INSTALLER_B64 });
         return;
     }
+    // 다리 깨우기 3차 경로 — UI의 window.open/iframe이 막히는 피그마 버전 대비 (openExternal은 메인 스레드 전용)
+    if (msg.type === "WAKE_BRIDGE") {
+        try {
+            figma.openExternal('claudebridge://start');
+        }
+        catch (e) {
+            console.log('[BRIDGE] openExternal 실패:', errStr(e));
+        }
+        return;
+    }
 };
