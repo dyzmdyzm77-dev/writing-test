@@ -1245,11 +1245,11 @@
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
       </div>
-      <!-- 추천 후 컴팩트 모드: 보낸 문구를 읽기 전용으로 표시 (문구를 바꾸려면 [새로 입력]) -->
+      <!-- 추천 후 컴팩트 모드: 보낸 문구를 읽기 전용으로 표시 ([초기화] = 결과·입력 비우고 처음으로) -->
       <div id="recommendEntered">
         <div class="entered-head">
           <div class="result-label">입력 내용</div>
-          <button id="recommendEdit" class="reset-btn visible" type="button">새로 입력</button>
+          <button id="recommendEdit" class="reset-btn visible" type="button">초기화</button>
         </div>
         <div id="recommendEnteredText" class="result-original"></div>
       </div>
@@ -2333,8 +2333,8 @@
       // ── 문구 추천 / 번역 실행 ──
       // 추천받기: 첫 실행 후 헤더가 컴팩트 모드로 바뀜 — 큰 입력창 대신
       // '입력 내용'(읽기 전용) + [다시 추천받기]가 상단 고정, 추천 리스트만 스크롤.
-      // [다시 추천받기] = 초기 화면 복귀(결과·입력 비움). [새로 입력] = 직전 문구를 살려 수정 시작.
-      let lastRecommendText = ''; // [새로 입력]이 수정 시작점으로 되살릴 직전 원문
+      // [다시 추천받기] = [초기화] = 초기 화면 복귀(결과·입력 모두 비움).
+      let lastRecommendText = ''; // 직전에 추천받은 원문 (컴팩트 헤더 표시용)
       function setRecommendCompact(on, original) {
         document.getElementById('recommendHeader').classList.toggle('compact', on);
         if (on) {
@@ -2360,12 +2360,14 @@
         if (!text) return;
         parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text, model: getSelectedModel() } }, '*');
       };
+      // [초기화] = 말 그대로 처음 상태로 — 결과·입력·직전 문구 모두 비우고 초기 화면 복귀
       document.getElementById('recommendEdit').onclick = () => {
-        const el = document.getElementById('recommendInput');
-        // 캔버스 선택 등으로 이미 채워진 값이 있으면 보존, 없으면 직전 문구를 되살려 수정 시작점 제공
-        if (!el.value.trim()) el.value = lastRecommendText;
+        lastRecommendText = '';
+        document.getElementById('recommendList').innerHTML = '';
+        document.getElementById('recommendInput').value = '';
         setRecommendCompact(false);
-        el.focus();
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        document.getElementById('recommendInput').focus();
       };
       document.getElementById('translateRun').onclick = () => {
         const text = document.getElementById('translateInput').value.trim();
