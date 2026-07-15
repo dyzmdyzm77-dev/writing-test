@@ -133,7 +133,9 @@ function killProc() {
         // (고아 claude가 설치 파일을 물고 있으면 클로드 앱 업데이트가 "사용 중"으로 막힘)
         spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
       } else {
-        proc.kill();
+        // macOS/리눅스: shell:true라 proc이 sh 껍데기일 수 있음 — startProc의 detached로 만든
+        // 프로세스 그룹(-pid)을 통째로 정리한다 (taskkill /T 대응)
+        try { process.kill(-proc.pid, 'SIGTERM'); } catch (_e2) { proc.kill(); }
       }
     } catch (_e) { /* 무시 */ }
   }
@@ -147,7 +149,10 @@ function startProc() {
   lineBuf = '';
   turns = 0;
   console.log('[bridge] 클로드 세션 시동 중… (모델: ' + currentModel + ')');
-  const thisProc = spawn('claude', ['-p', '--model', currentModel, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], { shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV });
+  const thisProc = spawn('claude', ['-p', '--model', currentModel, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], {
+    shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV,
+    detached: process.platform !== 'win32', // POSIX: 자기 프로세스 그룹 생성 — killProc이 그룹째 정리할 수 있게
+  });
   proc = thisProc;
   proc.stdout.on('data', (d) => {
     lineBuf += d.toString('utf8');

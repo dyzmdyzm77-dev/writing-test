@@ -27,7 +27,8 @@ function json(res, status, obj) {
 
 // claude CLI가 있는지 — 없으면 /wake 응답에 실어 플러그인이 안내할 수 있게 한다
 function hasClaude() {
-  try { return spawnSync('where', ['claude'], { stdio: 'ignore', shell: true }).status === 0; } catch (_e) { return false; }
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  try { return spawnSync(finder, ['claude'], { stdio: 'ignore', shell: true }).status === 0; } catch (_e) { return false; }
 }
 
 let waking = false; // 연타 방지 — 다리는 어차피 EADDRINUSE로 중복 정리하지만 프로세스 낭비를 줄인다
@@ -35,9 +36,14 @@ function wakeBridge() {
   if (waking) return;
   waking = true;
   setTimeout(() => { waking = false; }, 5000);
-  const proc = spawn('cmd', ['/c', 'node', 'scripts\\claude-bridge.js'], {
-    cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
-  });
+  const proc = process.platform === 'win32'
+    ? spawn('cmd', ['/c', 'node', 'scripts\\claude-bridge.js'], {
+        cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
+      })
+    // macOS/리눅스: 감시자를 띄운 node 실행 파일로 직접 스폰 (launchd 환경엔 PATH가 빈약할 수 있어 절대경로 사용)
+    : spawn(process.execPath, [path.join(__dirname, 'claude-bridge.js')], {
+        cwd: ROOT, detached: true, stdio: 'ignore',
+      });
   proc.unref(); // 감시자가 죽어도 다리는 남게 분리
 }
 

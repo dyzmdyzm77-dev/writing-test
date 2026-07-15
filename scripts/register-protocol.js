@@ -7,8 +7,57 @@
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
+if (process.platform === 'darwin') {
+  // macOS: 감시자(bridge-watcher)를 launchd 로그인 자동시작으로 등록 + 즉시 기동.
+  // claudebridge:// 프로토콜은 등록하지 않는다 — 피그마가 프로토콜 열기를 전부 막는 것이
+  // 실측 확인돼(CLAUDE.md), 어차피 유일한 동작 경로가 감시자 fetch(11889)이므로 감시자만으로 충분.
+  const os = require('os');
+  const fs = require('fs');
+  const LABEL = 'com.claudebridge.watcher';
+  const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
+  const plistPath = path.join(agentsDir, LABEL + '.plist');
+  const watcherJs = path.join(__dirname, 'bridge-watcher.js');
+  // launchd 기본 PATH엔 /usr/local/bin 등이 없어 다리가 claude를 못 찾는다 —
+  // 등록 시점(사용자 셸)의 PATH를 plist에 굳혀 넣는다.
+  const pathEnv = process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const plist = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>Label</key><string>' + LABEL + '</string>',
+    '  <key>ProgramArguments</key>',
+    '  <array>',
+    '    <string>' + xml(process.execPath) + '</string>',
+    '    <string>' + xml(watcherJs) + '</string>',
+    '  </array>',
+    '  <key>EnvironmentVariables</key>',
+    '  <dict><key>PATH</key><string>' + xml(pathEnv) + '</string></dict>',
+    '  <key>RunAtLoad</key><true/>',
+    // 비정상 종료 시에만 재시동 — EADDRINUSE(exit 0) 중복 기동이 무한 재시작으로 번지지 않게
+    '  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>',
+    '</dict>',
+    '</plist>',
+    '',
+  ].join('\n');
+  try {
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(plistPath, plist);
+    const uid = process.getuid();
+    // 재등록 대비: 기존 등록을 내리고(bootout, 없으면 조용히 실패) 다시 올린다.
+    spawnSync('launchctl', ['bootout', 'gui/' + uid + '/' + LABEL], { stdio: 'ignore' });
+    const boot = spawnSync('launchctl', ['bootstrap', 'gui/' + uid, plistPath], { stdio: 'ignore' });
+    if (boot.status !== 0) spawnSync('launchctl', ['load', '-w', plistPath], { stdio: 'ignore' }); // 구버전 macOS 폴백
+    console.log('[watcher] macOS 감시자 자동시작 등록(launchd) + 기동 — ' + plistPath);
+  } catch (e) {
+    console.log('[watcher] macOS 등록 실패(빌드는 계속):', e.message);
+  }
+  process.exit(0);
+}
+
 if (process.platform !== 'win32') {
-  process.exit(0); // Windows 전용 — 다른 OS에선 조용히 통과
+  process.exit(0); // Windows/macOS 외 OS — 조용히 통과
 }
 
 const launcher = path.join(__dirname, '..', 'claude-bridge-silent.vbs');
