@@ -3878,12 +3878,16 @@ figma.ui.onmessage = async (msg: any) => {
     figma.ui.postMessage({ type: 'installer-file', b64: INSTALLER_B64 });
     return;
   }
-  // 다리 깨우기 3차 경로 — UI의 window.open/iframe이 막히는 피그마 버전 대비 (openExternal은 메인 스레드 전용)
+  // 다리 깨우기 — 주경로: 감시자(11889) fetch. 피그마가 프로토콜 열기를 다 막아도 fetch는 못 막는다.
   if (msg.type === "WAKE_BRIDGE") {
-    // 주경로: 감시자(11889)에게 fetch로 부탁 — 피그마가 프로토콜 열기를 다 막아도 fetch는 못 막는다.
-    // 보조: figma.openExternal(claudebridge://) — 감시자가 없는 PC(설정 전) 대비. 중복 기동은 다리가 EADDRINUSE로 정리.
-    postJsonWithTimeout(WATCHER_URL + '/wake', {}, 3000).catch((e) => console.log('[BRIDGE] 감시자 깨우기 실패(감시자 꺼짐?):', errStr(e)));
-    try { figma.openExternal('claudebridge://start'); } catch (e) { console.log('[BRIDGE] openExternal 실패:', errStr(e)); }
+    // 보조 경로(claudebridge:// 프로토콜)는 감시자 실패 시에만 쓴다 — 병행하면 프로토콜이 안 막힌
+    // 피그마에서 다리가 이중 기동되며 그쪽 창(런처의 숨김이 안 먹는 환경)이 사용자에게 보일 수 있다.
+    try {
+      await postJsonWithTimeout(WATCHER_URL + '/wake', {}, 3000);
+    } catch (e) {
+      console.log('[BRIDGE] 감시자 깨우기 실패(감시자 꺼짐?) — 프로토콜 보조 경로 시도:', errStr(e));
+      try { figma.openExternal('claudebridge://start'); } catch (e2) { console.log('[BRIDGE] openExternal 실패:', errStr(e2)); }
+    }
     return;
   }
 };
