@@ -9,6 +9,7 @@
 // 다리는 심장박동 끊기면 죽지만(플러그인과 생사 동기화), 감시자는 계속 남아 다음 깨우기를 받는다.
 
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
@@ -36,14 +37,22 @@ function wakeBridge() {
   if (waking) return;
   waking = true;
   setTimeout(() => { waking = false; }, 5000);
-  const proc = process.platform === 'win32'
-    ? spawn('cmd', ['/c', 'node', 'scripts\\claude-bridge.js'], {
-        cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
-      })
+  let proc;
+  if (process.platform === 'win32') {
+    // Windows: 반드시 숨김 런처(vbs)로 — cmd 직스폰은 detached+windowsHide가 무시돼(Node 알려진 문제)
+    // 검은 콘솔 창이 사용자에게 그대로 보인다. vbs는 0번 창으로 실행하고 node/claude 점검 팝업도 겸한다.
+    const launcher = path.join(ROOT, 'claude-bridge-silent.vbs');
+    proc = fs.existsSync(launcher)
+      ? spawn('wscript.exe', [launcher], { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true })
+      : spawn('cmd', ['/c', 'node', 'scripts\\claude-bridge.js'], { // vbs 없는 비정상 설치 대비 폴백
+          cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true,
+        });
+  } else {
     // macOS/리눅스: 감시자를 띄운 node 실행 파일로 직접 스폰 (launchd 환경엔 PATH가 빈약할 수 있어 절대경로 사용)
-    : spawn(process.execPath, [path.join(__dirname, 'claude-bridge.js')], {
-        cwd: ROOT, detached: true, stdio: 'ignore',
-      });
+    proc = spawn(process.execPath, [path.join(__dirname, 'claude-bridge.js')], {
+      cwd: ROOT, detached: true, stdio: 'ignore',
+    });
+  }
   proc.unref(); // 감시자가 죽어도 다리는 남게 분리
 }
 
