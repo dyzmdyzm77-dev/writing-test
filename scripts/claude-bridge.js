@@ -27,7 +27,7 @@ const CLAUDE_ENV = Object.assign({}, process.env, {
   DISABLE_TELEMETRY: '1',
 });
 
-const PORT = 11888;
+const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스트용 (평소엔 11888 고정)
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -97,8 +97,32 @@ let turns = 0;
 let warmedUp = false;
 let currentModel = CLAUDE_MODEL; // 지금 세션이 물고 있는 모델 (요청이 다른 모델을 지정하면 세션 재시작)
 // 시작 시 Claude Code(claude CLI)가 쓸 수 있는지 점검 — 없으면 /health로 알려 플러그인이 안내한다.
-// null=확인 중, 'ok'=사용 가능, 'claude-missing'=claude 명령 없음/로그인 안 됨
+// null=확인 중, 'ok'=사용 가능, 'claude-missing'=claude 명령 없음,
+// 'claude-logout'=claude는 있지만 로그인 세션 만료 (턴 실패 시 감지, 성공 턴이 오면 자동 해제)
 let claudeStatus = null;
+// 로그인 만료 감지 — CLI가 내는 영어 인증 오류를 사람이 알아들을 안내로 바꾼다.
+// (claude --version은 로그인 없이도 성공해서 시동 점검으로는 못 잡고, 실제 턴에서만 드러난다)
+// "만료"만이 아니라 "한 번도 로그인 안 함"도 같은 경로로 잡히므로 중립 표현을 쓴다
+const LOGIN_GUIDE = '클로드 로그인이 필요해요(안 됐거나 만료) — [🟠 클로드 로그인 필요] 버튼을 누르면 로그인 창을 열어드려요.';
+// 실측한 문구들: "Failed to authenticate: OAuth session expired and could not be refreshed"(만료),
+// "Not logged in · Please run /login"(미로그인) — 둘 다 잡히게 넓힌다
+function isAuthError(s) {
+  return /authenticat|oauth|api key|log ?in|logged|session expired/i.test(String(s));
+}
+// 로그인된 계정 확인 — CLI가 ~/.claude.json에 기록하는 oauthAccount.emailAddress를 읽어
+// /health로 노출한다 (플러그인이 "누구 계정으로 쓰는 중인지" 표시 — 공용 PC에서 남의 계정 오사용 방지).
+// 파일이 클 수 있어(프로젝트 이력 포함) 30초 캐시. 재로그인하면 CLI가 파일을 갱신하므로 자동 반영된다.
+let accountCache = { at: 0, email: null };
+function claudeAccount() {
+  if (Date.now() - accountCache.at < 30000) return accountCache.email;
+  let email = null;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+    email = (j && j.oauthAccount && j.oauthAccount.emailAddress) || null;
+  } catch (_e) { /* 로그인 이력 없음 등 — null 유지 */ }
+  accountCache = { at: Date.now(), email };
+  return email;
+}
 function checkClaudeAvailable() {
   const probe = spawn('claude', ['--version'], { shell: true, env: CLAUDE_ENV });
   let out = '';
@@ -124,6 +148,24 @@ setInterval(() => {
     process.exit(0); // exit 핸들러가 killProc으로 claude 트리를 정리한다
   }
 }, 5000);
+
+// 브라우저 로그인 프로세스 (claude auth login --claudeai) — /open-login이 생성·관리.
+// 브라우저가 localhost로 결과를 보내줄 때까지 숨어서 대기하다가, 완료되면 스스로 끝난다.
+let loginProc = null;
+let loginProcTimer = null;
+function killLoginProc() {
+  if (loginProcTimer) { clearTimeout(loginProcTimer); loginProcTimer = null; }
+  if (!loginProc) return;
+  const p = loginProc;
+  loginProc = null;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/PID', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      try { process.kill(-p.pid, 'SIGTERM'); } catch (_e2) { p.kill(); }
+    }
+  } catch (_e) { /* 무시 */ }
+}
 
 function killProc() {
   if (proc) {
@@ -167,8 +209,19 @@ function startProc() {
         const w = waiter;
         waiter = null;
         clearTimeout(w.timer);
-        if (ev.is_error) w.reject(new Error('클로드 오류: ' + String(ev.result || ev.subtype || '').slice(0, 200)));
-        else w.resolve(String(ev.result || ''));
+        if (ev.is_error) {
+          const raw = String(ev.result || ev.subtype || '').slice(0, 200);
+          if (isAuthError(raw)) {
+            claudeStatus = 'claude-logout'; // /health로 플러그인에 알림 → 버튼이 [로그인 필요]로 바뀜
+            console.log('[bridge] 클로드 로그인 만료 감지:', raw);
+            w.reject(new Error(LOGIN_GUIDE));
+          } else {
+            w.reject(new Error('클로드 오류: ' + raw));
+          }
+        } else {
+          claudeStatus = 'ok'; // 성공 = 설치·로그인 다 정상 — 어떤 problem이든 해제 (재로그인/재설치 복귀)
+          w.resolve(String(ev.result || ''));
+        }
       }
     }
   });
@@ -279,6 +332,30 @@ function parseSuggestions(raw) {
   return [];
 }
 
+// 로그인 필요 상태일 때 /health 조회가 오면 뒤에서 워밍업을 다시 시도해본다 (30초에 1번만).
+// 성공하면 결과 핸들러가 claudeStatus='ok'로 되돌리므로, 재로그인 후 버튼이 저절로 🟢으로 복귀한다.
+// (플러그인이 로그인 창을 연 뒤 주기적으로 /health를 조회하는 것과 짝을 이룬다)
+let lastAuthRetryAt = 0;
+function retryAuthIfNeeded() {
+  if (claudeStatus !== 'claude-logout') return;
+  if (waiter || Date.now() - lastAuthRetryAt < 30000) return; // 진행 중 턴 방해 금지 + 30초 간격
+  lastAuthRetryAt = Date.now();
+  console.log('[bridge] 로그인 재확인 시도…');
+  runTurn(() => '로그인 확인용이다. "OK"라고만 답하라.').then(
+    () => console.log('[bridge] 로그인 확인됨 — 정상 상태로 복귀.'),
+    (e) => console.log('[bridge] 아직 로그인 안 됨:', String(e.message).slice(0, 80))
+  );
+}
+
+// 실패 응답을 사람용 안내로 변환 — 원인(로그인/설치)이 파악된 경우엔 그 안내를, 아니면 접두어+원문을 보낸다
+function friendlyError(e, prefix) {
+  if (e && e.message === LOGIN_GUIDE) return { error: LOGIN_GUIDE, problem: 'claude-logout' };
+  if (claudeStatus === 'claude-missing') {
+    return { error: '이 PC에 Claude Code(claude)가 설치돼 있지 않아요 — 설치하고 로그인한 뒤 다시 시도해 주세요.', problem: 'claude-missing' };
+  }
+  return { error: prefix + (e && e.message ? e.message : String(e)) };
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     let body = '';
@@ -302,9 +379,11 @@ function json(res, status, obj) {
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') {
+    retryAuthIfNeeded(); // 로그인 필요 상태면 재확인 시도 — 재로그인이 끝났으면 다음 조회부터 problem이 풀린다
     return json(res, 200, {
       ok: true, engine: 'claude', model: currentModel, models: ALLOWED_MODELS, examples: EXAMPLES.length, ready: warmedUp,
-      problem: claudeStatus === 'claude-missing' ? 'claude-missing' : null,
+      problem: (claudeStatus === 'ok' || claudeStatus === null) ? null : claudeStatus,
+      account: claudeAccount(),
       served: stats.served, lastAt: stats.lastAt, lastText: stats.lastText, lastSec: stats.lastSec,
     });
   }
@@ -312,6 +391,96 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/heartbeat') {
     lastBeat = Date.now();
     return json(res, 200, { ok: true });
+  }
+  // 로그인 — 플러그인의 [🟠 클로드 로그인 필요]·[🔑] 버튼이 호출한다.
+  // 기본(브라우저 직행): `claude auth login --claudeai`를 숨은 프로세스로 실행 — 메뉴 없이 곧장 브라우저를 열고,
+  //   localhost 수신 포트로 결과를 자동 수령한다(실측: 헤드리스에서도 브라우저 열림 + LISTEN 확인, 2026-07).
+  //   터미널이 화면에 전혀 안 뜬다. 브라우저 로그인만 하면 끝.
+  // 폴백(터미널): 자동 완료가 막힌 환경(브라우저가 localhost에 못 닿아 코드가 보이는 경우)에서
+  //   로그인 대기 중 버튼을 또 누르면, 코드를 붙여넣을 수 있는 터미널 방식으로 전환한다.
+  if (req.method === 'POST' && req.url === '/open-login') {
+    try {
+      if (loginProc) {
+        // 브라우저 방식이 진행 중인데 또 눌림 = 자동 완료가 안 되는 환경일 수 있음 — 터미널 방식으로 폴백
+        killLoginProc();
+        if (!openLoginTerminal()) {
+          return json(res, 501, { error: '이 OS에선 자동으로 못 열어요 — 터미널에서 claude 실행 후 /login 해 주세요.' });
+        }
+        killProc();
+        accountCache.at = 0;
+        console.log('[bridge] 로그인 폴백 — 터미널 방식으로 전환.');
+        return json(res, 200, { ok: true, mode: 'terminal' });
+      }
+      const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
+        shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
+        detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
+      });
+      loginProc = thisLogin;
+      thisLogin.on('error', () => { if (loginProc === thisLogin) loginProc = null; });
+      thisLogin.on('close', (code) => {
+        if (loginProc !== thisLogin) return;
+        loginProc = null;
+        if (loginProcTimer) { clearTimeout(loginProcTimer); loginProcTimer = null; }
+        accountCache.at = 0; // 새 계정일 수 있으니 다음 /health 때 다시 읽기
+        console.log('[bridge] 브라우저 로그인 절차 종료 (code ' + code + ')');
+      });
+      loginProcTimer = setTimeout(() => { console.log('[bridge] 로그인 10분 경과 — 대기 프로세스 정리.'); killLoginProc(); }, 600000);
+      // 낡은 입장권을 물고 있는 대기 세션은 버린다 — 재로그인 후 다음 요청이 새 세션(새 입장권)으로 시작하게
+      killProc();
+      accountCache.at = 0;
+      console.log('[bridge] 브라우저 로그인 시작 — 브라우저에서 로그인하면 자동 연결됩니다.');
+      return json(res, 200, { ok: true, mode: 'browser' });
+    } catch (e) {
+      return json(res, 500, { error: '로그인 창을 못 열었어요: ' + e.message });
+    }
+  }
+  // (터미널 폴백 구현부 — 브라우저 자동 완료가 안 되는 환경 전용)
+  function openLoginTerminal() {
+    {
+      if (process.platform === 'win32') {
+        // start가 새 콘솔 창을 만든다 (다리의 숨은 콘솔과 무관하게 사용자에게 보임).
+        // 이어서 PowerShell(.ps1)이 5초 뒤 그 창에 엔터를 보내 1번(구독 계정)을 자동 선택하고,
+        // 창을 최소화해 사용자 눈엔 브라우저 로그인만 남게 한다. 창을 못 찾으면 아무것도 안 한다
+        // (다른 창 오입력 방지 — 그 경우 메뉴가 보이는 채로 남고 사용자가 엔터 한 번 누르면 됨).
+        // 주의: claude가 콘솔 제목을 바꾸면 AppActivate/FindWindow가 못 찾을 수 있음 — 윈도우 실기에서 확인 필요.
+        const ps1 = path.join(os.tmpdir(), 'claude-bridge-login.ps1');
+        fs.writeFileSync(ps1, [
+          'Start-Sleep -Seconds 5',
+          '$ws = New-Object -ComObject WScript.Shell',
+          "if ($ws.AppActivate('claude-login')) {",
+          "  $ws.SendKeys('~')",
+          '  Start-Sleep -Seconds 2',
+          "  Add-Type -Namespace U -Name W -MemberDefinition '[DllImport(\"user32.dll\")] public static extern System.IntPtr FindWindow(string c, string t); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(System.IntPtr h, int n);'",
+          "  $h = [U.W]::FindWindow([NullString]::Value, 'claude-login')",
+          '  if ($h -ne [System.IntPtr]::Zero) { [void][U.W]::ShowWindow($h, 6) }', // 6 = SW_MINIMIZE
+          '}',
+        ].join('\r\n') + '\r\n');
+        const bat = path.join(os.tmpdir(), 'claude-bridge-login.bat');
+        fs.writeFileSync(bat, '@echo off\r\n' +
+          'start "claude-login" cmd /k claude /login\r\n' +
+          'powershell -NoProfile -ExecutionPolicy Bypass -File "' + ps1 + '"\r\n');
+        spawn('cmd', ['/c', bat], { env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true });
+      } else if (process.platform === 'darwin') {
+        // pty(expect)로 보낸 키에 클로드 TUI가 무반응인 것이 실측 확인됨(2026-07, 일반 \r·kitty 코드 모두) —
+        // 유일한 자동화 경로는 System Events의 진짜 키 입력. 접근성 권한이 있으면 6초 뒤 엔터가 자동 입력돼
+        // 1번(구독 계정)이 선택되고, 권한이 없으면 keystroke 줄만 조용히 실패해 사용자가 엔터 한 번 누르면 된다(fail-soft).
+        // 엔터 직전에 Terminal을 다시 앞으로 가져와 다른 앱에 키가 들어가는 것을 막는다.
+        spawn('osascript', [
+          '-e', 'tell application "Terminal" to do script "claude /login"',
+          '-e', 'tell application "Terminal" to activate',
+          '-e', 'delay 6',
+          '-e', 'tell application "Terminal" to activate',
+          '-e', 'delay 0.3',
+          '-e', 'tell application "System Events" to keystroke return',
+          // 엔터가 실제로 들어간 경우에만 여기 도달(권한 없으면 위에서 중단) — 터미널을 치워 브라우저만 남긴다
+          '-e', 'delay 1.5',
+          '-e', 'tell application "Terminal" to set miniaturized of front window to true',
+        ], { stdio: 'ignore' });
+      } else {
+        return false; // 지원 안 하는 OS
+      }
+      return true;
+    }
   }
   // 자기 종료 — 클로드다리-끄기.bat이 호출한다 (로컬에서만 접근 가능하니 안전)
   if (req.method === 'POST' && req.url === '/shutdown') {
@@ -342,7 +511,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { suggestions, engine: 'claude' });
     } catch (e) {
       console.log('[bridge] 실패:', e.message);
-      return json(res, 502, { error: '클로드 호출 실패: ' + e.message });
+      return json(res, 502, friendlyError(e, '클로드 호출 실패: '));
     }
   }
   // 번역 — 한국어 ↔ 영어 자동 (추천과 같은 세션 사용)
@@ -367,7 +536,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { translated: out.translated, direction: out.direction, engine: 'claude' });
     } catch (e) {
       console.log('[bridge] 번역 실패:', e.message);
-      return json(res, 502, { error: '클로드 번역 실패: ' + e.message });
+      return json(res, 502, friendlyError(e, '클로드 번역 실패: '));
     }
   }
   return json(res, 404, { error: 'Not found' });
@@ -383,7 +552,7 @@ server.on('error', (e) => {
   process.exit(1);
 });
 // 어떤 경로로 죽든(심장박동 끊김, Ctrl+C, /shutdown, 오류) claude 자식을 남기지 않는다
-process.on('exit', () => killProc());
+process.on('exit', () => { killProc(); killLoginProc(); });
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 

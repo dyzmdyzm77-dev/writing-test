@@ -909,6 +909,35 @@
       /* 클로드 다리 켜짐 표시 — 초록 톤 */
       #bridgeWakeBtn.bridge-on { color: #12805C; border-color: #A6E0C8; }
       #bridgeWakeBtn.bridge-on:hover { color: #0E6B4D; border-color: #12805C; background: #F1FBF6; }
+      /* 다리는 켜졌지만 조치 필요(로그인 만료·claude 없음) — 주황 톤 */
+      #bridgeWakeBtn.bridge-warn { color: #B54708; border-color: #F5C88A; }
+      #bridgeWakeBtn.bridge-warn:hover { color: #93370D; border-color: #B54708; background: #FFF8F1; }
+      /* 계정 확인 배너 — 이 PC의 클로드 계정을 처음 쓸 때(또는 계정이 바뀌면) 본인 확인 */
+      .account-confirm-bar {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 8px;
+        padding: 10px 12px;
+        background: #FFF8E8;
+        border: 1px solid #F2DCA0;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #5C4A12;
+        line-height: 1.5;
+      }
+      .account-confirm-bar .acb-actions { display: flex; gap: 6px; }
+      .account-confirm-bar button {
+        padding: 5px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .account-confirm-bar .acb-use { background: #1D6CEB; border: 1px solid #1D6CEB; color: #fff; }
+      .account-confirm-bar .acb-use:hover { background: #1558C6; }
+      .account-confirm-bar .acb-switch { background: #fff; border: 1px solid #D9D9D9; color: #555; }
+      .account-confirm-bar .acb-switch:hover { border-color: #1D6CEB; color: #1D6CEB; }
       .result-label {
         font-size: 12px;
         color: #757575;
@@ -1123,9 +1152,17 @@
           <div class="title">문구 추천받기</div>
           <div class="title-actions">
             <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="클로드 다리 상태 — 꺼져 있으면 눌러서 켜기" aria-label="클로드 다리">클로드 확인 중…</button>
+            <button id="bridgeLoginBtn" class="feature-settings-btn" type="button" title="다른 계정으로 로그인 — 브라우저에 클로드 로그인 페이지를 열어드려요" aria-label="클로드 계정 전환">계정 전환</button>
           </div>
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.</div>
+        <div class="account-confirm-bar" style="display:none">
+          <span class="acb-text"></span>
+          <span class="acb-actions">
+            <button type="button" class="acb-use">이 계정 사용</button>
+            <button type="button" class="acb-switch">다른 계정으로 로그인</button>
+          </span>
+        </div>
       </div>
       <!-- 추천 후 컴팩트 모드: 보낸 문구를 읽기 전용으로 표시 ([초기화] = 결과·입력 비우고 처음으로) -->
       <div id="recommendEntered">
@@ -1150,6 +1187,13 @@
           <div class="title">번역하기</div>
         </div>
         <div class="hint">문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[번역하기]</b> 버튼을 눌러주세요.</div>
+        <div class="account-confirm-bar" style="display:none">
+          <span class="acb-text"></span>
+          <span class="acb-actions">
+            <button type="button" class="acb-use">이 계정 사용</button>
+            <button type="button" class="acb-switch">다른 계정으로 로그인</button>
+          </span>
+        </div>
       </div>
       <textarea id="translateInput" class="feature-input" placeholder="예) 로그인이 필요합니다 / Please log in"></textarea>
       <button id="translateRun" class="button-primary button-full-width">번역하기</button>
@@ -1569,10 +1613,18 @@
           if (recOrig) setRecommendCompact(true, recOrig); // 결과가 오면 헤더를 컴팩트 모드로
         }
 
+        // AI를 쓰려는데 계정 확인이 안 된 상태 — 배너를 띄워 본인 확인을 요구한다
+        if (event.data.pluginMessage.type === 'account-confirm-needed') {
+          if (event.data.pluginMessage.account) showAccountConfirm(event.data.pluginMessage.account);
+        }
+
         // 클로드 다리 상태 — [🔌 클로드] 버튼에 표시하고, 깨우는 중이었다면 "켜졌어요" 알림
         if (event.data.pluginMessage.type === 'bridge-status') {
           const bs = event.data.pluginMessage;
           bridgeKnownAlive = !!bs.alive; // 최신 생존 상태 기억 (제스처에서 또 켤지 판단용)
+          bridgeProblem = bs.problem || null;
+          // 계정 확인이 필요하면 배너 표시, 확인됐거나 계정 정보가 없으면 숨김
+          if (bs.needConfirm && bs.account) showAccountConfirm(bs.account); else hideAccountConfirm();
           // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내
           if (bridgeStopping) {
             bridgeStopping = false;
@@ -1587,17 +1639,33 @@
               stopBridgeWakePoll();
               if (bs.problem === 'claude-missing') {
                 showToast('다리는 켜졌지만 Claude Code가 없어요. 터미널에서 claude --version 이 되는지(설치·로그인) 확인해 주세요.');
+              } else if (bs.problem === 'claude-logout') {
+                showToast('다리는 켜졌지만 클로드 로그인이 필요해요(안 됐거나 만료) — [클로드 로그인 필요] 버튼을 누르면 로그인 창을 열어드려요.');
               } else {
-                showToast(bs.ready ? '클로드 다리가 켜졌어요! 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요 — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
+                const acctNote = bs.account ? ' (' + bs.account + ' 계정)' : '';
+                showToast(bs.ready ? '클로드 다리가 켜졌어요!' + acctNote + ' 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요' + acctNote + ' — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
               }
             }
             if (bs.alive) installOffer = false; // 켜졌으면(설치 파일 실행 완료 등) 설치 제안 해제
             if (!bridgeWakePoll && !installOffer) {
-              bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive);
-              bridgeWakeBtn.textContent = bs.alive ? '🟢 클로드 켜짐' : '⚫ 클로드 꺼짐';
-              bridgeWakeBtn.title = bs.alive
-                ? '클로드 다리 켜져 있음 — 누르면 끄기'
-                : '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (처음이면 설치 파일 안내가 떠요)';
+              // 켜져 있어도 로그인 만료·claude 없음이면 초록 대신 주황으로 조치를 안내한다
+              const bridgeWarn = !!bs.alive && (bs.problem === 'claude-logout' || bs.problem === 'claude-missing');
+              // 누구 계정으로 도는지 버튼에 표시 — 공용 PC에서 남의 구독을 모르고 쓰는 일 방지.
+              // 라벨엔 @ 앞부분만(길이), 전체 이메일은 툴팁(title)에.
+              const acctShort = bs.account ? String(bs.account).split('@')[0] : '';
+              bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive && !bridgeWarn);
+              bridgeWakeBtn.classList.toggle('bridge-warn', bridgeWarn);
+              bridgeWakeBtn.textContent = !bs.alive ? '⚫ 클로드 꺼짐'
+                : bs.problem === 'claude-logout' ? '🟠 클로드 로그인 필요'
+                : bs.problem === 'claude-missing' ? '🟠 클로드 설치 필요'
+                : (acctShort ? '🟢 클로드 켜짐 · ' + acctShort : '🟢 클로드 켜짐');
+              bridgeWakeBtn.title = !bs.alive
+                ? '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (처음이면 설치 파일 안내가 떠요)'
+                : bs.problem === 'claude-logout'
+                ? (bs.account ? '클로드 로그인(' + bs.account + ')이 만료됐어요 — 누르면 로그인 창을 열어드려요.' : '클로드 로그인이 필요해요(안 됐거나 만료) — 누르면 로그인 창을 열어드려요.')
+                : bs.problem === 'claude-missing'
+                ? '이 PC에 Claude Code가 없어요 — claude 설치·로그인 후 다시 시도해 주세요.'
+                : (bs.account ? bs.account + ' 계정의 클로드로 답해요 — 누르면 끄기' : '클로드 다리 켜져 있음 — 누르면 끄기');
             }
           }
         }
@@ -2265,6 +2333,7 @@
       let bridgeStopping = false;  // [클로드 켜짐] 재클릭으로 끄는 중 — 상태 응답 오면 결과 안내
       let userTurnedOff = false;   // 사용자가 직접 껐음 — 화면 진입 자동 켜기를 건너뜀 (직접 켜면 해제)
       let bridgeKnownAlive = false; // 마지막으로 확인된 다리 생존 여부 (제스처에서 또 켤지 판단)
+      let bridgeProblem = null;    // 마지막으로 확인된 다리 problem (claude-logout이면 버튼 클릭이 로그인 창을 연다)
       let bridgeWakeWaited = 0;
       let installOffer = false;    // 켜기 실패 → 버튼이 [설치 파일 받기]로 바뀐 상태
       function requestBridgeStatus() {
@@ -2317,6 +2386,17 @@
             parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER' } }, '*');
             return;
           }
+          if (bridgeWakeBtn.classList.contains('bridge-warn')) {
+            if (bridgeProblem === 'claude-logout') {
+              // 로그인 필요 — 다리가 claude 터미널을 대신 열어준다 (브라우저 로그인만 본인이)
+              openClaudeLogin();
+            } else {
+              // 그 외(claude 없음 등) — 안내를 다시 보여주고 상태 재확인
+              showToast(bridgeWakeBtn.title);
+              requestBridgeStatus();
+            }
+            return;
+          }
           if (bridgeWakeBtn.classList.contains('bridge-on')) {
             // 켜진 상태에서 다시 누르면 끄기 (다리의 자기 종료 API 호출)
             bridgeStopping = true;
@@ -2329,6 +2409,59 @@
           userTurnedOff = false;    // 직접 켜면 자동 켜기 다시 허용
           openBridgeProtocol();     // 제스처 안에서 동기 실행
           startBridgePoll(false);   // 수동: 실패 시 설치 안내
+        };
+      }
+
+      // ── 계정 확인 배너 — 이 PC에 저장된 클로드 계정을 처음 쓸 때(계정이 바뀌었을 때도) 본인 확인 ──
+      // [이 계정 사용]을 눌러야만 AI 추천·번역이 돌아간다 (code.ts의 accountNeedsConfirm 게이트와 짝).
+      let pendingConfirmAccount = null;
+      function showAccountConfirm(account) {
+        pendingConfirmAccount = account;
+        document.querySelectorAll('.account-confirm-bar').forEach((bar) => {
+          const t = bar.querySelector('.acb-text');
+          if (t) { t.textContent = ''; const b = document.createElement('b'); b.textContent = account; t.appendChild(document.createTextNode('이 PC의 클로드 계정: ')); t.appendChild(b); t.appendChild(document.createTextNode(' — 이 계정으로 AI 추천·번역을 쓸까요? (사용량이 이 계정 구독에서 차감돼요)')); }
+          bar.style.display = 'flex';
+        });
+      }
+      function hideAccountConfirm() {
+        pendingConfirmAccount = null;
+        document.querySelectorAll('.account-confirm-bar').forEach((bar) => { bar.style.display = 'none'; });
+      }
+      document.querySelectorAll('.account-confirm-bar').forEach((bar) => {
+        const use = bar.querySelector('.acb-use');
+        const sw = bar.querySelector('.acb-switch');
+        if (use) use.onclick = () => {
+          if (!pendingConfirmAccount) return;
+          parent.postMessage({ pluginMessage: { type: 'CONFIRM_ACCOUNT', account: pendingConfirmAccount } }, '*');
+          hideAccountConfirm();
+        };
+        if (sw) sw.onclick = () => { openClaudeLogin(); };
+      });
+
+      // 로그인 창 열기 + 상태 재확인 폴링 — 🟠 버튼과 [🔑] 버튼이 공용으로 쓴다.
+      // 로그인이 끝나면 다리의 재확인(retryAuthIfNeeded)이 성공하면서, 아래 폴링이 버튼을 🟢·새 계정으로 되돌린다.
+      let loginWatchTimer = null;
+      function openClaudeLogin() {
+        showToast('클로드 로그인 창을 여는 중…');
+        parent.postMessage({ pluginMessage: { type: 'OPEN_CLAUDE_LOGIN' } }, '*');
+        if (loginWatchTimer) clearInterval(loginWatchTimer); // 연타 시 폴링 중복 방지
+        let left = 12; // 10초 × 12회 = 2분간 지켜본다 (로그인에 시간이 걸릴 수 있음)
+        loginWatchTimer = setInterval(() => {
+          requestBridgeStatus();
+          if (--left <= 0) { clearInterval(loginWatchTimer); loginWatchTimer = null; }
+        }, 10000);
+      }
+      // [🔑] 계정 바꾸기 — 켜짐 상태에서도 다른 계정으로 로그인할 수 있게 로그인 창을 연다.
+      // (다리가 낡은 세션을 버리므로, 재로그인 후 첫 추천부터 새 계정으로 답한다)
+      const bridgeLoginBtn = document.getElementById('bridgeLoginBtn');
+      if (bridgeLoginBtn) {
+        bridgeLoginBtn.onclick = () => {
+          if (!bridgeKnownAlive) {
+            showToast('클로드가 꺼져 있어요 — [클로드 꺼짐] 버튼으로 먼저 켠 뒤 다시 눌러 주세요.');
+            requestBridgeStatus();
+            return;
+          }
+          openClaudeLogin();
         };
       }
 
