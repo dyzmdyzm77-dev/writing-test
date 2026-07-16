@@ -1373,7 +1373,11 @@
           document.body.style.paddingTop = '20px';
           return;
         }
-        if (name === 'recommend' || name === 'translate') requestBridgeStatus(); // 클로드 쓰는 화면 열 때 상태 갱신 (자동 켜기는 클릭 제스처의 ensureBridgeFromGesture가 담당)
+        if (name === 'recommend' || name === 'translate') {
+          requestBridgeStatus(); // 클로드 쓰는 화면 열 때 상태 갱신 (자동 켜기는 클릭 제스처의 ensureBridgeFromGesture가 담당)
+          // 지금 캔버스에서 선택된 프레임 내용을 입력창에 자동으로 넣는다 (초기 선택·타이밍 누락 대비 직접 조회)
+          parent.postMessage({ pluginMessage: { type: 'GET_SELECTION_TEXT' } }, '*');
+        }
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
         document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'flex' : 'none';
@@ -1833,13 +1837,17 @@
         // 선택 해제(빈 문자열) 시 → 자동으로 채워졌던 값 그대로면 입력창을 비운다(직접 타이핑한 건 보존).
         if (event.data.pluginMessage.type === 'selection-text') {
           const text = event.data.pluginMessage.text || '';
+          const onEnter = !!event.data.pluginMessage.onEnter; // 화면 진입 조회(사용자 입력 보존) vs 캔버스 선택 변경
           const el = currentView === 'recommend' ? document.getElementById('recommendInput')
                    : currentView === 'translate' ? document.getElementById('translateInput')
                    : null;
           if (text) {
-            if (el) el.value = text;
+            // 진입 조회면 사용자가 이미 친 내용을 덮지 않는다(빈 칸이거나 이전 자동입력 그대로일 때만 채움).
+            // 캔버스에서 선택을 바꾼 경우(onEnter=false)는 바뀐 프레임 내용으로 갱신한다.
+            if (el && (!onEnter || !el.value.trim() || el.value === lastSelectionText)) el.value = text;
             lastSelectionText = text;
-          } else {
+          } else if (!onEnter) {
+            // 선택을 해제한 경우에만 비운다 — 진입 조회에서 선택이 없다고 사용자 입력을 지우면 안 된다
             if (el && lastSelectionText && el.value === lastSelectionText) el.value = '';
             lastSelectionText = '';
           }

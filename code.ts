@@ -11,7 +11,7 @@ interface PreviewItem {
 }
 
 interface PluginMessage {
-  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'CHECK_BRIDGE' | 'STOP_BRIDGE' | 'GET_INSTALLER' | 'WAKE_BRIDGE' | 'LIKE_SUGGESTION' | 'OPEN_CLAUDE_LOGIN' | 'CONFIRM_ACCOUNT' | 'RESTART_BRIDGE' | 'CHECK_ACCOUNT';
+  type: 'PREVIEW' | 'APPLY' | 'CANCEL' | 'TOGGLE_ANNOTATIONS' | 'CLEAR_ANNOTATIONS' | 'RESIZE_UI' | 'FOCUS_NODE' | 'SELECT_NODES' | 'SHOW_LOADING' | 'UPDATE_PROGRESS' | 'HIDE_LOADING' | 'RECOMMEND' | 'TRANSLATE' | 'REPORT' | 'CHECK_BRIDGE' | 'STOP_BRIDGE' | 'GET_INSTALLER' | 'WAKE_BRIDGE' | 'LIKE_SUGGESTION' | 'OPEN_CLAUDE_LOGIN' | 'CONFIRM_ACCOUNT' | 'RESTART_BRIDGE' | 'CHECK_ACCOUNT' | 'GET_SELECTION_TEXT';
   text?: string;
   forceAi?: boolean; // RECOMMEND: 사전 매칭을 건너뛰고 AI로 새 제안 받기 ([AI 추천 더 받기])
   model?: string;    // RECOMMEND: 클로드 다리에 쓸 모델 (haiku|sonnet|opus)
@@ -123,6 +123,13 @@ figma.ui.postMessage({
   type: 'selection-changed',
   hasSelection: initialSelection && initialSelection.length > 0
 });
+// 플러그인을 열 때 이미 프레임이 선택돼 있으면 그 문구를 미리 잡아둔다 (추천/번역 입력창 자동 채움용).
+// 초기엔 selectionchange가 안 울려서 이걸 안 하면 첫 진입 때 입력창이 비어 버린다.
+if (initialSelection && initialSelection.length > 0) {
+  collectSelectedText().then((t) => {
+    if (t && t.trim()) figma.ui.postMessage({ type: 'selection-text', text: t, onEnter: true });
+  }).catch(() => {});
+}
 
 // ===============================
 // UX Writing 엔진 타입 정의
@@ -3965,6 +3972,14 @@ figma.ui.onmessage = async (msg: any) => {
       figma.ui.postMessage({ type: 'show-toast', message: '클로드를 다시 켜지 못했어요 — [클로드 꺼짐] 버튼으로 직접 켜 주세요.' });
     }
     refreshBridgeStatus();
+    return;
+  }
+  // 추천/번역 화면에 들어올 때 UI가 요청 — 지금 캔버스에서 선택된 프레임/텍스트의 문구를 돌려준다.
+  // (초기 선택이나 selectionchange 타이밍에 안 잡히는 경우를 위해 화면 진입 시 직접 조회한다)
+  if (msg.type === "GET_SELECTION_TEXT") {
+    let t = '';
+    try { t = await collectSelectedText(); } catch (_e) { /* 선택 없음 등 */ }
+    figma.ui.postMessage({ type: 'selection-text', text: (t && t.trim()) ? t : '', onEnter: true });
     return;
   }
   // 이 PC의 클로드 계정 조회 — 감시자(항상 떠 있음)가 파일만 읽어 답한다.
