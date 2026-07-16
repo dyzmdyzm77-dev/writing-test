@@ -1721,6 +1721,7 @@
         if (event.data.pluginMessage.type === 'account-info') {
           knownAccount = event.data.pluginMessage.account || null;
           accountSource = event.data.pluginMessage.source || 'none';
+          watcherOld = !!event.data.pluginMessage.watcherOld;
           accountInfoSeen = true;
           if (typeof event.data.pluginMessage.confirmed !== 'undefined') {
             confirmedAccount = event.data.pluginMessage.confirmed || null;
@@ -2551,6 +2552,7 @@
       // 클로드를 켜지 않고(사용량 0) 감시자에게 계정만 물어 보여준다. 확인된 계정이면 홈으로 바로 간다.
       let knownAccount = null;      // 이 PC에 로그인된 계정 (감시자 응답)
       let accountSource = null;     // 'watcher'|'bridge' = 확인됨 / 'none'·null = 확인 자체를 못 함(감시자 꺼짐 등)
+      let watcherOld = false;       // 감시자가 옛 버전(/account 없음) — 계정 표시는 다리 폴백에 의존
       let confirmedAccount = null;  // 사용자가 [이 계정으로 시작]으로 확인한 계정 (clientStorage)
       let accountInfoSeen = false;  // account-info를 한 번이라도 받았나 (첫 화면 결정용)
       let confirmedSeen = false;    // confirmed-account를 받았나
@@ -2604,7 +2606,9 @@
           // 확인 자체를 못 함(감시자 꺼짐·구버전) — "로그인 없음"과 다르다. 멀쩡한 로그인을 다시 시키면 안 되므로 구분해서 안내한다
           if (stateEl) stateEl.textContent = '계정을 확인하지 못했어요';
           if (emailEl) emailEl.textContent = '';
-          if (noteEl) noteEl.textContent = '로그인이 안 됐다는 뜻은 아니에요 — 이 PC의 클로드 연결이 아직 준비되지 않았을 수 있어요. 그냥 시작해도 되고, 추천을 쓸 때 다시 확인해요.';
+          if (noteEl) noteEl.textContent = watcherOld
+            ? '이 PC의 도우미가 옛 버전이에요 — 로그인이 안 됐다는 뜻은 아니에요. [클로드 로그인]을 누르면 확인·연결되고, PC를 재시작하면 도우미도 최신으로 올라와요.'
+            : '로그인이 안 됐다는 뜻은 아니에요 — 이 PC의 클로드 연결이 아직 준비되지 않았을 수 있어요. 그냥 시작해도 되고, 추천을 쓸 때 다시 확인해요.';
           if (card) card.classList.add('ac-warn');
           if (useBtn) useBtn.disabled = true;
           if (bar) { bar.classList.remove('hab-on'); bar.classList.add('hab-warn'); }

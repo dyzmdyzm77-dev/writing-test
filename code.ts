@@ -3990,18 +3990,31 @@ figma.ui.onmessage = async (msg: any) => {
     let account: string | null = null;
     let claudeInstalled: boolean | null = null;
     let source = 'none';
+    let watcherOld = false;
+    // ① 감시자 /account (비용 0). 단, 옛 감시자(v2)는 이 경로가 없어 404를 준다 — 그건 '답 못 함'이지 '계정 없음'이 아니다.
     try {
       const res = await fetchWithTimeout(WATCHER_URL + '/account', 3000);
-      const d = await res.json().catch(() => ({} as any));
-      if (d && d.ok) { account = d.account || null; claudeInstalled = (typeof d.claude === 'boolean') ? d.claude : null; source = 'watcher'; }
-    } catch (_e) {
-      // 감시자가 없거나 구버전(/account 없음) — 다리가 이미 켜져 있으면 거기서라도 계정을 얻는다
+      if (res.ok) {
+        const d = await res.json().catch(() => ({} as any));
+        if (d && d.ok === true && ('account' in d)) {
+          account = d.account || null;
+          claudeInstalled = (typeof d.claude === 'boolean') ? d.claude : null;
+          source = 'watcher'; // v3 감시자가 확정적으로 답함(계정이 null이어도 '로그인 없음'으로 확정)
+        } else {
+          watcherOld = true; // 응답은 하는데 /account 형식이 아님 = 구버전
+        }
+      } else {
+        watcherOld = true; // 404 등 = 구버전 감시자(경로 없음)
+      }
+    } catch (_e) { /* 감시자 꺼짐 — 아래 다리 폴백으로 */ }
+    // ② 감시자가 계정을 확정 못 했으면(구버전·꺼짐) 다리로 폴백. 다리가 켜져 있으면 파일을 읽어 계정을 안다.
+    if (source === 'none') {
       try {
         const h = await bridgeHealth();
         if (h.alive && h.account) { account = h.account; claudeInstalled = true; source = 'bridge'; }
       } catch (_e2) { /* 둘 다 없으면 계정 모름 — UI가 '확인 불가'로 안내 */ }
     }
-    figma.ui.postMessage({ type: 'account-info', account, claudeInstalled, source, confirmed: confirmedClaudeAccount });
+    figma.ui.postMessage({ type: 'account-info', account, claudeInstalled, source, watcherOld, confirmed: confirmedClaudeAccount });
     return;
   }
   // 계정 확인 — UI의 [이 계정 사용] 버튼이 호출. 확인된 계정만 AI 추천·번역에 쓴다
