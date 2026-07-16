@@ -10,6 +10,8 @@
 
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { spawn, spawnSync } = require('child_process');
 
 const PORT = 11889;
@@ -26,6 +28,20 @@ function json(res, status, obj) {
 }
 
 // claude CLI가 있는지 — 없으면 /wake 응답에 실어 플러그인이 안내할 수 있게 한다
+// 로그인된 계정 읽기 — CLI가 ~/.claude.json에 기록하는 oauthAccount.emailAddress (다리의 claudeAccount와 같은 출처).
+// 파일이 클 수 있어 30초 캐시. 재로그인하면 CLI가 파일을 갱신하므로 자동 반영된다.
+let accountCache = { at: 0, email: null };
+function claudeAccount() {
+  if (Date.now() - accountCache.at < 30000) return accountCache.email;
+  let email = null;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+    email = (j && j.oauthAccount && j.oauthAccount.emailAddress) || null;
+  } catch (_e) { /* 로그인 이력 없음 등 — null */ }
+  accountCache = { at: Date.now(), email };
+  return email;
+}
+
 function hasClaude() {
   const finder = process.platform === 'win32' ? 'where' : 'which';
   try { return spawnSync(finder, ['claude'], { stdio: 'ignore', shell: true }).status === 0; } catch (_e) { return false; }
@@ -57,8 +73,16 @@ function wakeBridge() {
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.url === '/health') {
-    // v: 감시자 코드 버전 — 구버전 프로세스가 계속 돌고 있는지 밖에서 확인하는 용도 (v2 = 창 숨김 수정판)
-    return json(res, 200, { ok: true, watcher: true, v: 2 });
+    // v: 감시자 코드 버전 — 구버전 프로세스가 계속 돌고 있는지 밖에서 확인하는 용도
+    // (v2 = 창 숨김 수정판, v3 = /account 추가판)
+    return json(res, 200, { ok: true, watcher: true, v: 3 });
+  }
+  // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
+  // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
+  // 감시자는 파일만 읽으므로 사용량 0 · 대기 0 — 검토만 쓰는 사람에게 비용을 물리지 않는다.
+  // 주의: 여기 계정이 보여도 입장권이 만료됐을 수 있다(유효성은 실제 호출 때만 알 수 있음 — 다리 /health의 problem 참고).
+  if (req.url === '/account') {
+    return json(res, 200, { ok: true, account: claudeAccount(), claude: hasClaude() });
   }
   if (req.method === 'POST' && req.url === '/wake') {
     if (!hasClaude()) return json(res, 200, { ok: false, problem: 'claude-missing' });

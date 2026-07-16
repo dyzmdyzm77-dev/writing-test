@@ -912,6 +912,69 @@
       /* 다리는 켜졌지만 조치 필요(로그인 만료·claude 없음) — 주황 톤 */
       #bridgeWakeBtn.bridge-warn { color: #B54708; border-color: #F5C88A; }
       #bridgeWakeBtn.bridge-warn:hover { color: #93370D; border-color: #B54708; background: #FFF8F1; }
+      /* 계정 화면(첫 화면) — 감시자가 알려준 계정을 보여주고 본인 확인을 받는다 */
+      .account-card {
+        margin: 16px 0 12px 0;
+        padding: 14px;
+        background: #F7F9FF;
+        border: 1px solid #D6E2FB;
+        border-radius: 10px;
+      }
+      .account-card .ac-state { font-size: 12px; color: #555; margin-bottom: 4px; }
+      .account-card .ac-email { font-size: 15px; font-weight: 600; color: #1D1D1D; word-break: break-all; }
+      .account-card .ac-note { font-size: 12px; color: #757575; margin-top: 6px; line-height: 1.5; }
+      .account-card.ac-warn { background: #FFF8E8; border-color: #F2DCA0; }
+      #accountView .button-secondary { margin-top: 8px; }
+      .account-skip {
+        display: block;
+        width: 100%;
+        height: auto !important; /* 전역 button height 48px 되돌리기 — 링크처럼 보이게 */
+        margin-top: 14px;
+        padding: 6px;
+        background: none;
+        border: none;
+        color: #757575;
+        font-size: 12px;
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      .account-skip:hover { color: #1D6CEB; }
+      /* 홈 계정 줄 — 누구 구독으로 AI가 도는지 홈에서 바로 보이게 */
+      .home-account-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 10px 0 16px 0;
+        padding: 8px 10px;
+        background: #F7F7F7;
+        border: 1px solid #E8E8E8;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #555;
+      }
+      .home-account-bar .hab-dot { width: 7px; height: 7px; border-radius: 50%; background: #BDBDBD; flex-shrink: 0; }
+      .home-account-bar.hab-on .hab-dot { background: #12805C; }
+      .home-account-bar.hab-warn .hab-dot { background: #E08A2E; }
+      .home-account-bar .hab-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* 전역 button 규칙(width:100%, height:48px !important)을 이 버튼에서만 되돌린다 */
+      .home-account-bar .hab-btn {
+        flex: 0 0 auto;
+        display: inline-flex;      /* 전역 button의 display:block + 48px 높이에서 라벨이 밖으로 흐르는 것 방지 */
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        width: auto;
+        min-width: 0;
+        height: 26px !important;
+        padding: 3px 8px;
+        background: #fff;
+        border: 1px solid #D9D9D9;
+        border-radius: 6px;
+        color: #555;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .home-account-bar .hab-btn:hover { border-color: #1D6CEB; color: #1D6CEB; }
       /* 계정 확인 배너 — 이 PC의 클로드 계정을 처음 쓸 때(또는 계정이 바뀌면) 본인 확인 */
       .account-confirm-bar {
         display: flex;
@@ -1044,10 +1107,31 @@
       <button class="tab-btn" data-tab="translate">번역</button>
     </div>
 
+    <!-- 계정 화면: 플러그인을 켜면 맨 처음 보이는 화면 (확인된 계정이면 건너뛰고 홈으로).
+         여기서 보여주는 계정은 감시자가 파일만 읽어 알려준 것 — 클로드를 켜지 않으므로 사용량이 안 나간다. -->
+    <div id="accountView">
+      <div class="title">클로드 계정 확인</div>
+      <div class="hint">AI 추천·번역은 이 PC에 로그인된 클로드 계정으로 동작해요.</div>
+      <div id="accountCard" class="account-card">
+        <div class="ac-state" id="accountState">계정을 확인하는 중…</div>
+        <div class="ac-email" id="accountEmail"></div>
+        <div class="ac-note" id="accountNote"></div>
+      </div>
+      <button id="accountUse" class="button-primary button-full-width" type="button" disabled>이 계정으로 시작</button>
+      <button id="accountSwitch" class="button-secondary button-full-width" type="button">다른 계정으로 로그인</button>
+      <button id="accountSkip" class="account-skip" type="button">로그인 없이 검토만 쓰기</button>
+    </div>
+
     <!-- 홈 화면: 작업 선택 메뉴 -->
     <div id="homeView">
       <div class="title">S1 UX Writing Assistant</div>
       <div class="hint">문구 검토부터 번역까지 도와드려요.</div>
+      <!-- 홈 계정 줄 — 누구 구독으로 AI가 도는지 항상 보이게 (감시자 정보라 비용 0) -->
+      <div id="homeAccountBar" class="home-account-bar">
+        <span class="hab-dot" id="homeAccountDot"></span>
+        <span class="hab-text" id="homeAccountText">클로드 계정 확인 중…</span>
+        <button id="homeAccountBtn" class="hab-btn" type="button">계정 전환</button>
+      </div>
       <button class="home-card" data-go="review">
         <span class="home-card-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 3h8l4 4v14H6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v4h4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 13.5l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -1273,6 +1357,22 @@
       }
       function showView(name) {
         currentView = name;
+        // 계정 화면은 전용 화면 — 다른 화면 요소를 모두 숨기고 단독으로 보인다
+        const accView = document.getElementById('accountView');
+        if (accView) accView.style.display = name === 'account' ? 'block' : 'none';
+        if (name === 'account') {
+          document.getElementById('homeView').style.display = 'none';
+          document.getElementById('topFixed').style.display = 'none';
+          document.getElementById('recommendHeader').style.display = 'none';
+          document.getElementById('translateHeader').style.display = 'none';
+          document.getElementById('recommendSection').style.display = 'none';
+          document.getElementById('translateSection').style.display = 'none';
+          const tb = document.getElementById('tabBar');
+          tb.classList.remove('visible');
+          document.body.classList.remove('has-tabbar');
+          document.body.style.paddingTop = '20px';
+          return;
+        }
         if (name === 'recommend' || name === 'translate') requestBridgeStatus(); // 클로드 쓰는 화면 열 때 상태 갱신 (자동 켜기는 클릭 제스처의 ensureBridgeFromGesture가 담당)
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
@@ -1611,6 +1711,25 @@
             canAskAi: !!recMsg.canAskAi,   // 사전 답안 카드 밑에 [AI 추천 더 받기] 버튼 노출
           });
           if (recOrig) setRecommendCompact(true, recOrig); // 결과가 오면 헤더를 컴팩트 모드로
+        }
+
+        // 이 PC의 클로드 계정 정보 (감시자가 알려준 것 — 클로드는 안 켜짐)
+        if (event.data.pluginMessage.type === 'account-info') {
+          knownAccount = event.data.pluginMessage.account || null;
+          accountSource = event.data.pluginMessage.source || 'none';
+          accountInfoSeen = true;
+          if (typeof event.data.pluginMessage.confirmed !== 'undefined') {
+            confirmedAccount = event.data.pluginMessage.confirmed || null;
+            confirmedSeen = true;
+          }
+          renderAccountViews();
+          decideFirstScreen();
+        }
+        // 저장돼 있던 '확인한 계정' — 첫 화면을 정하는 데 쓴다
+        if (event.data.pluginMessage.type === 'confirmed-account') {
+          confirmedAccount = event.data.pluginMessage.account || null;
+          confirmedSeen = true;
+          decideFirstScreen();
         }
 
         // AI를 쓰려는데 계정 확인이 안 된 상태 — 배너를 띄워 본인 확인을 요구한다
@@ -2420,6 +2539,103 @@
         };
       }
 
+      // ── 계정 화면(첫 화면) + 홈 계정 줄 ──
+      // 클로드를 켜지 않고(사용량 0) 감시자에게 계정만 물어 보여준다. 확인된 계정이면 홈으로 바로 간다.
+      let knownAccount = null;      // 이 PC에 로그인된 계정 (감시자 응답)
+      let accountSource = null;     // 'watcher'|'bridge' = 확인됨 / 'none'·null = 확인 자체를 못 함(감시자 꺼짐 등)
+      let confirmedAccount = null;  // 사용자가 [이 계정으로 시작]으로 확인한 계정 (clientStorage)
+      let accountInfoSeen = false;  // account-info를 한 번이라도 받았나 (첫 화면 결정용)
+      let confirmedSeen = false;    // confirmed-account를 받았나
+      function requestAccountInfo() { parent.postMessage({ pluginMessage: { type: 'CHECK_ACCOUNT' } }, '*'); }
+      // 첫 화면 결정 — 두 정보(로그인된 계정 / 확인된 계정)가 다 와야 판단할 수 있다
+      let firstScreenDecided = false;
+      function decideFirstScreen() {
+        if (firstScreenDecided || !accountInfoSeen || !confirmedSeen) return;
+        firstScreenDecided = true;
+        // 이미 확인한 계정 그대로면 굳이 관문을 세우지 않는다 (매번 물으면 성가시다)
+        if (knownAccount && knownAccount === confirmedAccount) showView('home');
+        else showView('account');
+      }
+      // 계정 화면·홈 줄 그리기
+      function renderAccountViews() {
+        const stateEl = document.getElementById('accountState');
+        const emailEl = document.getElementById('accountEmail');
+        const noteEl = document.getElementById('accountNote');
+        const card = document.getElementById('accountCard');
+        const useBtn = document.getElementById('accountUse');
+        const bar = document.getElementById('homeAccountBar');
+        const barText = document.getElementById('homeAccountText');
+        const barBtn = document.getElementById('homeAccountBtn');
+        if (knownAccount) {
+          if (stateEl) stateEl.textContent = '이 PC에 로그인된 클로드 계정';
+          if (emailEl) emailEl.textContent = knownAccount;
+          if (noteEl) noteEl.textContent = 'AI 추천·번역 사용량이 이 계정 구독에서 차감돼요. 내 계정이 아니면 [다른 계정으로 로그인]을 눌러주세요.';
+          if (card) card.classList.remove('ac-warn');
+          if (useBtn) { useBtn.disabled = false; useBtn.textContent = '이 계정으로 시작'; }
+          if (bar) { bar.classList.add('hab-on'); bar.classList.remove('hab-warn'); }
+          if (barText) barText.textContent = '클로드 계정: ' + knownAccount;
+          if (barBtn) barBtn.textContent = '계정 전환';
+        } else if (!accountInfoSeen) {
+          if (stateEl) stateEl.textContent = '계정을 확인하는 중…';
+          if (emailEl) emailEl.textContent = '';
+          if (noteEl) noteEl.textContent = '';
+          if (card) card.classList.remove('ac-warn');
+          if (useBtn) useBtn.disabled = true;
+          if (barText) barText.textContent = '클로드 계정 확인 중…';
+        } else if (accountSource === 'watcher' || accountSource === 'bridge') {
+          // 확인은 됐는데 계정이 없다 = 이 PC에서 클로드에 로그인한 적이 없음
+          if (stateEl) stateEl.textContent = '로그인된 클로드 계정이 없어요';
+          if (emailEl) emailEl.textContent = '';
+          if (noteEl) noteEl.textContent = '[클로드 로그인]을 누르면 브라우저에 로그인 페이지가 열려요. 로그인 없이도 검토 기능은 그대로 쓸 수 있어요.';
+          if (card) card.classList.add('ac-warn');
+          if (useBtn) useBtn.disabled = true;
+          if (bar) { bar.classList.remove('hab-on'); bar.classList.add('hab-warn'); }
+          if (barText) barText.textContent = '클로드 로그인 안 됨 — AI 추천·번역을 쓰려면 로그인하세요';
+          if (barBtn) barBtn.textContent = '로그인';
+        } else {
+          // 확인 자체를 못 함(감시자 꺼짐·구버전) — "로그인 없음"과 다르다. 멀쩡한 로그인을 다시 시키면 안 되므로 구분해서 안내한다
+          if (stateEl) stateEl.textContent = '계정을 확인하지 못했어요';
+          if (emailEl) emailEl.textContent = '';
+          if (noteEl) noteEl.textContent = '로그인이 안 됐다는 뜻은 아니에요 — 이 PC의 클로드 연결이 아직 준비되지 않았을 수 있어요. 그냥 시작해도 되고, 추천을 쓸 때 다시 확인해요.';
+          if (card) card.classList.add('ac-warn');
+          if (useBtn) useBtn.disabled = true;
+          if (bar) { bar.classList.remove('hab-on'); bar.classList.add('hab-warn'); }
+          if (barText) barText.textContent = '클로드 계정 확인 안 됨';
+          if (barBtn) barBtn.textContent = '확인';
+        }
+        const switchBtn = document.getElementById('accountSwitch');
+        if (switchBtn) switchBtn.textContent = knownAccount ? '다른 계정으로 로그인' : '클로드 로그인';
+        // 확인을 못 한 상태에선 [이 계정으로 시작]이 막히므로, 빠져나갈 길을 '그냥 시작'으로 열어둔다
+        const skipBtn = document.getElementById('accountSkip');
+        if (skipBtn) skipBtn.textContent = (accountInfoSeen && !knownAccount && accountSource !== 'watcher' && accountSource !== 'bridge')
+          ? '그냥 시작하기' : '로그인 없이 검토만 쓰기';
+      }
+      document.getElementById('accountUse').onclick = () => {
+        if (!knownAccount) return;
+        confirmedAccount = knownAccount;
+        parent.postMessage({ pluginMessage: { type: 'CONFIRM_ACCOUNT', account: knownAccount } }, '*');
+        hideAccountConfirm(); // 추천·번역 화면의 확인 배너도 함께 해제
+        showView('home');
+      };
+      document.getElementById('accountSkip').onclick = () => { showView('home'); };
+      document.getElementById('accountSwitch').onclick = () => {
+        // 로그인 창은 다리가 열어준다 — 꺼져 있으면 감시자로 먼저 켠다
+        if (!bridgeKnownAlive) { openBridgeProtocol(); showToast('클로드를 켜는 중이에요 — 잠시 후 로그인 창이 열려요.'); setTimeout(openClaudeLogin, 6000); }
+        else openClaudeLogin();
+        startAccountWatch();
+      };
+      document.getElementById('homeAccountBtn').onclick = () => { showView('account'); };
+      // 로그인 후 계정이 바뀌는지 잠시 지켜본다 (감시자 캐시가 30초라 넉넉히)
+      let accountWatchTimer = null;
+      function startAccountWatch() {
+        if (accountWatchTimer) clearInterval(accountWatchTimer);
+        let left = 12;
+        accountWatchTimer = setInterval(() => {
+          requestAccountInfo();
+          if (--left <= 0) { clearInterval(accountWatchTimer); accountWatchTimer = null; }
+        }, 10000);
+      }
+
       // ── 계정 확인 배너 — 이 PC에 저장된 클로드 계정을 처음 쓸 때(계정이 바뀌었을 때도) 본인 확인 ──
       // [이 계정 사용]을 눌러야만 AI 추천·번역이 돌아간다 (code.ts의 accountNeedsConfirm 게이트와 짝).
       let pendingConfirmAccount = null;
@@ -2475,6 +2691,13 @@
 
       // 최초 로드 시 클로드 다리 상태 요청
       requestBridgeStatus();
+      // 첫 화면은 계정 화면 — 감시자에게 계정을 묻고(비용 0), 이미 확인된 계정이면 홈으로 넘어간다.
+      // 응답이 안 오는 환경(감시자 없음)에서도 멈춰 있지 않도록 4초 뒤엔 계정 화면을 그대로 보여준다.
+      showView('account');
+      requestAccountInfo();
+      setTimeout(() => {
+        if (!accountInfoSeen) { accountInfoSeen = true; renderAccountViews(); decideFirstScreen(); }
+      }, 4000);
 
       // ── 결과 렌더링 ──
       function escapeHtml(s) {
