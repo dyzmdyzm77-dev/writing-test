@@ -2631,12 +2631,9 @@
       };
       document.getElementById('accountSkip').onclick = () => { showView('home'); };
       document.getElementById('accountSwitch').onclick = () => {
-        // 이미 로그인된 계정이 있으면 '전환' — 시크릿 창으로 열어야 계정을 고를 수 있다.
-        // 로그인이 아예 없으면 보통 창으로 충분하다(고를 세션이 없으므로).
-        const sw = !!knownAccount;
-        // 로그인 창은 다리가 열어준다 — 꺼져 있으면 감시자로 먼저 켠다
-        if (!bridgeKnownAlive) { openBridgeProtocol(); showToast('클로드를 켜는 중이에요 — 잠시 후 로그인 창이 열려요.'); setTimeout(() => openClaudeLogin(sw), 6000); }
-        else openClaudeLogin(sw);
+        // 이미 로그인된 계정이 있으면 '전환'(로그아웃 후 계정 선택), 없으면 그냥 로그인.
+        // 다리 깨우기는 code.ts의 OPEN_CLAUDE_LOGIN이 알아서 한다(꺼져 있으면 감시자로 깨우고 재시도).
+        openClaudeLogin(!!knownAccount);
         startAccountWatch();
       };
       document.getElementById('homeAccountBtn').onclick = () => { showView('account'); };

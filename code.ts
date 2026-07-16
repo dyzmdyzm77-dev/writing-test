@@ -3929,23 +3929,39 @@ figma.ui.onmessage = async (msg: any) => {
   }
   // 클로드 로그인 창 열기 — [🟠 클로드 로그인 필요] 버튼이 호출. 다리가 claude 터미널을 대신 열어준다
   if (msg.type === "OPEN_CLAUDE_LOGIN") {
-    try {
-      // switchAccount=true면 다리가 시크릿 창으로 연다 — 기존 claude.ai 로그인 세션이 없어야 계정을 고를 수 있다
-      const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/open-login', { switchAccount: !!(msg as any).switchAccount }, 5000);
-      const data = await res.json().catch(() => ({} as any));
-      figma.ui.postMessage({
-        type: 'show-toast',
-        message: !res.ok
-          ? ((data && data.error) || '로그인 창을 못 열었어요 — 터미널에서 claude 실행 후 /login 해 주세요.')
-          : data && data.mode === 'terminal'
-          ? '이번엔 터미널 로그인 창을 열었어요 — 안내에 따라 진행하고, 브라우저에 코드가 보이면 터미널에 붙여넣으세요.'
-          : data && data.mode === 'browser-switch'
-          ? '브라우저에서 로그아웃 후 계정 선택 화면을 열어요 — 잠깐 기다렸다가 쓰려는 계정을 고르면 자동으로 바뀌어요.'
-          : '브라우저에 클로드 로그인 페이지를 열었어요 — 로그인하면 자동으로 연결돼요. 완료가 안 되면 버튼을 한 번 더 누르세요.',
-      });
-    } catch (e) {
-      figma.ui.postMessage({ type: 'show-toast', message: '로그인 창을 못 열었어요(다리 꺼짐?) — 터미널에서 claude 실행 후 /login 해 주세요.' });
+    // 로그인 창을 여는 건 다리다. 계정 화면은 비용 때문에 다리를 안 켜두므로, 여기서 로그인 직전에 다리를 확실히 깨운다.
+    // (안 그러면 "다리 꺼짐?" 오류가 난다 — 사용자는 로그인 버튼을 눌렀을 뿐인데.)
+    const switchAccount = !!(msg as any).switchAccount;
+    async function tryOpenLogin(): Promise<{ ok: boolean; data: any }> {
+      try {
+        const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/open-login', { switchAccount }, 5000);
+        const data = await res.json().catch(() => ({} as any));
+        return { ok: res.ok, data };
+      } catch (_e) { return { ok: false, data: null }; }
     }
+    let r = await tryOpenLogin();
+    if (!r.ok && !r.data) {
+      // 다리가 꺼져 있었다 — 감시자로 깨우고(claudebridge:// 보조), 뜰 때까지 기다렸다 다시 시도한다
+      figma.ui.postMessage({ type: 'show-toast', message: '클로드를 켜는 중이에요 — 잠시 후 로그인 창이 열려요.' });
+      try { await postJsonWithTimeout(WATCHER_URL + '/wake', {}, 3000); }
+      catch (_e) { try { figma.openExternal('claudebridge://start'); } catch (_e2) { /* 둘 다 실패 — 아래 재시도가 알려준다 */ } }
+      for (let i = 0; i < 8 && (!r.ok && !r.data); i++) {
+        await new Promise((res) => setTimeout(res, 1500));
+        if ((await bridgeHealth()).alive) r = await tryOpenLogin();
+      }
+    }
+    figma.ui.postMessage({
+      type: 'show-toast',
+      message: (!r.ok && !r.data)
+        ? '로그인 창을 못 열었어요 — 클로드가 이 PC에 연결됐는지 확인해 주세요(꺼져 있으면 [클로드] 버튼으로 켜기).'
+        : !r.ok
+        ? ((r.data && r.data.error) || '로그인 창을 못 열었어요 — 터미널에서 claude 실행 후 /login 해 주세요.')
+        : r.data && r.data.mode === 'terminal'
+        ? '이번엔 터미널 로그인 창을 열었어요 — 안내에 따라 진행하고, 브라우저에 코드가 보이면 터미널에 붙여넣으세요.'
+        : r.data && r.data.mode === 'browser-switch'
+        ? '브라우저에서 로그아웃 후 계정 선택 화면을 열어요 — 잠깐 기다렸다가 쓰려는 계정을 고르면 자동으로 바뀌어요.'
+        : '브라우저에 클로드 로그인 페이지를 열었어요 — 로그인하면 자동으로 연결돼요. 완료가 안 되면 버튼을 한 번 더 누르세요.',
+    });
     return;
   }
   // 구버전 다리 재시작 — [🟠 다리 업데이트 필요] 클릭. 옛 프로세스를 끄고 감시자로 새 코드를 켠다.
