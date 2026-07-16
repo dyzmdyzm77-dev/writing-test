@@ -153,10 +153,37 @@ setInterval(() => {
   }
 }, 5000);
 
+// 로그인 URL을 "우리가 정한 방식"으로 열기 위한 BROWSER 핸들러 스크립트를 만든다.
+// claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 URL을 넘긴다(실측 2026-07).
+// mode='switch' → 시크릿(프라이빗) 창으로 연다: claude.ai 세션이 없는 창이라 로그인 화면이 떠서
+//   "다른 계정으로 로그인"이 실제로 가능해진다(보통 창은 이미 로그인된 계정으로 승인 화면 직행).
+// 시크릿 창을 못 열면(크롬·엣지 없음) 기본 브라우저로 폴백 — 로그인 자체는 되게 한다.
+function writeBrowserHandler(mode) {
+  if (process.platform === 'win32') {
+    const cmd = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.cmd');
+    const ps = mode === 'switch'
+      ? "try { Start-Process chrome -ArgumentList '--incognito',$env:CB_URL -ErrorAction Stop } catch { try { Start-Process msedge -ArgumentList '--inprivate',$env:CB_URL -ErrorAction Stop } catch { Start-Process $env:CB_URL } }"
+      : 'Start-Process $env:CB_URL';
+    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"\r\n');
+    return cmd;
+  }
+  const sh = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.sh');
+  const body = mode === 'switch'
+    ? '#!/bin/sh\n' +
+      'open -na "Google Chrome" --args --incognito "$1" 2>/dev/null && exit 0\n' +
+      'open -na "Microsoft Edge" --args --inprivate "$1" 2>/dev/null && exit 0\n' +
+      'open "$1"\n'   // 시크릿 창을 못 열면 기본 브라우저 (로그인은 되게)
+    : '#!/bin/sh\nopen "$1"\n';
+  fs.writeFileSync(sh, body);
+  fs.chmodSync(sh, 0o755);
+  return sh;
+}
+
 // 브라우저 로그인 프로세스 (claude auth login --claudeai) — /open-login이 생성·관리.
 // 브라우저가 localhost로 결과를 보내줄 때까지 숨어서 대기하다가, 완료되면 스스로 끝난다.
 let loginProc = null;
 let loginProcTimer = null;
+let loginStartedAt = 0; // 브라우저 로그인 시작 시각 — 재클릭이 '재시도'인지 '자동완료 실패'인지 구분한다
 function killLoginProc() {
   if (loginProcTimer) { clearTimeout(loginProcTimer); loginProcTimer = null; }
   if (!loginProc) return;
@@ -404,9 +431,14 @@ const server = http.createServer(async (req, res) => {
   // 폴백(터미널): 자동 완료가 막힌 환경(브라우저가 localhost에 못 닿아 코드가 보이는 경우)에서
   //   로그인 대기 중 버튼을 또 누르면, 코드를 붙여넣을 수 있는 터미널 방식으로 전환한다.
   if (req.method === 'POST' && req.url === '/open-login') {
+    const body = await readBody(req);
+    const switchMode = !!(body && body.switchAccount); // 계정 전환 = 시크릿 창으로 열어 계정을 고를 수 있게
     try {
-      if (loginProc) {
-        // 브라우저 방식이 진행 중인데 또 눌림 = 자동 완료가 안 되는 환경일 수 있음 — 터미널 방식으로 폴백
+      // 진행 중인데 또 눌렀다 — 금방(60초 내) 다시 누른 건 "창을 닫았다/못 봤다"에 가까우므로 브라우저로 재시도한다.
+      // 한참 뒤에도 또 누르는 건 브라우저가 localhost 콜백에 못 닿아 자동 완료가 안 되는 환경일 수 있으니
+      // 그때만 코드를 붙여넣을 수 있는 터미널 방식으로 폴백한다 (두 번째 클릭에 터미널이 튀어나오면 당황스럽다).
+      const stale = loginProc && (Date.now() - loginStartedAt > 60000);
+      if (loginProc && stale) {
         killLoginProc();
         if (!openLoginTerminal()) {
           return json(res, 501, { error: '이 OS에선 자동으로 못 열어요 — 터미널에서 claude 실행 후 /login 해 주세요.' });
@@ -416,8 +448,13 @@ const server = http.createServer(async (req, res) => {
         console.log('[bridge] 로그인 폴백 — 터미널 방식으로 전환.');
         return json(res, 200, { ok: true, mode: 'terminal' });
       }
+      killLoginProc(); // 앞선 브라우저 로그인이 대기 중이면 접고 새로 연다 (창을 닫았거나 다시 누른 경우)
+      loginStartedAt = Date.now();
+      // BROWSER를 우리 핸들러로 지정 — CLI가 브라우저를 직접 열지 않고 URL만 넘겨준다.
+      // 핸들러가 실패하거나 CLI가 BROWSER를 무시해도 CLI가 알아서 기본 브라우저를 열므로 로그인은 된다(fail-soft).
+      const loginEnv = Object.assign({}, CLAUDE_ENV, { BROWSER: writeBrowserHandler(switchMode ? 'switch' : 'normal') });
       const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
-        shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
+        shell: true, env: loginEnv, stdio: 'ignore', windowsHide: true,
         detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
       });
       loginProc = thisLogin;
@@ -433,8 +470,8 @@ const server = http.createServer(async (req, res) => {
       // 낡은 입장권을 물고 있는 대기 세션은 버린다 — 재로그인 후 다음 요청이 새 세션(새 입장권)으로 시작하게
       killProc();
       accountCache.at = 0;
-      console.log('[bridge] 브라우저 로그인 시작 — 브라우저에서 로그인하면 자동 연결됩니다.');
-      return json(res, 200, { ok: true, mode: 'browser' });
+      console.log('[bridge] 브라우저 로그인 시작' + (switchMode ? ' (계정 전환 — 시크릿 창)' : '') + ' — 로그인하면 자동 연결됩니다.');
+      return json(res, 200, { ok: true, mode: switchMode ? 'browser-switch' : 'browser' });
     } catch (e) {
       return json(res, 500, { error: '로그인 창을 못 열었어요: ' + e.message });
     }

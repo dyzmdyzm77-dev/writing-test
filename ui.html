@@ -2515,8 +2515,8 @@
               // 옛 코드로 떠 있는 다리 — 껐다 새 코드로 켠다 (pull·복사만으론 갱신 안 되므로)
               parent.postMessage({ pluginMessage: { type: 'RESTART_BRIDGE' } }, '*');
             } else if (bridgeProblem === 'claude-logout') {
-              // 로그인 필요 — 다리가 claude 터미널을 대신 열어준다 (브라우저 로그인만 본인이)
-              openClaudeLogin();
+              // 로그인 필요(만료·미로그인) — 같은 계정 재로그인이 대부분이라 보통 창으로 연다
+              openClaudeLogin(false);
             } else {
               // 그 외(claude 없음 등) — 안내를 다시 보여주고 상태 재확인
               showToast(bridgeWakeBtn.title);
@@ -2619,9 +2619,12 @@
       };
       document.getElementById('accountSkip').onclick = () => { showView('home'); };
       document.getElementById('accountSwitch').onclick = () => {
+        // 이미 로그인된 계정이 있으면 '전환' — 시크릿 창으로 열어야 계정을 고를 수 있다.
+        // 로그인이 아예 없으면 보통 창으로 충분하다(고를 세션이 없으므로).
+        const sw = !!knownAccount;
         // 로그인 창은 다리가 열어준다 — 꺼져 있으면 감시자로 먼저 켠다
-        if (!bridgeKnownAlive) { openBridgeProtocol(); showToast('클로드를 켜는 중이에요 — 잠시 후 로그인 창이 열려요.'); setTimeout(openClaudeLogin, 6000); }
-        else openClaudeLogin();
+        if (!bridgeKnownAlive) { openBridgeProtocol(); showToast('클로드를 켜는 중이에요 — 잠시 후 로그인 창이 열려요.'); setTimeout(() => openClaudeLogin(sw), 6000); }
+        else openClaudeLogin(sw);
         startAccountWatch();
       };
       document.getElementById('homeAccountBtn').onclick = () => { showView('account'); };
@@ -2659,15 +2662,17 @@
           parent.postMessage({ pluginMessage: { type: 'CONFIRM_ACCOUNT', account: pendingConfirmAccount } }, '*');
           hideAccountConfirm();
         };
-        if (sw) sw.onclick = () => { openClaudeLogin(); };
+        if (sw) sw.onclick = () => { openClaudeLogin(true); }; // 배너의 [다른 계정으로 로그인] = 전환
       });
 
       // 로그인 창 열기 + 상태 재확인 폴링 — 🟠 버튼과 [🔑] 버튼이 공용으로 쓴다.
       // 로그인이 끝나면 다리의 재확인(retryAuthIfNeeded)이 성공하면서, 아래 폴링이 버튼을 🟢·새 계정으로 되돌린다.
       let loginWatchTimer = null;
-      function openClaudeLogin() {
-        showToast('클로드 로그인 창을 여는 중…');
-        parent.postMessage({ pluginMessage: { type: 'OPEN_CLAUDE_LOGIN' } }, '*');
+      // switchAccount=true — 이미 로그인된 계정이 있는데 다른 계정으로 바꾸려는 경우.
+      // 다리가 시크릿 창으로 열어준다(보통 창은 claude.ai 세션이 살아 있어 그 계정 승인 화면으로 직행해 계정을 못 고름).
+      function openClaudeLogin(switchAccount) {
+        showToast(switchAccount ? '계정 전환 창을 여는 중…' : '클로드 로그인 창을 여는 중…');
+        parent.postMessage({ pluginMessage: { type: 'OPEN_CLAUDE_LOGIN', switchAccount: !!switchAccount } }, '*');
         if (loginWatchTimer) clearInterval(loginWatchTimer); // 연타 시 폴링 중복 방지
         let left = 12; // 10초 × 12회 = 2분간 지켜본다 (로그인에 시간이 걸릴 수 있음)
         loginWatchTimer = setInterval(() => {
@@ -2685,7 +2690,7 @@
             requestBridgeStatus();
             return;
           }
-          openClaudeLogin();
+          openClaudeLogin(true); // [계정 전환] 버튼 = 다른 계정으로 바꾸려는 것 → 시크릿 창
         };
       }
 
