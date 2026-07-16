@@ -153,28 +153,19 @@ setInterval(() => {
   }
 }, 5000);
 
-// 로그인 URL을 "우리가 정한 방식"으로 열기 위한 BROWSER 핸들러 스크립트를 만든다.
+// 로그인 URL을 기본 브라우저로 여는 BROWSER 핸들러 스크립트를 만든다.
 // claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 URL을 넘긴다(실측 2026-07).
-// mode='switch' → 시크릿(프라이빗) 창으로 연다: claude.ai 세션이 없는 창이라 로그인 화면이 떠서
-//   "다른 계정으로 로그인"이 실제로 가능해진다(보통 창은 이미 로그인된 계정으로 승인 화면 직행).
-// 시크릿 창을 못 열면(크롬·엣지 없음) 기본 브라우저로 폴백 — 로그인 자체는 되게 한다.
-function writeBrowserHandler(mode) {
+// 시크릿 창은 쓰지 않는다: CLI가 주는 authorize URL(claude.com/cai/oauth/authorize)이 보통 창에서도
+// claude.ai/login?selectAccount=true 로 자동 리다이렉트돼 계정 선택 화면이 뜬다(실측) — 시크릿이 필요 없다.
+// 시크릿은 오히려 매번 새 로그인을 강요하고(비밀번호 재입력) 사내 정책상 막힌 PC도 있어 뺐다.
+function writeBrowserHandler() {
   if (process.platform === 'win32') {
-    const cmd = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.cmd');
-    const ps = mode === 'switch'
-      ? "try { Start-Process chrome -ArgumentList '--incognito',$env:CB_URL -ErrorAction Stop } catch { try { Start-Process msedge -ArgumentList '--inprivate',$env:CB_URL -ErrorAction Stop } catch { Start-Process $env:CB_URL } }"
-      : 'Start-Process $env:CB_URL';
-    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"\r\n');
+    const cmd = path.join(os.tmpdir(), 'claude-bridge-browser.cmd');
+    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process $env:CB_URL"\r\n');
     return cmd;
   }
-  const sh = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.sh');
-  const body = mode === 'switch'
-    ? '#!/bin/sh\n' +
-      'open -na "Google Chrome" --args --incognito "$1" 2>/dev/null && exit 0\n' +
-      'open -na "Microsoft Edge" --args --inprivate "$1" 2>/dev/null && exit 0\n' +
-      'open "$1"\n'   // 시크릿 창을 못 열면 기본 브라우저 (로그인은 되게)
-    : '#!/bin/sh\nopen "$1"\n';
-  fs.writeFileSync(sh, body);
+  const sh = path.join(os.tmpdir(), 'claude-bridge-browser.sh');
+  fs.writeFileSync(sh, '#!/bin/sh\nopen "$1"\n');
   fs.chmodSync(sh, 0o755);
   return sh;
 }
@@ -452,7 +443,7 @@ const server = http.createServer(async (req, res) => {
       loginStartedAt = Date.now();
       // BROWSER를 우리 핸들러로 지정 — CLI가 브라우저를 직접 열지 않고 URL만 넘겨준다.
       // 핸들러가 실패하거나 CLI가 BROWSER를 무시해도 CLI가 알아서 기본 브라우저를 열므로 로그인은 된다(fail-soft).
-      const loginEnv = Object.assign({}, CLAUDE_ENV, { BROWSER: writeBrowserHandler(switchMode ? 'switch' : 'normal') });
+      const loginEnv = Object.assign({}, CLAUDE_ENV, { BROWSER: writeBrowserHandler() });
       const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
         shell: true, env: loginEnv, stdio: 'ignore', windowsHide: true,
         detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
