@@ -155,25 +155,30 @@ setInterval(() => {
 
 // 로그인 URL을 기본 브라우저(보통 창)로 여는 BROWSER 핸들러 스크립트를 만든다.
 // claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 authorize URL을 넘긴다(실측 2026-07).
-// mode='switch'(계정 전환) → 로그인 URL을 열기 전에 claude.ai 로그아웃을 먼저 태운다.
-//   이유(실측): 로그인된 상태면 authorize URL이 곧장 승인 화면으로 가 계정을 못 고른다.
-//   로그아웃해 세션을 지우면 authorize가 login?selectAccount=true(계정 선택)로 가 다른 계정을 고를 수 있다.
-//   URL 파라미터(selectAccount=true, prompt=select_account)로는 로그인 상태를 못 뚫는 것도 실측 확인.
+// mode='switch'(계정 전환) → 로그인된 상태면 authorize가 곧장 승인 화면으로 가 계정을 못 고른다(실측,
+//   selectAccount=true·prompt=select_account로도 못 뚫음). 그래서 **한 탭 안에서** 로그아웃→계정선택으로 잇는다:
+//   claude.ai/logout?returnTo=<url-encoded /oauth/authorize?QUERY(상대경로)> 를 열면
+//   로그아웃(세션 지움) → login?selectAccount=true(계정 선택) 로 자동 체이닝된다(실측 확인). 남는 탭이 없다.
+//   (returnTo는 같은 도메인(claude.ai) 상대경로만 따른다 — claude.com 전체 URL은 안 됨.)
 // mode='normal'(만료 재로그인 등) → 로그아웃 없이 그냥 연다(대개 같은 계정이라 세션 유지가 더 빠름).
-const CLAUDE_LOGOUT_URL = 'https://claude.ai/logout';
 function writeBrowserHandler(mode) {
   const logout = mode === 'switch';
   if (process.platform === 'win32') {
     const cmd = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.cmd');
+    // PowerShell로 authorize URL을 logout?returnTo=<상대 /oauth/authorize> 로 변환해 한 탭으로 연다
     const ps = logout
-      ? "Start-Process '" + CLAUDE_LOGOUT_URL + "'; Start-Sleep -Seconds 4; Start-Process $env:CB_URL"
+      ? "$u=$env:CB_URL; $i=$u.IndexOf('oauth/authorize'); if($i -ge 0){ $rel='/'+$u.Substring($i); $enc=[System.Uri]::EscapeDataString($rel); Start-Process ('https://claude.ai/logout?returnTo='+$enc) } else { Start-Process $u }"
       : 'Start-Process $env:CB_URL';
     fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"\r\n');
     return cmd;
   }
   const sh = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.sh');
+  // node로 변환(전 OS에 node 있음 — 다리가 node로 돎). 실패하면 원본 URL을 그냥 연다(fail-soft).
+  const nodeBin = process.execPath;
   const body = logout
-    ? '#!/bin/sh\nopen "' + CLAUDE_LOGOUT_URL + '"\nsleep 4\nopen "$1"\n'   // 로그아웃(세션 지움) → 4초 뒤 로그인
+    ? '#!/bin/sh\n' +
+      'U=$("' + nodeBin + '" -e \'const u=process.argv[1];const i=u.indexOf("oauth/authorize");process.stdout.write(i<0?u:"https://claude.ai/logout?returnTo="+encodeURIComponent("/"+u.slice(i)))\' "$1" 2>/dev/null)\n' +
+      'open "${U:-$1}"\n'
     : '#!/bin/sh\nopen "$1"\n';
   fs.writeFileSync(sh, body);
   fs.chmodSync(sh, 0o755);
