@@ -155,32 +155,18 @@ setInterval(() => {
 
 // 로그인 URL을 기본 브라우저(보통 창)로 여는 BROWSER 핸들러 스크립트를 만든다.
 // claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 authorize URL을 넘긴다(실측 2026-07).
-// mode='switch'(계정 전환) → 로그인된 상태면 authorize가 곧장 승인 화면으로 가 계정을 못 고른다(실측,
-//   selectAccount=true·prompt=select_account로도 못 뚫음). 그래서 **한 탭 안에서** 로그아웃→계정선택으로 잇는다:
-//   claude.ai/logout?returnTo=<url-encoded /oauth/authorize?QUERY(상대경로)> 를 열면
-//   로그아웃(세션 지움) → login?selectAccount=true(계정 선택) 로 자동 체이닝된다(실측 확인). 남는 탭이 없다.
-//   (returnTo는 같은 도메인(claude.ai) 상대경로만 따른다 — claude.com 전체 URL은 안 됨.)
-// mode='normal'(만료 재로그인 등) → 로그아웃 없이 그냥 연다(대개 같은 계정이라 세션 유지가 더 빠름).
+// 로그아웃 강제는 하지 않는다: 로그인된 상태면 authorize가 승인 화면으로 가는데, 그 화면 하단에
+//   [계정 전환] 버튼이 이미 있어(사용자 확인) 다른 계정으로 바꾸는 건 거기서 처리된다.
+//   우리가 claude.ai/logout을 강제로 태우면 브라우저의 웹 로그인까지 풀리는 부작용이 있어 뺐다.
+// mode는 이제 브라우저 여는 방식엔 영향 없음(토스트 문구만 다름) — normal·switch 모두 그냥 authorize URL을 연다.
 function writeBrowserHandler(mode) {
-  const logout = mode === 'switch';
   if (process.platform === 'win32') {
     const cmd = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.cmd');
-    // PowerShell로 authorize URL을 logout?returnTo=<상대 /oauth/authorize> 로 변환해 한 탭으로 연다
-    const ps = logout
-      ? "$u=$env:CB_URL; $i=$u.IndexOf('oauth/authorize'); if($i -ge 0){ $rel='/'+$u.Substring($i); $enc=[System.Uri]::EscapeDataString($rel); Start-Process ('https://claude.ai/logout?returnTo='+$enc) } else { Start-Process $u }"
-      : 'Start-Process $env:CB_URL';
-    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"\r\n');
+    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process $env:CB_URL"\r\n');
     return cmd;
   }
   const sh = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.sh');
-  // node로 변환(전 OS에 node 있음 — 다리가 node로 돎). 실패하면 원본 URL을 그냥 연다(fail-soft).
-  const nodeBin = process.execPath;
-  const body = logout
-    ? '#!/bin/sh\n' +
-      'U=$("' + nodeBin + '" -e \'const u=process.argv[1];const i=u.indexOf("oauth/authorize");process.stdout.write(i<0?u:"https://claude.ai/logout?returnTo="+encodeURIComponent("/"+u.slice(i)))\' "$1" 2>/dev/null)\n' +
-      'open "${U:-$1}"\n'
-    : '#!/bin/sh\nopen "$1"\n';
-  fs.writeFileSync(sh, body);
+  fs.writeFileSync(sh, '#!/bin/sh\nopen "$1"\n');
   fs.chmodSync(sh, 0o755);
   return sh;
 }
