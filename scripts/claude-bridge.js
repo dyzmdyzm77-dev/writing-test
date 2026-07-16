@@ -153,19 +153,29 @@ setInterval(() => {
   }
 }, 5000);
 
-// 로그인 URL을 기본 브라우저로 여는 BROWSER 핸들러 스크립트를 만든다.
-// claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 URL을 넘긴다(실측 2026-07).
-// 시크릿 창은 쓰지 않는다: CLI가 주는 authorize URL(claude.com/cai/oauth/authorize)이 보통 창에서도
-// claude.ai/login?selectAccount=true 로 자동 리다이렉트돼 계정 선택 화면이 뜬다(실측) — 시크릿이 필요 없다.
-// 시크릿은 오히려 매번 새 로그인을 강요하고(비밀번호 재입력) 사내 정책상 막힌 PC도 있어 뺐다.
-function writeBrowserHandler() {
+// 로그인 URL을 기본 브라우저(보통 창)로 여는 BROWSER 핸들러 스크립트를 만든다.
+// claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 authorize URL을 넘긴다(실측 2026-07).
+// mode='switch'(계정 전환) → 로그인 URL을 열기 전에 claude.ai 로그아웃을 먼저 태운다.
+//   이유(실측): 로그인된 상태면 authorize URL이 곧장 승인 화면으로 가 계정을 못 고른다.
+//   로그아웃해 세션을 지우면 authorize가 login?selectAccount=true(계정 선택)로 가 다른 계정을 고를 수 있다.
+//   URL 파라미터(selectAccount=true, prompt=select_account)로는 로그인 상태를 못 뚫는 것도 실측 확인.
+// mode='normal'(만료 재로그인 등) → 로그아웃 없이 그냥 연다(대개 같은 계정이라 세션 유지가 더 빠름).
+const CLAUDE_LOGOUT_URL = 'https://claude.ai/logout';
+function writeBrowserHandler(mode) {
+  const logout = mode === 'switch';
   if (process.platform === 'win32') {
-    const cmd = path.join(os.tmpdir(), 'claude-bridge-browser.cmd');
-    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process $env:CB_URL"\r\n');
+    const cmd = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.cmd');
+    const ps = logout
+      ? "Start-Process '" + CLAUDE_LOGOUT_URL + "'; Start-Sleep -Seconds 4; Start-Process $env:CB_URL"
+      : 'Start-Process $env:CB_URL';
+    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"\r\n');
     return cmd;
   }
-  const sh = path.join(os.tmpdir(), 'claude-bridge-browser.sh');
-  fs.writeFileSync(sh, '#!/bin/sh\nopen "$1"\n');
+  const sh = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.sh');
+  const body = logout
+    ? '#!/bin/sh\nopen "' + CLAUDE_LOGOUT_URL + '"\nsleep 4\nopen "$1"\n'   // 로그아웃(세션 지움) → 4초 뒤 로그인
+    : '#!/bin/sh\nopen "$1"\n';
+  fs.writeFileSync(sh, body);
   fs.chmodSync(sh, 0o755);
   return sh;
 }
@@ -443,7 +453,7 @@ const server = http.createServer(async (req, res) => {
       loginStartedAt = Date.now();
       // BROWSER를 우리 핸들러로 지정 — CLI가 브라우저를 직접 열지 않고 URL만 넘겨준다.
       // 핸들러가 실패하거나 CLI가 BROWSER를 무시해도 CLI가 알아서 기본 브라우저를 열므로 로그인은 된다(fail-soft).
-      const loginEnv = Object.assign({}, CLAUDE_ENV, { BROWSER: writeBrowserHandler() });
+      const loginEnv = Object.assign({}, CLAUDE_ENV, { BROWSER: writeBrowserHandler(switchMode ? 'switch' : 'normal') });
       const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
         shell: true, env: loginEnv, stdio: 'ignore', windowsHide: true,
         detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
