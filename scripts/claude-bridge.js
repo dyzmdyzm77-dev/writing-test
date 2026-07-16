@@ -28,6 +28,10 @@ const CLAUDE_ENV = Object.assign({}, process.env, {
 });
 
 const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스트용 (평소엔 11888 고정)
+// 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
+// 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
+// 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
+const BRIDGE_V = 3;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -381,7 +385,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     retryAuthIfNeeded(); // 로그인 필요 상태면 재확인 시도 — 재로그인이 끝났으면 다음 조회부터 problem이 풀린다
     return json(res, 200, {
-      ok: true, engine: 'claude', model: currentModel, models: ALLOWED_MODELS, examples: EXAMPLES.length, ready: warmedUp,
+      ok: true, engine: 'claude', v: BRIDGE_V, dir: __dirname, // v·dir: 구버전/엉뚱한 사본이 떠 있는지 진단용
+      model: currentModel, models: ALLOWED_MODELS, examples: EXAMPLES.length, ready: warmedUp,
       problem: (claudeStatus === 'ok' || claudeStatus === null) ? null : claudeStatus,
       account: claudeAccount(),
       served: stats.served, lastAt: stats.lastAt, lastText: stats.lastText, lastSec: stats.lastSec,

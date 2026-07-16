@@ -1637,7 +1637,9 @@
             if (bs.alive && bridgeWakePoll) {
               // 방금 켜짐 — 폴링 종료 + 알림. 단 Claude Code가 없으면 켜져도 추천이 안 되니 그걸 안내.
               stopBridgeWakePoll();
-              if (bs.problem === 'claude-missing') {
+              if (bs.problem === 'bridge-old') {
+                showToast('옛 버전 클로드가 켜져 있어요 — [업데이트 필요] 버튼을 누르면 새 버전으로 다시 켜드려요.');
+              } else if (bs.problem === 'claude-missing') {
                 showToast('다리는 켜졌지만 Claude Code가 없어요. 터미널에서 claude --version 이 되는지(설치·로그인) 확인해 주세요.');
               } else if (bs.problem === 'claude-logout') {
                 showToast('다리는 켜졌지만 클로드 로그인이 필요해요(안 됐거나 만료) — [클로드 로그인 필요] 버튼을 누르면 로그인 창을 열어드려요.');
@@ -1649,18 +1651,21 @@
             if (bs.alive) installOffer = false; // 켜졌으면(설치 파일 실행 완료 등) 설치 제안 해제
             if (!bridgeWakePoll && !installOffer) {
               // 켜져 있어도 로그인 만료·claude 없음이면 초록 대신 주황으로 조치를 안내한다
-              const bridgeWarn = !!bs.alive && (bs.problem === 'claude-logout' || bs.problem === 'claude-missing');
+              const bridgeWarn = !!bs.alive && (bs.problem === 'bridge-old' || bs.problem === 'claude-logout' || bs.problem === 'claude-missing');
               // 누구 계정으로 도는지 버튼에 표시 — 공용 PC에서 남의 구독을 모르고 쓰는 일 방지.
               // 라벨엔 @ 앞부분만(길이), 전체 이메일은 툴팁(title)에.
               const acctShort = bs.account ? String(bs.account).split('@')[0] : '';
               bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive && !bridgeWarn);
               bridgeWakeBtn.classList.toggle('bridge-warn', bridgeWarn);
               bridgeWakeBtn.textContent = !bs.alive ? '⚫ 클로드 꺼짐'
+                : bs.problem === 'bridge-old' ? '🟠 업데이트 필요'
                 : bs.problem === 'claude-logout' ? '🟠 클로드 로그인 필요'
                 : bs.problem === 'claude-missing' ? '🟠 클로드 설치 필요'
                 : (acctShort ? '🟢 클로드 켜짐 · ' + acctShort : '🟢 클로드 켜짐');
               bridgeWakeBtn.title = !bs.alive
                 ? '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (처음이면 설치 파일 안내가 떠요)'
+                : bs.problem === 'bridge-old'
+                ? '옛 버전 클로드가 켜져 있어요 — 누르면 새 버전으로 다시 켜드려요.'
                 : bs.problem === 'claude-logout'
                 ? (bs.account ? '클로드 로그인(' + bs.account + ')이 만료됐어요 — 누르면 로그인 창을 열어드려요.' : '클로드 로그인이 필요해요(안 됐거나 만료) — 누르면 로그인 창을 열어드려요.')
                 : bs.problem === 'claude-missing'
@@ -2387,7 +2392,10 @@
             return;
           }
           if (bridgeWakeBtn.classList.contains('bridge-warn')) {
-            if (bridgeProblem === 'claude-logout') {
+            if (bridgeProblem === 'bridge-old') {
+              // 옛 코드로 떠 있는 다리 — 껐다 새 코드로 켠다 (pull·복사만으론 갱신 안 되므로)
+              parent.postMessage({ pluginMessage: { type: 'RESTART_BRIDGE' } }, '*');
+            } else if (bridgeProblem === 'claude-logout') {
               // 로그인 필요 — 다리가 claude 터미널을 대신 열어준다 (브라우저 로그인만 본인이)
               openClaudeLogin();
             } else {
