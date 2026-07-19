@@ -1,5 +1,0 @@
-# Cloudflare 워커 배포 설정 — 터미널에서 `npx wrangler deploy`로 배포
-# (이름이 기존 워커 "writingtest"와 같아야 그 워커가 업데이트된다)
-name = "writingtest"
-main = "worker.js"
-compatibility_date = "2026-07-01"

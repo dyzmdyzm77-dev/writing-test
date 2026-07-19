@@ -2,7 +2,8 @@
 node_modules/
 
 # Build output
-code.js
+# code.js는 빌드 산출물이지만 일부러 커밋한다 — 회사 PC↔맥을 git으로 오갈 때
+# pull 직후 빌드 없이 플러그인이 바로 돌아야 하기 때문 (npm 없는 PC 폴백도 동일)
 out/
 dist/
 

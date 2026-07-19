@@ -160,7 +160,8 @@ const psScript = [
   "$dir = Join-Path $env:LOCALAPPDATA 'ClaudeBridge'",
   "New-Item -ItemType Directory -Force -Path (Join-Path $dir 'scripts') | Out-Null",
   "[IO.File]::WriteAllBytes((Join-Path $dir 'scripts\\claude-bridge.js'), (Part 'BRIDGE' 'EXAMPLES'))",
-  "[IO.File]::WriteAllBytes((Join-Path $dir 'recommend-examples.md'), (Part 'EXAMPLES' 'LAUNCHER'))",
+  "[IO.File]::WriteAllBytes((Join-Path $dir 'recommend-examples.md'), (Part 'EXAMPLES' 'GUIDE'))",
+  "[IO.File]::WriteAllBytes((Join-Path $dir 'ux-writing.md'), (Part 'GUIDE' 'LAUNCHER'))",
   "$launcher = Join-Path $dir 'claude-bridge-silent.vbs'",
   "[IO.File]::WriteAllBytes($launcher, (Part 'LAUNCHER' 'WATCHER'))",
   "[IO.File]::WriteAllBytes((Join-Path $dir 'scripts\\bridge-watcher.js'), (Part 'WATCHER' 'WSILENT'))",
@@ -204,6 +205,8 @@ const batContent = [
   b64lines(bridgeBytes),
   '::EXAMPLES::',
   b64lines(Buffer.from(recMd, 'utf8')),
+  '::GUIDE::', // 다리 loadGuide()가 읽는 스타일 가이드 전문 — 프롬프트에 포함됨
+  b64lines(fs.readFileSync(path.join(root, 'ux-writing.md'))),
   '::LAUNCHER::',
   b64lines(launcherBytes),
   '::WATCHER::',
@@ -227,32 +230,24 @@ src = src.replace(reInst, instGen);
 
 fs.writeFileSync(tsPath, src, 'utf8');
 
-// 워커(worker.js)의 RECOMMEND 마커에도 같은 예시를 주입 — AI 추천 프롬프트의 few-shot으로 쓰인다
-const workerPath = path.join(root, 'naver-passport-proxy', 'worker.js');
-if (fs.existsSync(workerPath)) {
-  const workerGen = [
-    '// ===== RECOMMEND:BEGIN — 자동 생성 영역. 직접 수정하지 말고 recommend-examples.md를 고친 뒤 npm run build =====',
-    'const RECOMMEND_EXAMPLES = [',
-    ...validExamples.map((e) => `  { input: ${JSON.stringify(e.input)}, suggestions: ${JSON.stringify(e.suggestions)} },`),
-    '];',
-    '// ===== RECOMMEND:END =====',
-  ].join('\n');
-  let workerSrc = fs.readFileSync(workerPath, 'utf8');
-  if (reRec.test(workerSrc)) {
-    fs.writeFileSync(workerPath, workerSrc.replace(reRec, workerGen), 'utf8');
-  }
-
-  // Vercel 제보 앱(ux-writing-reports)의 api/recommend.js에도 주입 — 현재 실서버 (옆 폴더에 클론돼 있을 때만).
-  // 주입 후 그쪽 저장소에서 커밋+푸시해야 Vercel에 배포된다.
-  const vercelRecPath = path.join(root, '..', 'ux-writing-reports', 'api', 'recommend.js');
-  if (fs.existsSync(vercelRecPath)) {
-    const vercelSrc = fs.readFileSync(vercelRecPath, 'utf8');
-    if (reRec.test(vercelSrc)) {
-      fs.writeFileSync(vercelRecPath, vercelSrc.replace(reRec, workerGen), 'utf8');
-      console.log('[recommend] ux-writing-reports/api/recommend.js에도 반영 — 그쪽 저장소에서 커밋+푸시 필요');
-    }
+// Vercel 제보 앱(ux-writing-reports)의 api/recommend.js에도 같은 예시를 주입 — 현재 실서버 (옆 폴더에 클론돼 있을 때만).
+// 주입 후 그쪽 저장소에서 커밋+푸시해야 Vercel에 배포된다.
+// (구 Cloudflare 워커(naver-passport-proxy) 주입은 2026-07 워커 삭제와 함께 제거 — git 히스토리에서 복구 가능)
+const serverRecGen = [
+  '// ===== RECOMMEND:BEGIN — 자동 생성 영역. 직접 수정하지 말고 recommend-examples.md를 고친 뒤 npm run build =====',
+  'const RECOMMEND_EXAMPLES = [',
+  ...validExamples.map((e) => `  { input: ${JSON.stringify(e.input)}, suggestions: ${JSON.stringify(e.suggestions)} },`),
+  '];',
+  '// ===== RECOMMEND:END =====',
+].join('\n');
+const vercelRecPath = path.join(root, '..', 'ux-writing-reports', 'api', 'recommend.js');
+if (fs.existsSync(vercelRecPath)) {
+  const vercelSrc = fs.readFileSync(vercelRecPath, 'utf8');
+  if (reRec.test(vercelSrc)) {
+    fs.writeFileSync(vercelRecPath, vercelSrc.replace(reRec, serverRecGen), 'utf8');
+    console.log('[recommend] ux-writing-reports/api/recommend.js에도 반영 — 그쪽 저장소에서 커밋+푸시 필요');
   }
 }
 
 console.log(`[glossary] 용어 ${terms.length}건, 권장 문구 ${phrases.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건, 예외 표기 ${keepSpellings.length}건 반영`);
-console.log(`[recommend] 추천 예시 ${validExamples.length}건 반영 (code.ts + worker.js)`);
+console.log(`[recommend] 추천 예시 ${validExamples.length}건 반영 (code.ts)`);
