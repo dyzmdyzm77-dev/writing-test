@@ -591,10 +591,10 @@
         width: 100%;
         max-width: 300px;
         background: #fff;
-        border-radius: 12px;
+        border-radius: 8px;
         padding: 20px;
         box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
-        text-align: center;
+        text-align: left;
       }
       .modal-title { font-size: 15px; font-weight: 700; color: #1D1D1D; }
       .modal-account {
@@ -606,13 +606,19 @@
       }
       .modal-desc { margin-top: 6px; font-size: 13px; color: #555; line-height: 1.5; }
       .modal-actions { display: flex; gap: 8px; margin-top: 18px; }
-      /* 전역 button 규칙(width:100%, height:48px !important) 되돌리기 */
+      /* 전역 button 규칙(width:100%, height:48px !important, display:block) 되돌리기.
+         display:inline-flex + line-height:1 이 없으면 라벨이 위아래 가운데에 안 맞는다 */
       .modal-actions .modal-btn {
         flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
         width: auto;
         height: 38px !important;
         min-width: 0;
-        border-radius: 8px;
+        padding: 0 8px;
+        border-radius: 4px;
         font-size: 13px;
         font-weight: 600;
         cursor: pointer;
