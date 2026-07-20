@@ -588,8 +588,9 @@
       }
       .modal-overlay.active { display: flex; }
       .modal-box {
-        width: 100%;
-        max-width: 300px;
+        width: 300px;
+        box-sizing: border-box; /* 패딩 포함 300 — 없으면 300+패딩40=340이 된다 */
+        flex-shrink: 0;         /* 오버레이가 flex라 좁은 창에서 줄어드는 것 방지 */
         background: #fff;
         border-radius: 8px;
         padding: 20px;
@@ -615,7 +616,7 @@
         justify-content: center;
         line-height: 1;
         width: auto;
-        height: 38px !important;
+        height: 50px !important;
         min-width: 0;
         padding: 0 8px;
         border-radius: 4px;
