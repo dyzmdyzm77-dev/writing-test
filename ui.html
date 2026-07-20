@@ -5,7 +5,8 @@
     <style>
       body {
         margin: 0; /* 브라우저 기본 마진(8px) 제거 — 고정 헤더(검토하기 버튼)와 좌우 정렬 맞춤 */
-        font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        /* 플러그인 전체 폰트는 프리텐다드. 뒤는 미설치 PC용 폴백(전엔 body가 시스템 폰트라 button만 Pretendard였음) */
+        font: 12px 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         padding: 20px;
         padding-top: 150px; /* 고정 헤더 높이만큼 확보 (JS가 실제 높이로 재조정) */
         background: #FFFFFF;
@@ -620,8 +621,9 @@
         min-width: 0;
         padding: 0 8px;
         border-radius: 4px;
-        font-size: 13px;
-        font-weight: 600;
+        font-family: 'Pretendard', sans-serif;
+        font-size: 16px;
+        font-weight: 500; /* Medium */
         cursor: pointer;
       }
       .modal-btn-ghost { background: #fff; border: 1px solid #D9D9D9; color: #555; }
