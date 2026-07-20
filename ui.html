@@ -1757,8 +1757,9 @@
           bridgeProblem = bs.problem || null;
           // 계정 확인이 필요하면 배너 표시, 확인됐거나 계정 정보가 없으면 숨김
           if (bs.needConfirm && bs.account) showAccountConfirm(bs.account); else hideAccountConfirm();
-          // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내
-          if (bridgeStopping) {
+          // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내.
+          // 주기 갱신(periodic)은 제외 — 끄는 도중 주기 응답이 먼저 오면 "끄지 못했어요"가 잘못 뜬다.
+          if (bridgeStopping && !bs.periodic) {
             bridgeStopping = false;
             if (bridgeWakeBtn) bridgeWakeBtn.disabled = false;
             showToast(bs.alive ? '클로드를 끄지 못했어요 — 다리가 아직 응답해요.' : '클로드를 껐어요. 다시 켜려면 이 버튼을 누르세요.');
@@ -1766,8 +1767,9 @@
           if (bridgeWakeBtn) {
             // 버튼은 항상 보이고 상태를 색·글자로 표시한다.
             // 켜짐(초록) "클로드 켜짐" — 추천받기 누르면 자동으로 클로드가 답함 / 꺼짐(회색) "클로드 꺼짐" — 눌러서 켜기
-            if (bs.alive && bridgeWakePoll) {
+            if (bs.alive && bridgeWakePoll && !bs.periodic) {
               // 방금 켜짐 — 폴링 종료 + 알림. 단 Claude Code가 없으면 켜져도 추천이 안 되니 그걸 안내.
+              // (주기 갱신은 제외 — 켜기 폴링이 자체 조회로 잡으므로 토스트가 두 번 뜨지 않게)
               stopBridgeWakePoll();
               if (bs.problem === 'bridge-old') {
                 showToast('옛 버전 클로드가 켜져 있어요 — [업데이트 필요] 버튼을 누르면 새 버전으로 다시 켜드려요.');

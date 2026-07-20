@@ -1393,9 +1393,10 @@ function needsAccountConfirm(h) {
 }
 // 다리 상태를 다시 조회해 UI 버튼에 반영 — AI 호출 실패 직후 호출해서
 // 로그인 만료(claude-logout) 같은 problem이 [클로드 켜짐] 표시를 바로 갱신하게 한다.
-function refreshBridgeStatus() {
+function refreshBridgeStatus(periodic) {
     bridgeHealth().then((h) => {
-        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem, account: h.account, needConfirm: needsAccountConfirm(h) });
+        // periodic=true(주기 갱신)이면 UI가 일회성 토스트(껐어요/켜졌어요)를 건너뛰고 라벨만 갱신한다
+        figma.ui.postMessage({ type: 'bridge-status', alive: h.alive, ready: h.ready, model: h.model, problem: h.problem, account: h.account, needConfirm: needsAccountConfirm(h), periodic: !!periodic });
     });
 }
 // 클로드다리 설치 파일 — 다리+예시+런처를 내장한 자기완결 bat. UI의 [🔧 설치 파일 받기]가 다운로드로 내려준다.
@@ -1409,7 +1410,9 @@ function sendHeartbeat() {
     postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/heartbeat', {}, 3000).catch(() => { });
 }
 sendHeartbeat();
-setInterval(sendHeartbeat, 5000);
+// 박동과 함께 다리 상태도 주기적으로 갱신한다 — 안 하면 백그라운드에서 다리가 꺼지거나 켜져도
+// 버튼 라벨이 옛 상태로 남는다(화면 진입·버튼 클릭 때만 조회했음). /health는 로컬 호출이라 비용 무시 가능.
+setInterval(() => { sendHeartbeat(); refreshBridgeStatus(true); }, 5000);
 // 타임아웃 있는 fetch — 한 요청이 멈춰도 그 슬롯이 영원히 막히지 않게 한다.
 // Figma 플러그인 런타임엔 AbortController가 없어 Promise.race로 구현 (느린 fetch는 버려지고 슬롯만 푼다).
 function fetchWithTimeout(url, ms) {
