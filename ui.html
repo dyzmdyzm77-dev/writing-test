@@ -915,6 +915,8 @@
         cursor: pointer;
       }
       .home-account-bar .hab-btn:hover { border-color: #1D6CEB; color: #1D6CEB; }
+      .home-account-bar .hab-btn-ghost { color: #999; }
+      .home-account-bar .hab-btn-ghost:hover { border-color: #D64545; color: #D64545; }
       /* 계정 확인 배너 — 이 PC의 클로드 계정을 처음 쓸 때(또는 계정이 바뀌면) 본인 확인 */
       .account-confirm-bar {
         display: flex;
@@ -1070,6 +1072,7 @@
       <div id="homeAccountBar" class="home-account-bar">
         <span class="hab-dot"></span>
         <span class="hab-text" id="homeAccountText">클로드 계정 확인 중…</span>
+        <button id="homeLogoutBtn" class="hab-btn hab-btn-ghost" type="button">로그아웃</button>
         <button id="homeAccountBtn" class="hab-btn" type="button">계정 전환</button>
       </div>
       <button class="home-card" data-go="review">
@@ -1644,6 +1647,14 @@
             canAskAi: !!recMsg.canAskAi,   // 사전 답안 카드 밑에 [AI 추천 더 받기] 버튼 노출
           });
           if (recOrig) setRecommendCompact(true, recOrig); // 결과가 오면 헤더를 컴팩트 모드로
+        }
+
+        // 로그아웃 결과 — 버튼 원복하고 계정 상태 다시 조회(성공하면 '로그인 없음'으로 바뀜)
+        if (event.data.pluginMessage.type === 'logout-result') {
+          const btn = document.getElementById('homeLogoutBtn');
+          if (btn) { btn.disabled = false; btn.textContent = '로그아웃'; }
+          showToast(event.data.pluginMessage.ok ? '로그아웃했어요. AI 추천·번역을 쓰려면 다시 로그인하세요.' : ('로그아웃 실패: ' + (event.data.pluginMessage.error || '잠시 후 다시 시도해주세요.')));
+          requestAccountInfo();
         }
 
         // 이 PC의 클로드 계정 정보 (감시자가 알려준 것 — 클로드는 안 켜짐)
@@ -2495,6 +2506,9 @@
         const bar = document.getElementById('homeAccountBar');
         const barText = document.getElementById('homeAccountText');
         const barBtn = document.getElementById('homeAccountBtn');
+        const logoutBtn = document.getElementById('homeLogoutBtn');
+        // 로그아웃 버튼은 로그인된 계정이 있을 때만 보인다
+        if (logoutBtn) logoutBtn.style.display = knownAccount ? '' : 'none';
         if (knownAccount) {
           if (stateEl) stateEl.textContent = '이 PC에 로그인된 클로드 계정';
           if (emailEl) emailEl.textContent = knownAccount;
@@ -2556,6 +2570,23 @@
         startAccountWatch();
       };
       document.getElementById('homeAccountBtn').onclick = () => { showView('account'); };
+      // 로그아웃 — 이 PC의 클로드 CLI 로그인을 해제한다(claude auth logout). 다리가 대신 실행.
+      // 확인 한 번 받고 진행(되돌리려면 다시 로그인해야 하므로). 끝나면 계정 상태를 다시 조회.
+      let logoutConfirming = false;
+      document.getElementById('homeLogoutBtn').onclick = () => {
+        const btn = document.getElementById('homeLogoutBtn');
+        if (!knownAccount) { showToast('로그아웃할 클로드 계정이 없어요.'); return; }
+        if (!logoutConfirming) {
+          logoutConfirming = true;
+          btn.textContent = '정말 로그아웃?';
+          setTimeout(() => { if (logoutConfirming) { logoutConfirming = false; btn.textContent = '로그아웃'; } }, 4000);
+          return;
+        }
+        logoutConfirming = false;
+        btn.textContent = '로그아웃 중…';
+        btn.disabled = true;
+        parent.postMessage({ pluginMessage: { type: 'LOGOUT_CLAUDE' } }, '*');
+      };
       // 로그인 후 계정이 바뀌는지 잠시 지켜본다 (감시자 캐시가 30초라 넉넉히)
       let accountWatchTimer = null;
       function startAccountWatch() {
