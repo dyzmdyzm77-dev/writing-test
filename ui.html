@@ -2569,7 +2569,12 @@
         openClaudeLogin(!!knownAccount);
         startAccountWatch();
       };
-      document.getElementById('homeAccountBtn').onclick = () => { showView('account'); };
+      // 홈의 [계정 전환]/[로그인] — 계정 확인 화면을 거치지 않고 브라우저 로그인을 바로 연다
+      // (계정 화면 안의 버튼·🔑 버튼과 동일하게 통일). knownAccount 있으면 전환, 없으면 로그인.
+      document.getElementById('homeAccountBtn').onclick = () => {
+        openClaudeLogin(!!knownAccount);
+        startAccountWatch();
+      };
       // 로그아웃 — 이 PC의 클로드 CLI 로그인을 해제한다(claude auth logout). 다리가 대신 실행.
       // 확인 한 번 받고 진행(되돌리려면 다시 로그인해야 하므로). 끝나면 계정 상태를 다시 조회.
       let logoutConfirming = false;
