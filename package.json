@@ -1,7 +1,7 @@
 {
   "name": "s1-ux-writing-assistant",
   "version": "1.0.0",
-  "description": "S1 UX Writing Assistant (Figma Plugin)",
+  "description": "S-1 S/W UX Writing Assistant (Figma Plugin)",
   "main": "code.js",
   "scripts": {
     "build": "node scripts/build-glossary.js && node scripts/register-protocol.js && tsc -p tsconfig.json",
