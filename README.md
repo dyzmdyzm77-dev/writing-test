@@ -104,7 +104,7 @@ npm run lint    # ESLint 검사
 
 ### "네이버 맞춤법 미작동" 토스트가 뜨는 경우
 - 네이버가 비공식 API 구조를 바꿨을 수 있습니다 (이 경우 로컬 규칙만 동작)
-- 사내망이라면 Vercel(`report-admin-weld.vercel.app`) 접근이 차단되지 않았는지 확인하세요
+- 사내망이라면 Vercel(`report-admin-amber.vercel.app`) 접근이 차단되지 않았는지 확인하세요
 
 ### 추천·번역이 안 되는 경우
 - [클로드] 버튼이 ⚫ 꺼짐이면 눌러서 켜세요 (감시자가 죽어 있으면 `npm run build` 한 번으로 재등록)

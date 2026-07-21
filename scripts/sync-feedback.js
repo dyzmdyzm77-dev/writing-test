@@ -2,7 +2,7 @@
 // 사용: npm run sync-feedback  (또는 node scripts/sync-feedback.js)
 //
 // 무엇을 하나:
-//   1) https://report-admin-weld.vercel.app/api/list 에서 전체 항목을 가져온다
+//   1) https://report-admin-amber.vercel.app/api/list 에서 전체 항목을 가져온다
 //   2) reason === '추천 좋아요' → 좋아요한 추천 (code.ts LIKE_SUGGESTION이 보낸 것)
 //      그 외                    → 오수정 제보 (잘못된 수정안 신고)
 //   3) 좋아요는 recommend-examples.md에 이미 있는 예시와 중복 제거 후,
@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const LIST_URL = 'https://report-admin-weld.vercel.app/api/list';
+const LIST_URL = 'https://report-admin-amber.vercel.app/api/list';
 const LIKE_MARKER = '추천 좋아요'; // code.ts LIKE_SUGGESTION의 reason 값과 같아야 한다
 const OUT_PATH = path.join(root, 'feedback-candidates.md');
 const EXAMPLES_PATH = path.join(root, 'recommend-examples.md');

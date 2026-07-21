@@ -1413,12 +1413,12 @@ let naverOkCount = 0; // 이번 검토에서 SpellerProxy 정상 응답 건수
 // 제보 앱과 같은 Vercel(ux-writing-reports)로 이사함 — 2026-07. 구 워커 코드는 삭제됨(git 히스토리에서 복구 가능).
 // 경로: GET {URL}passport / POST {URL}recommend / POST {URL}translate
 // ↓ 주소를 바꾸면 manifest.json allowedDomains에도 같은 도메인 추가할 것.
-const NAVER_PROXY_URL = 'https://report-admin-weld.vercel.app/api/';
+const NAVER_PROXY_URL = 'https://report-admin-amber.vercel.app/api/';
 
 // 오수정 제보 저장/열람은 별도 Vercel 앱(ux-writing-reports)에서 처리한다.
-// 저장 API: POST /api/report, 관리자 페이지: https://report-admin-weld.vercel.app/
+// 저장 API: POST /api/report, 관리자 페이지: https://report-admin-amber.vercel.app/
 // (manifest.json allowedDomains에도 이 도메인 추가)
-const REPORT_URL = 'https://report-admin-weld.vercel.app/api/report';
+const REPORT_URL = 'https://report-admin-amber.vercel.app/api/report';
 
 // ── 클로드 다리 (같은 PC의 Claude Code 브리지 — scripts/claude-bridge.js) ──
 // `npm run bridge`로 켜두면 Gemini 키 없이도 클로드가 AI 추천을 만든다.
