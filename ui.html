@@ -2553,12 +2553,21 @@
       // 첫 화면 결정 — 두 정보(로그인된 계정 / 확인된 계정)가 다 와야 판단할 수 있다
       let firstScreenDecided = false;
       function decideFirstScreen() {
-        if (firstScreenDecided || !accountInfoSeen || !confirmedSeen) return;
-        firstScreenDecided = true;
-        // 최초 화면 = 로그인 안 됐을 때만 로그인 화면. 로그인돼 있으면 바로 홈으로.
-        // (로그인은 됐지만 아직 확인 안 한 계정은 홈으로 보내되, 추천·번역 쓸 때 확인 배너로 막는다.)
-        if (knownAccount) showView('home');
-        else showView('account');
+        if (!accountInfoSeen || !confirmedSeen) return;
+        if (!firstScreenDecided) {
+          firstScreenDecided = true;
+          // 최초 화면 = 로그인 안 됐을 때만 로그인 화면. 로그인돼 있으면 바로 홈으로.
+          // (로그인은 됐지만 아직 확인 안 한 계정은 홈으로 보내되, 추천·번역 쓸 때 확인 배너로 막는다.)
+          if (knownAccount) showView('home');
+          else showView('account');
+          return;
+        }
+        // 첫 화면을 정한 뒤에도, 로그인 화면에 머무는 중 로그인이 끝나면 홈으로 넘어간다.
+        // (이게 없으면 로그인해도 로그인 화면 그대로 — firstScreenDecided에 막혀 전환이 안 됨)
+        if (currentView === 'account' && knownAccount) {
+          showView('home');
+          showToast(knownAccount + ' 계정으로 로그인했어요.');
+        }
       }
       // 계정 화면·홈 줄 그리기
       function renderAccountViews() {

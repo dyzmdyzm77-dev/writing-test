@@ -30,9 +30,10 @@ function json(res, status, obj) {
 // claude CLI가 있는지 — 없으면 /wake 응답에 실어 플러그인이 안내할 수 있게 한다
 // 로그인된 계정 읽기 — CLI가 ~/.claude.json에 기록하는 oauthAccount.emailAddress (다리의 claudeAccount와 같은 출처).
 // 파일이 클 수 있어 30초 캐시. 재로그인하면 CLI가 파일을 갱신하므로 자동 반영된다.
+// 캐시 5초 — 로그인 직후 새 계정이 곧바로 잡혀야 플러그인이 로그인 화면에서 홈으로 넘어간다(30초면 너무 늦음)
 let accountCache = { at: 0, email: null };
 function claudeAccount() {
-  if (Date.now() - accountCache.at < 30000) return accountCache.email;
+  if (Date.now() - accountCache.at < 5000) return accountCache.email;
   let email = null;
   try {
     const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
