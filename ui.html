@@ -2635,9 +2635,11 @@
         if (switchBtn) switchBtn.textContent = '클로드 로그인'; // 이 화면은 로그인 안 됐을 때만 뜬다
       }
       document.getElementById('accountSwitch').onclick = () => {
-        // 이미 로그인된 계정이 있으면 '전환'(로그아웃 후 계정 선택), 없으면 그냥 로그인.
+        // 로그인 화면의 [클로드 로그인] — 항상 '계정 선택'(로그아웃 후 selectAccount)으로 연다.
+        // 일반 로그인(switch=false)이면 브라우저에 이미 로그인된 계정이 있을 때 승인 화면으로 직행해
+        // 계정을 못 고른다(실측). 계정을 골라 로그인하려는 화면이므로 switch=true로 고정.
         // 다리 깨우기는 code.ts의 OPEN_CLAUDE_LOGIN이 알아서 한다(꺼져 있으면 감시자로 깨우고 재시도).
-        openClaudeLogin(!!knownAccount);
+        openClaudeLogin(true);
         startAccountWatch();
       };
       // 홈의 [계정 전환]/[로그인] — 계정 확인 화면을 거치지 않고 브라우저 로그인을 바로 연다
