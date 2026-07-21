@@ -1107,8 +1107,8 @@
     <!-- 계정 화면: 플러그인을 켜면 맨 처음 보이는 화면 (확인된 계정이면 건너뛰고 홈으로).
          여기서 보여주는 계정은 감시자가 파일만 읽어 알려준 것 — 클로드를 켜지 않으므로 사용량이 안 나간다. -->
     <div id="accountView">
-      <div class="title">클로드 계정 확인</div>
-      <div class="hint">AI 추천·번역은 이 PC에 로그인된 클로드 계정으로 동작해요.</div>
+      <div class="title">클로드 로그인</div>
+      <div class="hint">AI 추천·번역을 쓰려면 클로드 로그인이 필요해요. 검토 기능은 로그인 없이도 쓸 수 있어요.</div>
       <div id="accountCard" class="account-card">
         <div class="ac-state" id="accountState">계정을 확인하는 중…</div>
         <div class="ac-email" id="accountEmail"></div>
@@ -2562,8 +2562,9 @@
       function decideFirstScreen() {
         if (firstScreenDecided || !accountInfoSeen || !confirmedSeen) return;
         firstScreenDecided = true;
-        // 이미 확인한 계정 그대로면 굳이 관문을 세우지 않는다 (매번 물으면 성가시다)
-        if (knownAccount && knownAccount === confirmedAccount) showView('home');
+        // 최초 화면 = 로그인 안 됐을 때만 로그인 화면. 로그인돼 있으면 바로 홈으로.
+        // (로그인은 됐지만 아직 확인 안 한 계정은 홈으로 보내되, 추천·번역 쓸 때 확인 배너로 막는다.)
+        if (knownAccount) showView('home');
         else showView('account');
       }
       // 계정 화면·홈 줄 그리기
@@ -2579,6 +2580,8 @@
         const logoutBtn = document.getElementById('homeLogoutBtn');
         // 로그아웃 버튼은 로그인된 계정이 있을 때만 보인다
         if (logoutBtn) logoutBtn.style.display = knownAccount ? '' : 'none';
+        // [이 계정으로 시작]은 계정이 있을 때만 의미가 있다 — 없으면 숨겨 로그인 버튼만 남긴다
+        if (useBtn) useBtn.style.display = knownAccount ? '' : 'none';
         if (knownAccount) {
           if (stateEl) stateEl.textContent = '이 PC에 로그인된 클로드 계정';
           if (emailEl) emailEl.textContent = knownAccount;
