@@ -1223,6 +1223,19 @@
       </div>
     </div>
 
+    <!-- 계정 확인 팝업 — 로그인이 끝나면 "이 계정으로 쓸까요?"를 팝업으로 확인받는다 -->
+    <div id="confirmAccountModal" class="modal-overlay">
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmAccountTitle">
+        <div class="modal-title" id="confirmAccountTitle">클로드 계정 확인</div>
+        <div class="modal-account" id="confirmAccountEmail"></div>
+        <div class="modal-desc">이 계정으로 AI 추천·번역을 쓸까요?<br>사용량이 이 계정 구독에서 차감돼요.</div>
+        <div class="modal-actions">
+          <button id="confirmAccountNo" class="modal-btn modal-btn-ghost" type="button">다른 계정</button>
+          <button id="confirmAccountYes" class="modal-btn modal-btn-primary" type="button">네</button>
+        </div>
+      </div>
+    </div>
+
     <div id="previewSection" class="preview-section">
       <div id="previewList"></div>
     </div>
@@ -2565,8 +2578,7 @@
         if (!firstScreenDecided) {
           firstScreenDecided = true;
           // 최초 화면 = 로그인 안 됐을 때만 로그인 화면. 로그인돼 있으면 바로 홈으로.
-          // (로그인은 됐지만 아직 확인 안 한 계정은 홈으로 보내되, 추천·번역 쓸 때 확인 배너로 막는다.)
-          if (knownAccount) showView('home');
+          if (knownAccount) { showView('home'); maybeAskConfirmAccount(); }
           else showView('account');
           return;
         }
@@ -2574,8 +2586,11 @@
         // (이게 없으면 로그인해도 로그인 화면 그대로 — firstScreenDecided에 막혀 전환이 안 됨)
         if (currentView === 'account' && knownAccount) {
           showView('home');
-          showToast(knownAccount + ' 계정으로 로그인했어요.');
+          maybeAskConfirmAccount(); // 로그인 완료 → "이 계정으로 쓸까요?" 팝업
+          return;
         }
+        // 계정이 바뀌었는데(다른 계정으로 로그인) 아직 확인 전이면 팝업으로 확인받는다
+        maybeAskConfirmAccount();
       }
       // 계정 화면·홈 줄 그리기
       function renderAccountViews() {
@@ -2669,6 +2684,41 @@
         if (btn) { btn.textContent = '로그아웃 중…'; btn.disabled = true; }
         parent.postMessage({ pluginMessage: { type: 'LOGOUT_CLAUDE' } }, '*');
       };
+
+      // ── 계정 확인 팝업 — 로그인이 끝나면 "이 계정으로 쓸까요?"를 팝업으로 물어본다 ──
+      // (추천·번역 화면의 인라인 배너는 그대로 두되, 로그인 직후엔 팝업이 먼저 확인을 받는다)
+      const confirmModal = document.getElementById('confirmAccountModal');
+      let confirmAskedFor = null; // 같은 계정으로 팝업을 반복해 띄우지 않게 기억
+      function openConfirmAccountModal(account) {
+        if (!account) return;
+        confirmAskedFor = account;
+        document.getElementById('confirmAccountEmail').textContent = account;
+        confirmModal.classList.add('active');
+      }
+      function closeConfirmAccountModal() { confirmModal.classList.remove('active'); }
+      confirmModal.onclick = (e) => { if (e.target === confirmModal) closeConfirmAccountModal(); };
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && confirmModal.classList.contains('active')) closeConfirmAccountModal();
+      });
+      document.getElementById('confirmAccountYes').onclick = () => {
+        closeConfirmAccountModal();
+        if (!knownAccount) return;
+        confirmedAccount = knownAccount;
+        parent.postMessage({ pluginMessage: { type: 'CONFIRM_ACCOUNT', account: knownAccount } }, '*');
+        hideAccountConfirm(); // 추천·번역 화면의 인라인 배너도 함께 해제
+      };
+      document.getElementById('confirmAccountNo').onclick = () => {
+        closeConfirmAccountModal();
+        openClaudeLogin(true); // 다른 계정으로 — 계정 선택 화면
+        startAccountWatch();
+      };
+      // 로그인된 계정이 아직 확인 안 된 상태면 팝업으로 확인받는다 (계정당 1회)
+      function maybeAskConfirmAccount() {
+        if (!knownAccount || knownAccount === confirmedAccount) return;
+        if (confirmAskedFor === knownAccount) return;       // 이미 물어본 계정 — 반복 금지
+        if (confirmModal.classList.contains('active')) return;
+        openConfirmAccountModal(knownAccount);
+      }
       // 로그인 후 계정이 바뀌는지 잠시 지켜본다 (감시자 캐시가 30초라 넉넉히)
       let accountWatchTimer = null;
       function startAccountWatch() {
