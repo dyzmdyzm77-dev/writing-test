@@ -1108,15 +1108,8 @@
          여기서 보여주는 계정은 감시자가 파일만 읽어 알려준 것 — 클로드를 켜지 않으므로 사용량이 안 나간다. -->
     <div id="accountView">
       <div class="title">클로드 로그인</div>
-      <div class="hint">AI 추천·번역을 쓰려면 클로드 로그인이 필요해요. 검토 기능은 로그인 없이도 쓸 수 있어요.</div>
-      <div id="accountCard" class="account-card">
-        <div class="ac-state" id="accountState">계정을 확인하는 중…</div>
-        <div class="ac-email" id="accountEmail"></div>
-        <div class="ac-note" id="accountNote"></div>
-      </div>
-      <button id="accountUse" class="button-primary button-full-width" type="button" disabled>이 계정으로 시작</button>
-      <button id="accountSwitch" class="button-secondary button-full-width" type="button">다른 계정으로 로그인</button>
-      <button id="accountSkip" class="account-skip" type="button">로그인 없이 검토만 쓰기</button>
+      <div class="hint">플러그인을 사용하려면 클로드 로그인이 필요해요.</div>
+      <button id="accountSwitch" class="button-primary button-full-width" type="button">클로드 로그인</button>
     </div>
 
     <!-- 홈 화면: 작업 선택 메뉴 -->
@@ -2622,20 +2615,8 @@
           if (barBtn) barBtn.textContent = '확인';
         }
         const switchBtn = document.getElementById('accountSwitch');
-        if (switchBtn) switchBtn.textContent = knownAccount ? '다른 계정으로 로그인' : '클로드 로그인';
-        // 확인을 못 한 상태에선 [이 계정으로 시작]이 막히므로, 빠져나갈 길을 '그냥 시작'으로 열어둔다
-        const skipBtn = document.getElementById('accountSkip');
-        if (skipBtn) skipBtn.textContent = (accountInfoSeen && !knownAccount && accountSource !== 'watcher' && accountSource !== 'bridge')
-          ? '그냥 시작하기' : '로그인 없이 검토만 쓰기';
+        if (switchBtn) switchBtn.textContent = '클로드 로그인'; // 이 화면은 로그인 안 됐을 때만 뜬다
       }
-      document.getElementById('accountUse').onclick = () => {
-        if (!knownAccount) return;
-        confirmedAccount = knownAccount;
-        parent.postMessage({ pluginMessage: { type: 'CONFIRM_ACCOUNT', account: knownAccount } }, '*');
-        hideAccountConfirm(); // 추천·번역 화면의 확인 배너도 함께 해제
-        showView('home');
-      };
-      document.getElementById('accountSkip').onclick = () => { showView('home'); };
       document.getElementById('accountSwitch').onclick = () => {
         // 이미 로그인된 계정이 있으면 '전환'(로그아웃 후 계정 선택), 없으면 그냥 로그인.
         // 다리 깨우기는 code.ts의 OPEN_CLAUDE_LOGIN이 알아서 한다(꺼져 있으면 감시자로 깨우고 재시도).
