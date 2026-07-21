@@ -3711,46 +3711,6 @@ figma.ui.onmessage = async (msg) => {
         }
         return;
     }
-    // 번역 — 한국어 ↔ 영어 자동 (직접 입력 우선, 없으면 선택 영역 텍스트).
-    // 추천과 동일한 구조: 클로드 다리 전용, API 키 안 씀.
-    if (msg.type === "TRANSLATE") {
-        try {
-            const text = (msg.text && msg.text.trim()) ? msg.text.trim() : await collectSelectedText();
-            if (!text) {
-                figma.ui.postMessage({ type: 'show-toast', message: '번역할 문구를 입력하거나 텍스트를 선택해주세요.' });
-                return;
-            }
-            const bh = await bridgeHealth();
-            if (!bh.alive) {
-                figma.ui.postMessage({ type: 'show-toast', message: '번역하려면 클로드가 필요해요 — [클로드] 버튼으로 켜 주세요.' });
-                return;
-            }
-            // 계정 확인 게이트 (추천과 동일) — 확인 전엔 남의 계정일 수 있는 저장 로그인을 쓰지 않는다
-            if (needsAccountConfirm(bh)) {
-                figma.ui.postMessage({ type: 'account-confirm-needed', account: bh.account });
-                figma.ui.postMessage({ type: 'show-toast', message: '어느 클로드 계정으로 쓸지 먼저 확인해 주세요.' });
-                return;
-            }
-            figma.ui.postMessage({ type: 'show-loading', indeterminate: true, status: '클로드가 번역하는 중이에요' });
-            const res = await postJsonWithTimeout(CLAUDE_BRIDGE_URL + '/translate', { text, model: msg.model }, 130000);
-            const data = await res.json();
-            figma.ui.postMessage({ type: 'hide-loading' });
-            if (!res.ok || data.error || !data.translated) {
-                // 원인이 파악된 실패(로그인/설치)는 다리가 이미 사람용 안내문을 보냄 — 접두어 없이 그대로 + 버튼 상태 갱신
-                const guided = data && data.problem && data.error;
-                figma.ui.postMessage({ type: 'show-toast', message: guided ? String(data.error) : ('번역 실패: ' + (data && data.error ? data.error : ('HTTP ' + res.status))) });
-                refreshBridgeStatus();
-                return;
-            }
-            figma.ui.postMessage({ type: 'translate-result', original: text, translated: data.translated, direction: data.direction || '' });
-        }
-        catch (e) {
-            figma.ui.postMessage({ type: 'hide-loading' });
-            figma.ui.postMessage({ type: 'show-toast', message: '번역 실패: ' + errStr(e) });
-            refreshBridgeStatus();
-        }
-        return;
-    }
     // 오수정 제보 — "이 수정안이 잘못됐다"는 신고를 워커(/report)로 보내 관리자 페이지에 저장한다
     if (msg.type === "REPORT") {
         try {
