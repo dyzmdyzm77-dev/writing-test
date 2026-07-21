@@ -787,8 +787,9 @@
         border-bottom-color: #1D6CEB;
       }
       /* 탭 바가 떠 있을 때: 각 화면 고정 헤더를 탭 바 아래로 내리고, 화면 내 '← 홈' 링크는 숨김 */
+      /* 탭 바(높이 44)가 있을 때 고정 헤더를 그만큼 내린다 — 안 내리면 헤더가 탭 바 뒤로 겹친다 */
       body.has-tabbar #topFixed,
-      body.has-tabbar #recommendHeader,
+      body.has-tabbar #recommendHeader { top: 44px; }
       body.has-tabbar .back-btn { display: none; }
 
       /* ── 홈 / 기능 화면 (문구 추천) ── */
