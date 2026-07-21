@@ -1714,7 +1714,15 @@
         if (event.data.pluginMessage.type === 'logout-result') {
           const btn = document.getElementById('homeLogoutBtn');
           if (btn) { btn.disabled = false; btn.textContent = '로그아웃'; }
-          showToast(event.data.pluginMessage.ok ? '로그아웃했어요. AI 추천·번역을 쓰려면 다시 로그인하세요.' : ('로그아웃 실패: ' + (event.data.pluginMessage.error || '잠시 후 다시 시도해주세요.')));
+          if (event.data.pluginMessage.ok) {
+            // 로그아웃 성공 → 로그인 화면(첫 화면)으로 돌아간다
+            knownAccount = null;
+            showView('account');
+            renderAccountViews();
+            showToast('로그아웃했어요. 다시 로그인해 주세요.');
+          } else {
+            showToast('로그아웃 실패: ' + (event.data.pluginMessage.error || '잠시 후 다시 시도해주세요.'));
+          }
           requestAccountInfo();
         }
 
