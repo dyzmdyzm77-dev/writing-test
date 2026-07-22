@@ -2791,6 +2791,7 @@
         // 첫 화면을 정한 뒤에도, 로그인 화면에 머무는 중 로그인이 끝나면 홈으로 넘어간다.
         // (이게 없으면 로그인해도 로그인 화면 그대로 — firstScreenDecided에 막혀 전환이 안 됨)
         if (currentView === 'account' && knownAccount) {
+          stopAccountWatch(); // 잡혔으니 폴링 종료
           showView('home');
           maybeAskConfirmAccount(); // 로그인 완료 → "이 계정으로 쓸까요?" 팝업
           return;
@@ -2949,13 +2950,22 @@
       }
       // 로그인 후 계정이 바뀌는지 잠시 지켜본다 (감시자 캐시가 30초라 넉넉히)
       let accountWatchTimer = null;
+      // 로그인 직후엔 빨리 잡아야 하니 처음 20초는 2초 간격으로 촘촘히, 그 뒤 2분은 10초 간격으로 확인.
+      // 계정이 잡히거나(decideFirstScreen에서 홈 전환) 화면이 홈으로 넘어가면 stopAccountWatch로 즉시 종료.
+      function stopAccountWatch() {
+        if (accountWatchTimer) { clearTimeout(accountWatchTimer); accountWatchTimer = null; }
+      }
       function startAccountWatch() {
-        if (accountWatchTimer) clearInterval(accountWatchTimer);
-        let left = 12;
-        accountWatchTimer = setInterval(() => {
+        stopAccountWatch();
+        const start = Date.now();
+        const tick = () => {
           requestAccountInfo();
-          if (--left <= 0) { clearInterval(accountWatchTimer); accountWatchTimer = null; }
-        }, 10000);
+          const elapsed = Date.now() - start;
+          if (elapsed > 140000) { accountWatchTimer = null; return; } // 2분 20초면 종료
+          const next = elapsed < 20000 ? 2000 : 10000; // 초반 20초는 2초, 이후 10초
+          accountWatchTimer = setTimeout(tick, next);
+        };
+        tick();
       }
 
       // ── 계정 확인 배너 — 이 PC에 저장된 클로드 계정을 처음 쓸 때(계정이 바뀌었을 때도) 본인 확인 ──
