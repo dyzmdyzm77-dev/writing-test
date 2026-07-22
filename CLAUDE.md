@@ -1,4 +1,4 @@
-# S-1 S/W UX Writing Assistant (Figma 플러그인)
+# S-1 S/W UX Writing Agent (Figma 플러그인)
 
 에스원 UX Writing 검토 플러그인. 선택 영역의 텍스트를 네이버 맞춤법 + 로컬 규칙(용어집/해요체/띄어쓰기)으로 검사하고, 캔버스에 형광펜·코멘트를 표시한다.
 
