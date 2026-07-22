@@ -124,6 +124,60 @@
         cursor: pointer;
       }
       .mode-toggle .mode-btn.active { background: #1D6CEB; color: #FFFFFF; font-weight: 600; }
+      /* 대화 모드일 땐 헤더의 큰 입력창·버튼을 숨기고 헤더를 낮춘다 (입력은 하단 고정 바에서) */
+      #recommendHeader.chat-mode { min-height: 0; }
+      #recommendHeader.chat-mode #recommendInput,
+      #recommendHeader.chat-mode #recommendRun { display: none; }
+      /* 하단 고정 입력 바 — 클로드 앱과 같은 위치. 전역 button 규칙(width:100%,height:48px!important) 되돌림 */
+      .compose-bar {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        display: none;
+        gap: 8px;
+        align-items: flex-end;
+        padding: 10px 20px 12px 20px;
+        background: #FFFFFF;
+        border-top: 1px solid #E5E5E5;
+        z-index: 1500;
+      }
+      .compose-bar.visible { display: flex; }
+      #composeInput {
+        flex: 1;
+        resize: none;
+        min-height: 40px;
+        max-height: 120px;
+        padding: 10px 12px;
+        border: 1px solid #D5D5D5;
+        border-radius: 10px;
+        font-size: 13px;
+        font-family: inherit;
+        line-height: 1.45;
+        box-sizing: border-box;
+      }
+      #composeInput:focus { outline: none; border-color: #1D6CEB; }
+      #composeSend {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px !important;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        border: none;
+        border-radius: 50%;
+        background: #1D6CEB;
+        color: #FFFFFF;
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+      }
+      #composeSend:hover { background: #1558C6; }
+      #composeSend:disabled { background: #C9D8F5; cursor: default; border: none; }
+      /* 하단 바가 내용을 가리지 않게 본문에 여백 */
+      body.compose-open { padding-bottom: 88px; }
       /* 대화로 만들기 — 채팅 말풍선 */
       #composeChat { padding-top: 4px; }
       .chat-msg {
@@ -1337,6 +1391,12 @@
       <div id="composeChat" style="display:none"></div>
     </div>
 
+    <!-- 대화로 만들기: 하단 고정 입력 바 (클로드 앱과 동일 위치) -->
+    <div id="composeBar" class="compose-bar">
+      <textarea id="composeInput" rows="1" placeholder="예) 비밀번호를 5번 틀렸을 때 뜨는 안내 문구가 필요해"></textarea>
+      <button id="composeSend" type="button" aria-label="보내기" title="보내기">↑</button>
+    </div>
+
     <button id="scrollTopBtn" class="scroll-top-btn" title="맨 위로" aria-label="맨 위로">
       <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M8 13V3M8 3L3.5 7.5M8 3L12.5 7.5" stroke="#4A4A4A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1429,6 +1489,12 @@
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
         document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'flex' : 'none';
         document.getElementById('recommendSection').style.display = name === 'recommend' ? 'block' : 'none';
+        // 대화 하단 입력 바는 추천 화면 + 대화 모드일 때만 보인다 (다른 화면으로 가면 숨김)
+        {
+          const inCompose = (name === 'recommend' && composeMode);
+          document.getElementById('composeBar').classList.toggle('visible', inCompose);
+          document.body.classList.toggle('compose-open', inCompose);
+        }
         // 상단 탭 바: 홈이 아닐 때만 표시하고 현재 탭을 강조
         const tabBar = document.getElementById('tabBar');
         const showTabs = name !== 'home';
@@ -1753,7 +1819,7 @@
             composeMsgs.push({ role: 'assistant', text: '⚠ ' + (cm.error || '요청에 실패했어요. 잠시 후 다시 시도해주세요.') });
           }
           renderComposeChat();
-          updateFeatureButtonState();
+          updateComposeSendState();
         }
 
         if (event.data.pluginMessage.type === 'recommend-result') {
@@ -2478,15 +2544,16 @@
         document.getElementById('modeRefine').classList.toggle('active', !compose);
         document.getElementById('modeCompose').classList.toggle('active', compose);
         document.getElementById('recommendHint').innerHTML = compose
-          ? '만들고 싶은 문구의 <b>상황</b>을 설명해 주세요. 이어서 "더 짧게" 같은 요청으로 다듬을 수 있어요.'
+          ? '만들고 싶은 문구의 <b>상황</b>을 아래 입력창에 설명해 주세요. 이어서 "더 짧게" 같은 요청으로 다듬을 수 있어요.'
           : '문구를 입력하거나, 캔버스에서 텍스트를 선택 후 <b>[추천받기]</b> 버튼을 눌러주세요.';
-        document.getElementById('recommendInput').placeholder = compose
-          ? '예) 비밀번호를 5번 틀렸을 때 뜨는 안내 문구가 필요해'
-          : '예) 로그인이 필요합니다';
-        document.getElementById('recommendRun').textContent = compose ? '보내기' : '추천받기';
         document.getElementById('recommendList').style.display = compose ? 'none' : 'block';
         document.getElementById('composeChat').style.display = compose ? 'block' : 'none';
-        if (compose) renderComposeChat();
+        // 대화 모드: 헤더의 큰 입력창·버튼 숨기고, 하단 고정 입력 바를 띄운다 (클로드 앱과 동일)
+        document.getElementById('recommendHeader').classList.toggle('chat-mode', compose);
+        document.getElementById('composeBar').classList.toggle('visible', compose);
+        document.body.classList.toggle('compose-open', compose);
+        if (compose) { renderComposeChat(); adjustTopPadding(); setTimeout(() => document.getElementById('composeInput').focus(), 50); }
+        else { adjustTopPadding(); }
         updateFeatureButtonState();
       }
       document.getElementById('modeRefine').onclick = () => setRecommendMode(false);
@@ -2518,23 +2585,42 @@
       }
       function sendCompose() {
         if (composeBusy) return;
-        const el = document.getElementById('recommendInput');
+        const el = document.getElementById('composeInput');
         const text = el.value.trim();
         if (!text) return;
         composeMsgs.push({ role: 'user', text });
         el.value = '';
+        el.style.height = 'auto'; // 자동 높이 초기화
         composeBusy = true;
         renderComposeChat();
-        updateFeatureButtonState();
+        updateComposeSendState();
         parent.postMessage({ pluginMessage: {
           type: 'COMPOSE',
           messages: composeMsgs.map((m) => ({ role: m.role, text: m.text })),
           model: getSelectedModel(),
         } }, '*');
       }
+      // 하단 입력창: 자동 높이 + Enter 전송(Shift+Enter 줄바꿈) + 보내기 버튼 상태
+      function updateComposeSendState() {
+        const el = document.getElementById('composeInput');
+        const btn = document.getElementById('composeSend');
+        if (btn) btn.disabled = composeBusy || !el.value.trim();
+      }
+      (function wireComposeBar() {
+        const el = document.getElementById('composeInput');
+        el.addEventListener('input', () => {
+          el.style.height = 'auto';
+          el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+          updateComposeSendState();
+        });
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendCompose(); }
+        });
+        document.getElementById('composeSend').onclick = sendCompose;
+        updateComposeSendState();
+      })();
 
       document.getElementById('recommendRun').onclick = () => {
-        if (composeMode) { sendCompose(); return; }
         const compact = document.getElementById('recommendHeader').classList.contains('compact');
         if (compact) {
           // [다시 추천받기] = 초기 화면으로 복귀 — 결과 비우고 새 문구 입력부터
@@ -2565,7 +2651,9 @@
         // 컴팩트 모드의 [다시 추천받기]는 초기 화면 복귀 버튼이라 입력창이 비어도 활성 유지
         const rCompact = document.getElementById('recommendHeader').classList.contains('compact');
         // 대화 모드: 응답 대기 중이거나 입력이 비면 [보내기] 비활성
-        if (rEl && rBtn) rBtn.disabled = composeMode ? (composeBusy || !rEl.value.trim()) : (rCompact ? false : !rEl.value.trim());
+        // 대화 모드에선 헤더 추천 버튼이 숨겨져 있으므로 다듬기 모드만 판단
+        if (rEl && rBtn) rBtn.disabled = rCompact ? false : !rEl.value.trim();
+        if (composeMode) updateComposeSendState();
       }
       document.getElementById('recommendInput').addEventListener('input', updateFeatureButtonState);
       updateFeatureButtonState();
