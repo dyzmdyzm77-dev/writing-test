@@ -924,6 +924,10 @@
         border-radius: 10px;
         transition: border-color .15s, box-shadow .15s;
       }
+      /* 게스트 모드: 추천 카드·탭 잠금 표시 */
+      .home-card.locked { opacity: 0.5; }
+      .home-card.locked .home-card-title::after { content: ' 🔒'; font-size: 12px; }
+      .tab-btn.locked { opacity: 0.45; }
       .home-card:hover {
         background: #FFFFFF;
         border-color: #1D6CEB;
@@ -1221,8 +1225,9 @@
          여기서 보여주는 계정은 감시자가 파일만 읽어 알려준 것 — 클로드를 켜지 않으므로 사용량이 안 나간다. -->
     <div id="accountView">
       <div class="title">클로드 로그인</div>
-      <div class="hint">플러그인을 사용하려면 클로드 로그인이 필요해요.</div>
+      <div class="hint">AI 추천을 쓰려면 클로드 로그인이 필요해요.</div>
       <button id="accountSwitch" class="button-primary button-full-width" type="button">클로드 로그인</button>
+      <button id="accountSkip" class="account-skip" type="button">로그인 없이 사용하기</button>
     </div>
 
     <!-- 홈 화면: 작업 선택 메뉴 -->
@@ -1332,7 +1337,7 @@
       <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmAccountTitle">
         <div class="modal-title" id="confirmAccountTitle">클로드 계정 확인</div>
         <div class="modal-account" id="confirmAccountEmail"></div>
-        <div class="modal-desc">이 계정으로 AI 추천·번역을 쓸까요?<br>사용량이 이 계정 구독에서 차감돼요.</div>
+        <div class="modal-desc">이 계정으로 AI 추천을 쓸까요?<br>사용량이 이 계정 구독에서 차감돼요.</div>
         <div class="modal-actions">
           <button id="confirmAccountNo" class="modal-btn modal-btn-ghost" type="button">다른 계정</button>
           <button id="confirmAccountYes" class="modal-btn modal-btn-primary" type="button">네</button>
@@ -2496,8 +2501,17 @@
       // ── 홈 메뉴 / 뒤로가기 버튼 연결 ──
       // 추천으로 가는 클릭이면, 이 제스처 안에서 다리를 바로 켠다(팝업 차단 방지) → 이후 showView
       const NEEDS_BRIDGE = { recommend: true }; // 클로드를 쓰는 화면들
+      // 게스트 모드면 추천 진입을 막고 로그인 안내 — true면 진입 취소
+      function blockedByGuest(name) {
+        if (guestMode && name === 'recommend') {
+          showToast('AI 추천은 로그인이 필요해요. 로그인하면 바로 쓸 수 있어요.');
+          return true;
+        }
+        return false;
+      }
       document.querySelectorAll('[data-go]').forEach((btn) => {
         btn.addEventListener('click', () => {
+          if (blockedByGuest(btn.dataset.go)) return;
           if (NEEDS_BRIDGE[btn.dataset.go]) ensureBridgeFromGesture();
           showView(btn.dataset.go);
         });
@@ -2509,6 +2523,7 @@
       // ── 상단 탭 바 연결 (탭 전환 / 홈 버튼) ──
       document.querySelectorAll('.tab-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
+          if (blockedByGuest(btn.dataset.tab)) return;
           if (NEEDS_BRIDGE[btn.dataset.tab]) ensureBridgeFromGesture();
           showView(btn.dataset.tab);
         });
@@ -2756,6 +2771,7 @@
       let accountSource = null;     // 'watcher'|'bridge' = 확인됨 / 'none'·null = 확인 자체를 못 함(감시자 꺼짐 등)
       let watcherOld = false;       // 감시자가 옛 버전(/account 없음) — 계정 표시는 다리 폴백에 의존
       let confirmedAccount = null;  // 사용자가 [이 계정으로 시작]으로 확인한 계정 (clientStorage)
+      let guestMode = false;        // '로그인 없이 사용하기' — 검토만 쓰고 추천은 잠긴다 (이 세션 한정)
       let accountInfoSeen = false;  // account-info를 한 번이라도 받았나 (첫 화면 결정용)
       let confirmedSeen = false;    // confirmed-account를 받았나
       function requestAccountInfo() { parent.postMessage({ pluginMessage: { type: 'CHECK_ACCOUNT' } }, '*'); }
@@ -2763,6 +2779,8 @@
       let firstScreenDecided = false;
       function decideFirstScreen() {
         if (!accountInfoSeen || !confirmedSeen) return;
+        // 게스트로 쓰다가 로그인해 계정이 잡히면 게스트 모드 해제 → 추천 잠금 풀림
+        if (guestMode && knownAccount) { guestMode = false; applyGuestLock(); }
         if (!firstScreenDecided) {
           firstScreenDecided = true;
           // 최초 화면 = 로그인 안 됐을 때만 로그인 화면. 로그인돼 있으면 바로 홈으로.
@@ -2793,12 +2811,19 @@
         const logoutBtn = document.getElementById('homeLogoutBtn');
         // 로그아웃 버튼은 로그인된 계정이 있을 때만 보인다
         if (logoutBtn) logoutBtn.style.display = knownAccount ? '' : 'none';
+        // 게스트 모드: 계정 상태와 무관하게 "로그인하면 AI 추천도" 안내로 고정
+        if (guestMode && !knownAccount) {
+          if (barText) barText.textContent = '로그인 없이 사용 중 — 로그인하면 AI 추천도 쓸 수 있어요';
+          if (barBtn) barBtn.textContent = '로그인';
+          if (bar) { bar.classList.remove('hab-on'); bar.classList.add('hab-warn'); }
+          return;
+        }
         // [이 계정으로 시작]은 계정이 있을 때만 의미가 있다 — 없으면 숨겨 로그인 버튼만 남긴다
         if (useBtn) useBtn.style.display = knownAccount ? '' : 'none';
         if (knownAccount) {
           if (stateEl) stateEl.textContent = '이 PC에 로그인된 클로드 계정';
           if (emailEl) emailEl.textContent = knownAccount;
-          if (noteEl) noteEl.textContent = 'AI 추천·번역 사용량이 이 계정 구독에서 차감돼요. 내 계정이 아니면 [다른 계정으로 로그인]을 눌러주세요.';
+          if (noteEl) noteEl.textContent = 'AI 추천 사용량이 이 계정 구독에서 차감돼요. 내 계정이 아니면 [다른 계정으로 로그인]을 눌러주세요.';
           if (card) card.classList.remove('ac-warn');
           if (useBtn) { useBtn.disabled = false; useBtn.textContent = '이 계정으로 시작'; }
           if (bar) { bar.classList.add('hab-on'); bar.classList.remove('hab-warn'); }
@@ -2819,7 +2844,7 @@
           if (card) card.classList.add('ac-warn');
           if (useBtn) useBtn.disabled = true;
           if (bar) { bar.classList.remove('hab-on'); bar.classList.add('hab-warn'); }
-          if (barText) barText.textContent = '클로드 로그인 안 됨 — AI 추천·번역을 쓰려면 로그인하세요';
+          if (barText) barText.textContent = '클로드 로그인 안 됨 — AI 추천을 쓰려면 로그인하세요';
           if (barBtn) barBtn.textContent = '로그인';
         } else {
           // 확인 자체를 못 함(감시자 꺼짐·구버전) — "로그인 없음"과 다르다. 멀쩡한 로그인을 다시 시키면 안 되므로 구분해서 안내한다
@@ -2845,6 +2870,21 @@
         openClaudeLogin(true);
         startAccountWatch();
       };
+      // [로그인 없이 사용하기] — 게스트 모드로 홈 진입. 검토만 쓰고 추천은 잠긴다.
+      document.getElementById('accountSkip').onclick = () => {
+        guestMode = true;
+        applyGuestLock();
+        showView('home');
+      };
+      // 게스트 모드일 때 추천 진입을 잠근다: 홈 카드·탭 비활성 + 안내
+      function applyGuestLock() {
+        const lock = guestMode;
+        document.querySelectorAll('[data-go="recommend"], [data-tab="recommend"]').forEach((el) => {
+          el.classList.toggle('locked', lock);
+        });
+        const bar = document.getElementById('homeAccountBar');
+        if (bar) bar.classList.toggle('guest', lock);
+      }
       // 홈의 [계정 전환]/[로그인] — 계정 확인 화면을 거치지 않고 브라우저 로그인을 바로 연다
       // (계정 화면 안의 버튼·🔑 버튼과 동일하게 통일). knownAccount 있으면 전환, 없으면 로그인.
       document.getElementById('homeAccountBtn').onclick = () => {
@@ -2925,7 +2965,7 @@
         pendingConfirmAccount = account;
         document.querySelectorAll('.account-confirm-bar').forEach((bar) => {
           const t = bar.querySelector('.acb-text');
-          if (t) { t.textContent = ''; const b = document.createElement('b'); b.textContent = account; t.appendChild(document.createTextNode('이 PC의 클로드 계정: ')); t.appendChild(b); t.appendChild(document.createTextNode(' — 이 계정으로 AI 추천·번역을 쓸까요? (사용량이 이 계정 구독에서 차감돼요)')); }
+          if (t) { t.textContent = ''; const b = document.createElement('b'); b.textContent = account; t.appendChild(document.createTextNode('이 PC의 클로드 계정: ')); t.appendChild(b); t.appendChild(document.createTextNode(' — 이 계정으로 AI 추천을 쓸까요? (사용량이 이 계정 구독에서 차감돼요)')); }
           bar.style.display = 'flex';
         });
       }
