@@ -195,7 +195,8 @@
       .chat-ai { margin-right: auto; background: #F5F5F5; color: #1D1D1D; }
       .chat-typing { color: #999999; font-size: 12px; margin: 8px 0; }
       .chat-sugg { margin: 4px 0 10px 0; }
-      .chat-sugg .sugg-reason { font-size: 11.5px; color: #757575; margin: 2px 2px 8px 2px; line-height: 1.4; }
+      /* 대화 모드 추천 사유 — 이제 카드 밖이 아니라 .sugg-main 안에 들어간다(다듬기 모드와 같은 구조) */
+      .chat-sugg .sugg-reason { font-size: 11.5px; color: #757575; margin: 4px 0 0 0; line-height: 1.4; }
       .chat-new {
         display: inline-flex;
         width: auto;
@@ -785,6 +786,157 @@
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
       }
+      /* ── 클로드 켜는 중 / 못 켬 / 꺼둠 안내 ── */
+      /* 다리가 꺼져 있으면 추천이 어차피 클로드로 안 되므로, 버튼 라벨만 바꾸지 않고 추천 화면을 통째로 덮는다.
+         탭 바(z-index 1600)는 안 덮어서 검토·홈으로는 언제든 나갈 수 있다. */
+      .bridge-loading {
+        position: fixed;
+        top: 44px; left: 0; right: 0; bottom: 0;
+        background: #FFFFFF;
+        display: none;
+        flex-direction: column;
+        z-index: 1550; /* 하단 대화 입력 바(1500)까지 덮되, 탭 바(1600) 아래 */
+      }
+      .bridge-loading.active { display: flex; }
+      /* 검토 첫 화면(#topFixed.empty-review)과 같은 규격의 상자 — 안내문구·버튼이 같은 자리에 온다.
+         min-height/padding을 바꿀 거면 .top-fixed 쪽과 같이 고칠 것 (안 맞추면 탭을 오갈 때 버튼이 튄다) */
+      .bridge-loading-box {
+        min-height: 320px;
+        padding: 20px 20px 12px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
+      /* 검토의 사용법 예시(#reviewEmpty)와 같은 자리 — 남는 공간을 채워 세로 가운데.
+         아래 여백 14는 .review-guide와 같은 값 (버튼과 붙어 보이지 않게) */
+      .bridge-loading-msg {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        margin-bottom: 14px;
+      }
+      /* 예시 그래픽 — 검토 첫 화면(.review-guide svg)과 같은 폭·여백. 꺼둔 상태에서만 보인다
+         (켜는 중엔 스피너가, 못 켰을 땐 버튼 3개가 그 자리를 쓴다) */
+      .bridge-loading-art {
+        display: none;
+        width: 100%;
+        max-width: 200px;
+        /* 아래 여백 8 — 이걸 키우면 상자가 min-height 320을 넘겨 버튼이 검토 화면보다 아래로 밀린다 */
+        margin: 0 auto 8px;
+      }
+      .bridge-loading.stopped .bridge-loading-art { display: block; }
+      .bridge-loading-title {
+        font-size: 16px;
+        font-weight: 500; /* Medium */
+        color: #353535;
+      }
+      .bridge-loading-sub {
+        font-size: 12px;
+        color: #757575;
+        margin-top: 8px;
+        line-height: 1.6;
+      }
+      /* 조치 버튼 — 크기·모양은 [검토하기](button-primary/secondary + 전역 button 규칙) 그대로 쓴다 */
+      .bridge-loading-actions {
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .bridge-loading-actions button { margin: 0; }
+      .bridge-loading.failed .bridge-loading-actions,
+      .bridge-loading.stopped .bridge-loading-actions { display: flex; }
+      .bridge-loading.failed .loading-spinner,
+      .bridge-loading.stopped .loading-spinner { display: none; }
+      /* 설치 파일은 "못 켰을 때"만 제안 — 직접 꺼둔 경우엔 이미 깔려 있으니 안 보여준다 */
+      .bridge-loading .bl-install { display: none; }
+      .bridge-loading.failed .bl-install { display: block; }
+      /* 직접 꺼둔 경우엔 켤 때까지 이 화면 — 추천은 클로드가 하는 일이라 닫아도 쓸 게 없다.
+         (못 켠 경우(failed)는 켤 방법 자체가 막힌 상황이라 닫고 나갈 길을 남겨 둔다) */
+      .bridge-loading.stopped .bl-close { display: none; }
+      .bl-close {
+        background: none;
+        border: none;
+        color: #757575;
+        text-decoration: underline;
+        height: 32px !important;
+        font-size: 13px;
+        margin: 4px 0 0 !important;
+      }
+      .bl-close:hover { color: #353535; }
+      /* ── 로그인 기다리는 중 ── */
+      /* 브라우저에서 OAuth를 하는 동안 플러그인은 폴링만 해서 화면이 죽은 것처럼 보였다.
+         (토스트는 몇 초 뒤 사라져 결국 아무 표시도 안 남는다) → 끝날 때까지 로딩을 띄운다. */
+      .login-waiting {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: #FFFFFF;
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 24px;
+        text-align: center;
+        z-index: 2600; /* 모든 화면 위, 계정 확인 팝업(3000) 아래 */
+      }
+      .login-waiting.active { display: flex; }
+      /* 로그인 창을 아예 못 연 상태 — 스피너를 지우고 조치를 보여준다 (도는 스피너는 거짓말이 된다) */
+      .login-waiting.failed .loading-spinner { display: none; }
+      .login-waiting .lw-install { display: none; }
+      .login-waiting.failed .lw-install { display: block; }
+      /* 맥도 설치 파일을 받는다(.command zip) — 버튼은 공용, 안내문만 IS_MAC으로 갈린다 */
+      /* 우측 상단 닫기(X) — 누르면 로그인 화면으로. 전역 button(width 100%, height 48) 규칙을 되돌린다 */
+      .lw-close {
+        position: absolute;
+        top: 12px; right: 12px;
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 0;
+        line-height: 32px !important;
+        margin: 0;
+        padding: 0;
+        background: none;
+        border: none;
+        border-radius: 6px;
+        color: #757575;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .lw-close:hover { background: #F5F5F5; color: #353535; }
+      .lw-title {
+        font-size: 16px;
+        font-weight: 500; /* Medium */
+        color: #353535;
+      }
+      .lw-sub {
+        font-size: 12px;
+        color: #757575;
+        margin-top: 8px;
+        line-height: 1.6;
+      }
+      .lw-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        margin-top: 20px;
+      }
+      .lw-link {
+        width: auto !important;
+        height: 30px !important;
+        line-height: normal !important;
+        margin: 0;
+        padding: 0 8px;
+        background: none;
+        border: none;
+        color: #757575;
+        font-size: 13px;
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      .lw-link:hover { color: #353535; }
       .toast-notification {
         position: fixed;
         bottom: 80px; /* 플로팅 버튼 위에 표시 */
@@ -796,7 +948,8 @@
         padding: 12px 20px;
         border-radius: 20px;
         font-size: 14px;
-        z-index: 1001; /* 플로팅 버튼(z-index: 1000) 위에 표시 */
+        z-index: 2700; /* 모든 덮개 위 — 특히 로그인 대기(2600)보다 위여야 한다.
+                          아래로 내리면 대기 화면이 오류 토스트를 가려 "아무 반응 없음"처럼 보인다(실제 발생) */
         display: none;
         text-align: center;
         word-break: break-word;
@@ -853,7 +1006,7 @@
         height: 44px;
         background: #FFFFFF;
         border-bottom: 1px solid #E0E0E0;
-        z-index: 200; /* 각 화면 고정 헤더(z-index 100)보다 위 */
+        z-index: 1600; /* 화면 고정 헤더(100)·대화 입력 바(1500)·클로드 로딩(1550)보다 위 — 로딩 중에도 탭 이동은 가능해야 한다 */
         box-sizing: border-box;
         align-items: stretch;
       }
@@ -1225,8 +1378,10 @@
          여기서 보여주는 계정은 감시자가 파일만 읽어 알려준 것 — 클로드를 켜지 않으므로 사용량이 안 나간다. -->
     <div id="accountView">
       <div class="title">클로드 로그인</div>
-      <div class="hint">AI 추천을 쓰려면 클로드 로그인이 필요해요.</div>
+      <div class="hint" id="accountHint">AI 추천을 쓰려면 클로드 로그인이 필요해요.</div>
       <button id="accountSwitch" class="button-primary button-full-width" type="button">클로드 로그인</button>
+      <!-- 처음 쓰는 PC(감시자 무응답)에서만 표시 — 로그인 실패를 겪기 전에 설치 경로를 먼저 보여준다 -->
+      <button id="accountInstall" class="button-secondary button-full-width" type="button" style="display:none">클로드 설치 파일 받기</button>
       <button id="accountSkip" class="account-skip" type="button">로그인 없이 사용하기</button>
     </div>
 
@@ -1361,7 +1516,7 @@
         <div class="title-row">
           <div class="title">문구 추천받기</div>
           <div class="title-actions">
-            <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="클로드 다리 상태 — 꺼져 있으면 눌러서 켜기" aria-label="클로드 다리">클로드 확인 중…</button>
+            <button id="bridgeWakeBtn" class="feature-settings-btn" type="button" title="클로드 연동 상태 — 연동 안 됐으면 눌러서 연결하기" aria-label="클로드 연동">클로드 확인 중…</button>
             <button id="bridgeLoginBtn" class="feature-settings-btn" type="button" title="다른 계정으로 로그인 — 브라우저에 클로드 로그인 페이지를 열어드려요" aria-label="클로드 계정 전환">계정 전환</button>
           </div>
         </div>
@@ -1394,6 +1549,63 @@
       <div id="recommendList"></div>
       <!-- 대화로 만들기 모드의 대화 기록 (다듬기 모드에선 숨김) -->
       <div id="composeChat" style="display:none"></div>
+    </div>
+
+    <!-- 로그인 기다리는 중 — 브라우저 OAuth가 끝날 때까지 (계정이 잡히면 자동으로 사라진다) -->
+    <div id="loginWaiting" class="login-waiting">
+      <button id="loginWaitingClose" class="lw-close" type="button" aria-label="닫고 로그인 화면으로">✕</button>
+      <div class="loading-spinner"></div>
+      <div class="lw-title" id="loginWaitingTitle">브라우저에서 로그인해 주세요.</div>
+      <div class="lw-sub" id="loginWaitingSub">로그인이 끝나면 클로드가 자동으로 연결돼요.</div>
+      <div class="lw-actions">
+        <button id="loginWaitingRetry" class="lw-link" type="button">로그인 재시도</button>
+        <button id="loginWaitingInstall" class="lw-link lw-install" type="button">클로드 설치 파일 받기</button>
+      </div>
+    </div>
+
+    <!-- 클로드 켜는 중 — 추천 화면을 덮는 로딩. 못 켜면 .failed, 직접 꺼두면 .stopped로 조치 버튼이 나온다.
+         상자 규격(.bridge-loading-box)은 검토 첫 화면(#topFixed.empty-review)과 맞춰져 있다 -->
+    <div id="bridgeLoading" class="bridge-loading">
+      <div class="bridge-loading-box">
+        <!-- 화면 타이틀 — 덮개가 헤더를 가리므로 여기서 다시 보여준다 (검토 화면과 같은 .title-section/.title) -->
+        <div class="title-section">
+          <div class="title">문구 추천받기</div>
+        </div>
+        <div class="bridge-loading-msg">
+          <!-- 꺼둔 상태에서만 보이는 예시 그래픽 (검토 첫 화면의 #reviewEmpty와 같은 자리·같은 톤).
+               이 플러그인(왼쪽, 문구)과 클로드(오른쪽, 파란 별표)가 이어지는 그림 -->
+          <svg class="bridge-loading-art" viewBox="0 0 280 150" width="100%" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="이 플러그인과 클로드가 연결되는 예시">
+            <rect x="8" y="8" width="264" height="134" rx="10" fill="#F7F7F7" stroke="#E9E9E9"/>
+            <path d="M106 75h68" stroke="#1D6CEB" stroke-width="3" stroke-linecap="round" stroke-dasharray="7 8"/>
+            <rect x="24" y="38" width="82" height="74" rx="10" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1.6"/>
+            <rect x="40" y="63" width="50" height="8" rx="4" fill="#D5D5D5"/>
+            <rect x="40" y="79" width="32" height="8" rx="4" fill="#E4E4E4"/>
+            <rect x="174" y="38" width="82" height="74" rx="10" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1.6"/>
+            <!-- 클로드 마크(코랄 선버스트) 근사 — 공식 에셋이 아니라 길이가 불규칙한 11갈래로 흉내 낸 것 -->
+            <g stroke="#D97757" stroke-width="3" stroke-linecap="round">
+              <path d="M215.4 71.8L217.1 60.1"/>
+              <path d="M217.1 72.6L222.5 66.3"/>
+              <path d="M218.1 74.1L228.4 71.0"/>
+              <path d="M218.1 75.9L225.1 77.9"/>
+              <path d="M217.1 77.4L225.2 86.7"/>
+              <path d="M215.5 78.2L216.7 86.9"/>
+              <path d="M213.7 77.9L209.0 88.2"/>
+              <path d="M212.3 76.7L205.8 81.0"/>
+              <path d="M211.8 75.0L200.0 75.0"/>
+              <path d="M212.3 73.3L204.5 68.3"/>
+              <path d="M213.7 72.1L209.4 62.7"/>
+            </g>
+          </svg>
+          <div class="loading-spinner"></div>
+          <div class="bridge-loading-title" id="bridgeLoadingTitle">클로드를 연결하는 중이에요.</div>
+          <div class="bridge-loading-sub" id="bridgeLoadingSub">잠시만 기다려 주세요.</div>
+        </div>
+        <div class="bridge-loading-actions">
+          <button id="bridgeLoadingRetry" class="button-primary" type="button">클로드 연결하기</button>
+          <button id="bridgeLoadingInstall" class="bl-install button-secondary" type="button">클로드 설치 파일 받기</button>
+          <button id="bridgeLoadingClose" class="bl-close" type="button">클로드 없이 추천받기</button>
+        </div>
+      </div>
     </div>
 
     <!-- 대화로 만들기: 하단 고정 입력 바 (클로드 앱과 동일 위치) -->
@@ -1455,7 +1667,14 @@
       }
 
       // ── 화면 전환 컨트롤러 (홈 / 검토 / 문구추천) ──
+      // 이 PC가 맥인지 — 실패 안내를 OS에 맞게 바꾼다.
+      // 윈도우는 자기완결 설치 파일(.bat)을 내려주지만, 맥엔 그런 게 없고 npm install 한 번이 설치 과정이다.
+      const IS_MAC = /Mac|iPhone|iPad|iPod/i.test((navigator.platform || '') + ' ' + (navigator.userAgent || ''));
+      if (IS_MAC) document.body.classList.add('is-mac');
       let currentView = 'home';
+      // 클로드 다리 깨우는 중/못 켬 — 추천 화면 로딩 덮개 상태. 'off' | 'waking' | 'failed'
+      // (아래쪽 다리 상태 변수들보다 먼저 선언한다 — updateFeatureButtonState가 초기 실행에서 읽는다)
+      let bridgeLoadState = 'off';
       function activeHeaderEl() {
         if (currentView === 'review') return document.getElementById('topFixed');
         if (currentView === 'recommend') return document.getElementById('recommendHeader');
@@ -1489,6 +1708,8 @@
           requestBridgeStatus(); // 클로드 쓰는 화면 열 때 상태 갱신 (자동 켜기는 클릭 제스처의 ensureBridgeFromGesture가 담당)
           // 지금 캔버스에서 선택된 프레임 내용을 입력창에 자동으로 넣는다 (초기 선택·타이밍 누락 대비 직접 조회)
           parent.postMessage({ pluginMessage: { type: 'GET_SELECTION_TEXT' } }, '*');
+          // 추천 화면은 검토와 무관하므로 캔버스 코멘트 + 검토 결과(previewData) 모두 초기화
+          if (previewData && previewData.length > 0) resetReview();
         }
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
@@ -1525,6 +1746,7 @@
           const el = document.getElementById('recommendInput');
           if (el && !el.value.trim()) el.value = lastSelectionText;
         }
+        syncBridgeLoading(); // 켜는 중/못 켬 덮개는 추천 화면에서만 — 탭을 옮기면 따라 숨는다
         updateFeatureButtonState();
         adjustTopPadding();
         updateReviewGuide();
@@ -1791,6 +2013,20 @@
           }
         }
 
+        // 로그인 창 열기 결과 — 대기 화면이 이걸 보고 계속 기다릴지/실패를 알릴지 정한다
+        if (event.data.pluginMessage.type === 'login-open-result') {
+          const lr = event.data.pluginMessage;
+          if (isLoginWaiting()) {
+            if (!lr.ok) {
+              setLoginWaitFailed(lr.error);
+            } else if (lr.mode === 'terminal') {
+              // 브라우저가 아니라 터미널로 열린 경우 — 기다리는 곳이 다르니 안내를 바꾼다
+              document.getElementById('loginWaitingSub').textContent =
+                '터미널 창의 안내를 따라 진행해 주세요. 끝나면 클로드가 자동으로 연결돼요.';
+            }
+          }
+        }
+
         // 좋아요 전송 결과 — 성공하면 버튼을 파란색으로 고정
         if (event.data.pluginMessage.type === 'like-result') {
           const likeMsg = event.data.pluginMessage;
@@ -1844,6 +2080,12 @@
           if (event.data.pluginMessage.ok) {
             // 로그아웃 성공 → 로그인 화면(첫 화면)으로 돌아간다
             knownAccount = null;
+            confirmedAccount = null;
+            confirmAskedFor = null;
+            justLoggedOut = true;          // 낡은 계정 조회를 무시 (감시자 5초 캐시 대비)
+            stopAccountWatch();            // 남아 있던 폴링 중단 — 낡은 계정으로 홈에 튕기지 않게
+            closeConfirmAccountModal();    // 이미 떠 있던 확인 팝업이 있으면 닫는다
+            hideAccountConfirm();          // 추천·번역 인라인 배너도 해제
             showView('account');
             renderAccountViews();
             showToast('로그아웃했어요. 다시 로그인해 주세요.');
@@ -1855,7 +2097,14 @@
 
         // 이 PC의 클로드 계정 정보 (감시자가 알려준 것 — 클로드는 안 켜짐)
         if (event.data.pluginMessage.type === 'account-info') {
-          knownAccount = event.data.pluginMessage.account || null;
+          const rawAccount = event.data.pluginMessage.account || null;
+          // 방금 로그아웃했는데 계정이 잡힌다 = 감시자 캐시(5초)의 낡은 값 — 무시한다.
+          // 계정이 null로 오면 로그아웃이 반영된 것 → 플래그 해제하고 정상 처리.
+          if (justLoggedOut) {
+            if (rawAccount) { renderAccountViews(); return; } // 낡은 조회 — 그대로 로그인 화면 유지
+            justLoggedOut = false;
+          }
+          knownAccount = rawAccount;
           accountSource = event.data.pluginMessage.source || 'none';
           watcherOld = !!event.data.pluginMessage.watcherOld;
           accountInfoSeen = true;
@@ -1863,6 +2112,9 @@
             confirmedAccount = event.data.pluginMessage.confirmed || null;
             confirmedSeen = true;
           }
+          // 로그인 대기 로딩은 '계정이 실제로 바뀌었을 때'만 걷는다.
+          // 계정 전환은 새 로그인이 끝나기 전까진 옛 계정이 그대로 읽히므로, 단순히 계정이 있다고 걷으면 안 된다.
+          if (isLoginWaiting() && knownAccount && knownAccount !== loginWaitFromAccount) hideLoginWaiting();
           renderAccountViews();
           decideFirstScreen();
         }
@@ -1883,6 +2135,11 @@
           const bs = event.data.pluginMessage;
           bridgeKnownAlive = !!bs.alive; // 최신 생존 상태 기억 (제스처에서 또 켤지 판단용)
           bridgeProblem = bs.problem || null;
+          // 로그인을 기다리는 중인데 claude가 없다고 밝혀졌다 — 브라우저는 영영 안 뜬다.
+          // (다리가 로그인 프로세스의 즉시 실패를 잡아 /health에 실어 보낸다)
+          if (isLoginWaiting() && bs.problem === 'claude-missing') {
+            setLoginWaitFailed('이 PC에 Claude Code가 없어요. 설치 파일을 한 번 실행하면 다음부터 바로 열려요.');
+          }
           // 계정 확인이 필요하면 배너 표시, 확인됐거나 계정 정보가 없으면 숨김
           if (bs.needConfirm && bs.account) showAccountConfirm(bs.account); else hideAccountConfirm();
           // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내.
@@ -1890,7 +2147,7 @@
           if (bridgeStopping && !bs.periodic) {
             bridgeStopping = false;
             if (bridgeWakeBtn) bridgeWakeBtn.disabled = false;
-            showToast(bs.alive ? '클로드를 끄지 못했어요 — 다리가 아직 응답해요.' : '클로드를 껐어요. 다시 켜려면 이 버튼을 누르세요.');
+            showToast(bs.alive ? '클로드 연결을 끊지 못했어요 — 아직 응답하고 있어요.' : '클로드 연결을 끊었어요. 다시 연결하려면 이 버튼을 누르세요.');
           }
           if (bridgeWakeBtn) {
             // 버튼은 항상 보이고 상태를 색·글자로 표시한다.
@@ -1900,17 +2157,22 @@
               // (주기 갱신은 제외 — 켜기 폴링이 자체 조회로 잡으므로 토스트가 두 번 뜨지 않게)
               stopBridgeWakePoll();
               if (bs.problem === 'bridge-old') {
-                showToast('옛 버전 클로드가 켜져 있어요 — [업데이트 필요] 버튼을 누르면 새 버전으로 다시 켜드려요.');
+                showToast('옛 버전 클로드가 연동돼 있어요 — [업데이트 필요] 버튼을 누르면 새 버전으로 다시 연결해요.');
               } else if (bs.problem === 'claude-missing') {
-                showToast('다리는 켜졌지만 Claude Code가 없어요. 터미널에서 claude --version 이 되는지(설치·로그인) 확인해 주세요.');
+                showToast('연결은 됐지만 Claude Code가 없어요. 터미널에서 claude --version 이 되는지(설치·로그인) 확인해 주세요.');
               } else if (bs.problem === 'claude-logout') {
-                showToast('다리는 켜졌지만 클로드 로그인이 필요해요(안 됐거나 만료) — [클로드 로그인 필요] 버튼을 누르면 로그인 창을 열어드려요.');
+                showToast('연결은 됐지만 클로드 로그인이 필요해요(안 됐거나 만료) — [클로드 로그인 필요] 버튼을 누르면 로그인 창을 열어드려요.');
               } else {
                 const acctNote = bs.account ? ' (' + bs.account + ' 계정)' : '';
-                showToast(bs.ready ? '클로드 다리가 켜졌어요!' + acctNote + ' 이제 추천받기를 누르면 클로드가 답해요.' : '클로드 다리가 켜졌어요' + acctNote + ' — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
+                showToast(bs.ready ? '클로드가 연결됐어요!' + acctNote + ' 이제 추천받기를 누르면 클로드가 답해요.' : '클로드가 연결됐어요' + acctNote + ' — 첫 추천은 준비 때문에 조금 걸릴 수 있어요.');
               }
             }
-            if (bs.alive) installOffer = false; // 켜졌으면(설치 파일 실행 완료 등) 설치 제안 해제
+            if (bs.alive) { installOffer = false; bridgeWakeFailed = false; } // 켜졌으면(설치 파일 실행 완료 등) 실패 기억·설치 제안 해제
+            // 못 켬/꺼둠 안내를 띄운 뒤 켜졌으면(설치 파일 실행, 다른 경로로 켬 등) 덮개를 스스로 걷는다
+            if (bs.alive && (bridgeLoadState === 'failed' || bridgeLoadState === 'stopped')) setBridgeLoadState('off');
+            // 직접 껐으면 그 즉시 추천 화면을 [클로드 켜기] 화면으로 — 켜기 전까진 추천을 쓸 수 없다.
+            // (탭을 다시 들어와야 바뀌면, 끈 직후엔 멀쩡해 보이는 화면에서 추천이 안 되는 것처럼 보인다)
+            if (!bs.alive && userTurnedOff && !bridgeWakePoll && bridgeLoadState === 'off') setBridgeLoadState('stopped');
             if (!bridgeWakePoll && !installOffer) {
               // 켜져 있어도 로그인 만료·claude 없음이면 초록 대신 주황으로 조치를 안내한다
               const bridgeWarn = !!bs.alive && (bs.problem === 'bridge-old' || bs.problem === 'claude-logout' || bs.problem === 'claude-missing');
@@ -1919,20 +2181,20 @@
               const acctShort = bs.account ? String(bs.account).split('@')[0] : '';
               bridgeWakeBtn.classList.toggle('bridge-on', !!bs.alive && !bridgeWarn);
               bridgeWakeBtn.classList.toggle('bridge-warn', bridgeWarn);
-              bridgeWakeBtn.textContent = !bs.alive ? '⚫ 클로드 꺼짐'
+              bridgeWakeBtn.textContent = !bs.alive ? '⚫ 클로드 연동 안 됨'
                 : bs.problem === 'bridge-old' ? '🟠 업데이트 필요'
                 : bs.problem === 'claude-logout' ? '🟠 클로드 로그인 필요'
                 : bs.problem === 'claude-missing' ? '🟠 클로드 설치 필요'
-                : (acctShort ? '🟢 클로드 켜짐 · ' + acctShort : '🟢 클로드 켜짐');
+                : (acctShort ? '🟢 클로드 연동 · ' + acctShort : '🟢 클로드 연동');
               bridgeWakeBtn.title = !bs.alive
-                ? '클로드 다리가 꺼져 있어요 — 눌러서 켜기 (처음이면 설치 파일 안내가 떠요)'
+                ? '클로드가 연동돼 있지 않아요 — 눌러서 연결하기 (처음이면 설치 파일 안내가 떠요)'
                 : bs.problem === 'bridge-old'
-                ? '옛 버전 클로드가 켜져 있어요 — 누르면 새 버전으로 다시 켜드려요.'
+                ? '옛 버전 클로드가 연동돼 있어요 — 누르면 새 버전으로 다시 연결해요.'
                 : bs.problem === 'claude-logout'
                 ? (bs.account ? '클로드 로그인(' + bs.account + ')이 만료됐어요 — 누르면 로그인 창을 열어드려요.' : '클로드 로그인이 필요해요(안 됐거나 만료) — 누르면 로그인 창을 열어드려요.')
                 : bs.problem === 'claude-missing'
                 ? '이 PC에 Claude Code가 없어요 — claude 설치·로그인 후 다시 시도해 주세요.'
-                : (bs.account ? bs.account + ' 계정의 클로드로 답해요 — 누르면 끄기' : '클로드 다리 켜져 있음 — 누르면 끄기');
+                : (bs.account ? bs.account + ' 계정의 클로드로 답해요 — 누르면 연결 끊기' : '클로드 연동됨 — 누르면 연결 끊기');
             }
           }
         }
@@ -1941,24 +2203,34 @@
         if (event.data.pluginMessage.type === 'installer-file') {
           try {
             const b64 = event.data.pluginMessage.b64 || '';
+            const fname = event.data.pluginMessage.name || '클로드다리-설치.bat';
+            const mime = event.data.pluginMessage.mime || 'application/octet-stream';
             if (!b64) {
               showToast('설치 파일이 플러그인에 없어요 — npm run build 후 플러그인을 다시 실행해 주세요.');
             } else {
               const bin = atob(b64);
               const bytes = new Uint8Array(bin.length);
               for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-              const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+              const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
               const a = document.createElement('a');
-              a.href = url; a.download = '클로드다리-설치.bat';
+              a.href = url; a.download = fname;
               document.body.appendChild(a); a.click(); a.remove();
               setTimeout(() => URL.revokeObjectURL(url), 10000);
-              showToast('클로드다리-설치.bat을 받았어요! 받은 파일을 한 번 실행하면 설치·연결이 끝나요 — 그 다음 추천받기를 누르세요.');
+              showToast(IS_MAC
+                ? fname + '을 받았어요! 압축을 풀고 나온 파일을 우클릭 → [열기] 한 번이면 설치·연결이 끝나요.'
+                : fname + '을 받았어요! 받은 파일을 한 번 실행하면 설치·연결이 끝나요 — 그 다음 추천받기를 누르세요.');
             }
           } catch (_e) {
-            showToast('설치 파일 다운로드에 실패했어요 — 플러그인 폴더의 클로드다리-설치.bat을 직접 실행해 주세요.');
+            showToast('설치 파일 다운로드에 실패했어요 — 플러그인 폴더의 설치 파일을 직접 실행해 주세요.');
           }
           installOffer = false;
           if (bridgeWakeBtn) bridgeWakeBtn.disabled = false;
+          { // 설치 버튼들 원복 (다시 누를 수 있게)
+            ['bridgeLoadingInstall', 'loginWaitingInstall', 'accountInstall'].forEach((id) => {
+              const b = document.getElementById(id);
+              if (b) { b.disabled = false; b.textContent = '클로드 설치 파일 받기'; }
+            });
+          }
           requestBridgeStatus(); // 라벨 원복 (꺼짐 상태로)
         }
 
@@ -2578,14 +2850,25 @@
         const box = document.getElementById('composeChat');
         let html = '';
         if (composeMsgs.length) html += '<button class="chat-new" id="composeNew" type="button">새 대화 시작</button>';
+        // 대화 모드엔 '원본 문구'가 없다 — 좋아요의 before로는 이 제안을 부른 사용자 요청을 쓴다.
+        // (sync-feedback.js가 before를 기준으로 묶고, 비어 있으면 후보에서 통째로 버린다)
+        let lastUserText = '';
         composeMsgs.forEach((m) => {
+          if (m.role === 'user') lastUserText = m.text || '';
           html += '<div class="chat-msg ' + (m.role === 'user' ? 'chat-user' : 'chat-ai') + '">' + escapeHtml(m.text) + '</div>';
           if (m.suggestions && m.suggestions.length) {
             html += '<div class="chat-sugg">';
             m.suggestions.forEach((sg) => {
-              html += '<div class="sugg-card"><span class="sugg-text">' + escapeHtml(sg.text) +
-                '</span><button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(sg.text) + '">' + COPY_ICON + '</button></div>';
-              if (sg.reason) html += '<div class="sugg-reason">' + escapeHtml(sg.reason) + '</div>';
+              // 다듬기 모드(renderRecommend)와 같은 카드 구조 — 좋아요 + 복사를 오른쪽에 세로로
+              const likeKey = encodeURIComponent(lastUserText + '\\u0001' + sg.text);
+              const liked = likedKeys.has(likeKey);
+              html += '<div class="sugg-card"><div class="sugg-main"><span class="sugg-text">' + escapeHtml(sg.text) + '</span>' +
+                (sg.reason ? '<div class="sugg-reason">' + escapeHtml(sg.reason) + '</div>' : '') +
+                '</div><div class="sugg-actions">' +
+                '<button class="like-btn' + (liked ? ' liked' : '') + '" title="' + (liked ? '좋아요한 추천이에요' : '이 추천 좋아요 — 예시 후보로 저장') + '" aria-label="좋아요"' +
+                ' data-like-key="' + likeKey + '" data-like-orig="' + encodeURIComponent(lastUserText) + '" data-like-text="' + encodeURIComponent(sg.text) + '" data-like-reason="' + encodeURIComponent(sg.reason || '') + '">' + LIKE_ICON + '</button>' +
+                '<button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(sg.text) + '">' + COPY_ICON + '</button>' +
+                '</div></div>';
             });
             html += '</div>';
           }
@@ -2593,6 +2876,7 @@
         if (composeBusy) html += '<div class="chat-typing">클로드가 문구를 만드는 중…</div>';
         box.innerHTML = html;
         wireCopyButtons(box);
+        wireLikeButtons(box);
         const nb = document.getElementById('composeNew');
         if (nb) nb.onclick = () => { composeMsgs = []; composeBusy = false; renderComposeChat(); };
         // 새 메시지가 보이도록 아래로
@@ -2619,7 +2903,7 @@
       function updateComposeSendState() {
         const el = document.getElementById('composeInput');
         const btn = document.getElementById('composeSend');
-        if (btn) btn.disabled = composeBusy || !el.value.trim();
+        if (btn) btn.disabled = composeBusy || bridgeLoadState === 'waking' || !el.value.trim();
       }
       (function wireComposeBar() {
         const el = document.getElementById('composeInput');
@@ -2667,7 +2951,8 @@
         const rCompact = document.getElementById('recommendHeader').classList.contains('compact');
         // 대화 모드: 응답 대기 중이거나 입력이 비면 [보내기] 비활성
         // 대화 모드에선 헤더 추천 버튼이 숨겨져 있으므로 다듬기 모드만 판단
-        if (rEl && rBtn) rBtn.disabled = rCompact ? false : !rEl.value.trim();
+        // 클로드를 켜는 중이면 어차피 추천이 안 되므로 실행 버튼을 잠근다 (덮개가 가리지만 이중 안전)
+        if (rEl && rBtn) rBtn.disabled = bridgeLoadState === 'waking' ? true : (rCompact ? false : !rEl.value.trim());
         if (composeMode) updateComposeSendState();
       }
       document.getElementById('recommendInput').addEventListener('input', updateFeatureButtonState);
@@ -2685,13 +2970,49 @@
       let bridgeKnownAlive = false; // 마지막으로 확인된 다리 생존 여부 (제스처에서 또 켤지 판단)
       let bridgeProblem = null;    // 마지막으로 확인된 다리 problem (claude-logout이면 버튼 클릭이 로그인 창을 연다)
       let bridgeWakeWaited = 0;
+      let bridgeWakeFailed = false; // 이미 20초 기다려 실패함 — 들어올 때마다 또 20초 돌리지 않는다
       let installOffer = false;    // 켜기 실패 → 버튼이 [설치 파일 받기]로 바뀐 상태
       function requestBridgeStatus() {
         parent.postMessage({ pluginMessage: { type: 'CHECK_BRIDGE' } }, '*');
       }
       function stopBridgeWakePoll() {
         if (bridgeWakePoll) { clearInterval(bridgeWakePoll); bridgeWakePoll = null; }
+        setBridgeLoadState('off');
         if (bridgeWakeBtn) { bridgeWakeBtn.disabled = false; requestBridgeStatus(); } // 끝난 뒤 최신 상태로 라벨 갱신
+      }
+      // ── 추천 화면 덮개 ──
+      // 다리가 꺼져 있으면 추천이 어차피 클로드로 안 되니, 버튼 라벨만 바꾸지 않고 화면을 덮어 상태를 알린다.
+      //   waking  = 켜는 중 (로딩) / failed = 20초 안에 못 켬 / stopped = 사용자가 직접 꺼둠
+      // '연결해 주세요' — 동작 명사(glossary.md)라 띄어 쓴다. 검토 규칙과 어긋나면 안 되는 문구들
+      const BRIDGE_LOAD_COPY = {
+        waking:  { title: '클로드를 연결하는 중이에요.', sub: '잠시만 기다려 주세요.' },
+        failed:  { title: '클로드를 연결하지 못했어요.',
+                   sub: (IS_MAC
+                     ? '이 PC에서 클로드를 처음 쓴다면 설치 파일을 받아 압축을 풀고, 나온 파일을 우클릭 → [열기] 해주세요.'
+                     : '이 PC에서 클로드를 처음 쓴다면 설치 파일을 한 번 실행해야 해요.')
+                     + '<br>클로드 없이도 예시·규칙으로 추천은 받을 수 있어요.' },
+        stopped: { title: '클로드를 연결해 주세요.', sub: '문구 추천은 클로드가 만들어요.<br>연결하면 바로 이어서 쓸 수 있어요.' }
+      };
+      function setBridgeLoadState(state) {
+        bridgeLoadState = state;
+        syncBridgeLoading();
+        updateFeatureButtonState();
+      }
+      function syncBridgeLoading() {
+        const el = document.getElementById('bridgeLoading');
+        if (!el) return;
+        // 추천 화면에서만 덮는다 — 검토/홈으로 나가면 뒤에서 조용히 계속 켜진다
+        const show = bridgeLoadState !== 'off' && currentView === 'recommend';
+        el.classList.toggle('active', show);
+        el.classList.toggle('failed', bridgeLoadState === 'failed');
+        el.classList.toggle('stopped', bridgeLoadState === 'stopped');
+        const copy = BRIDGE_LOAD_COPY[bridgeLoadState];
+        if (!copy) return;
+        document.getElementById('bridgeLoadingTitle').textContent = copy.title;
+        document.getElementById('bridgeLoadingSub').innerHTML =
+          bridgeLoadState === 'waking' && bridgeWakeWaited > 0
+            ? '잠시만 기다려 주세요. (' + bridgeWakeWaited + '초)'
+            : copy.sub;
       }
       // 다리 깨우기 — 메인 스레드에 위임 (감시자 fetch 주경로, 실패 시에만 claudebridge:// 보조).
       // 예전의 window.open/숨은 iframe 프로토콜 열기는 제거(2026-07): 피그마 데스크톱에선 어차피
@@ -2700,32 +3021,58 @@
         parent.postMessage({ pluginMessage: { type: 'WAKE_BRIDGE' } }, '*');
       }
       // 켜는 중 상태 폴링 시작 (window.open은 호출부에서 이미 제스처로 실행함).
-      // auto=true(화면 진입 자동): 실패해도 조용히 / auto=false(버튼 수동): 실패 시 설치 안내
+      // 켜는 동안은 추천 화면을 로딩으로 덮고, 20초 안에 못 켜면 자동/수동 구분 없이
+      // 같은 자리에 조치 버튼([클로드 켜기]/[설치 파일 받기])을 띄운다.
       function startBridgePoll(auto) {
         if (bridgeWakePoll) return;
-        if (bridgeWakeBtn) { bridgeWakeBtn.disabled = true; bridgeWakeBtn.textContent = '켜는 중…'; }
+        if (bridgeWakeBtn) bridgeWakeBtn.disabled = true;
         bridgeWakeWaited = 0;
+        setBridgeLoadState('waking');
         bridgeWakePoll = setInterval(() => {
           bridgeWakeWaited += 2;
+          syncBridgeLoading(); // 경과 초 갱신
           requestBridgeStatus();
-          if (bridgeWakeWaited >= 20) { // 20초 안에 안 켜지면 종료. 수동일 때만 설치 파일 제안
+          if (bridgeWakeWaited >= 20) { // 20초 안에 안 켜지면 종료 → 못 켬 안내로 전환
             stopBridgeWakePoll();
-            if (!auto) {
-              installOffer = true; // 버튼을 [설치 파일 받기]로 전환 — bridge-status 응답이 라벨을 덮지 않게 플래그로 유지
-              if (bridgeWakeBtn) {
-                bridgeWakeBtn.textContent = '🔧 클로드 설치 파일 받기';
-                bridgeWakeBtn.title = '이 PC에서 처음이에요 — 누르면 설치 파일을 받아요. 받은 파일을 한 번 실행하면 다음부턴 자동으로 켜져요.';
-              }
-              showToast('클로드가 아직 이 PC에 연결 안 됐어요. 버튼을 눌러 설치 파일을 받고, 받은 파일을 한 번만 실행해 주세요.');
+            bridgeWakeFailed = true;
+            installOffer = true;// 헤더 버튼도 [설치 파일 받기]로 — bridge-status 응답이 라벨을 덮지 않게 플래그로 유지
+            if (bridgeWakeBtn) {
+              bridgeWakeBtn.textContent = '🔧 클로드 설치 파일 받기';
+              bridgeWakeBtn.title = '이 PC에서 클로드를 처음 써요 — 누르면 설치 파일을 받아요. 받은 파일을 한 번 실행하면 다음부턴 자동으로 연결돼요.';
             }
+            setBridgeLoadState('failed');
+            if (!auto) showToast('클로드가 아직 이 PC에 연동되지 않았어요. 설치 파일을 받아 한 번만 실행해 주세요.');
           }
         }, 2000);
       }
-      // 추천 화면 진입(제스처) 시 호출 — 다리가 꺼진 걸로 알면 그 자리에서 바로 켠다
+      // 못 켬 화면의 조치 버튼들
+      document.getElementById('bridgeLoadingRetry').onclick = () => {
+        installOffer = false;
+        bridgeWakeFailed = false; // 다시 켜보겠다는 뜻 — 실패 기억 지우고 정상 대기
+        userTurnedOff = false;    // 직접 켜려는 의사 — 자동 켜기 차단 해제
+        openBridgeProtocol();    // ← 클릭 제스처 안에서 동기 실행
+        startBridgePoll(false);
+      };
+      document.getElementById('bridgeLoadingInstall').onclick = () => {
+        const b = document.getElementById('bridgeLoadingInstall');
+        b.disabled = true;
+        b.textContent = '설치 파일 만드는 중…';
+        parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER', mac: IS_MAC } }, '*');
+      };
+      // 클로드 없이도 예시·규칙 폴백으로 추천은 되므로, 덮개는 닫고 계속 쓸 수 있어야 한다
+      document.getElementById('bridgeLoadingClose').onclick = () => setBridgeLoadState('off');
+      // 추천 화면 진입(제스처) 시 호출.
+      // 규칙: 다리가 꺼져 있으면 추천 화면은 **항상** 덮개로 상태를 알린다 — 아무것도 안 뜨는 경우는 없다.
+      //   켜짐 / 이미 켜는 중  → 그대로 둔다
+      //   직접 껐음            → 몰래 다시 켜지 않고 [클로드 켜기]만 보여준다 (stopped)
+      //   전에 20초 실패       → 또 20초 태우지 않고 조치 화면 (failed)
+      //   그 외                → 지금 깨우면서 로딩 (waking)
       function ensureBridgeFromGesture() {
-        if (bridgeKnownAlive || bridgeWakePoll || userTurnedOff) return; // 켜짐/켜는중/직접꺼둠이면 안 함
+        if (bridgeKnownAlive || bridgeWakePoll) return;
+        if (userTurnedOff) { setBridgeLoadState('stopped'); return; }
+        if (bridgeWakeFailed) { setBridgeLoadState('failed'); return; }
         openBridgeProtocol();   // ← 제스처 안에서 동기 실행 (차단 방지)
-        startBridgePoll(true);  // 켜질 때까지 상태 폴링 (조용히)
+        startBridgePoll(true);  // 켜질 때까지 상태 폴링
       }
       if (bridgeWakeBtn) {
         bridgeWakeBtn.onclick = () => {
@@ -2733,7 +3080,7 @@
             // 켜기 실패 뒤 — 설치 파일을 다운로드로 내려준다 (클릭 제스처 안이라 다운로드 허용)
             bridgeWakeBtn.disabled = true;
             bridgeWakeBtn.textContent = '설치 파일 만드는 중…';
-            parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER' } }, '*');
+            parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER', mac: IS_MAC } }, '*');
             return;
           }
           if (bridgeWakeBtn.classList.contains('bridge-warn')) {
@@ -2755,7 +3102,7 @@
             bridgeStopping = true;
             userTurnedOff = true; // 직접 껐으니 화면 진입 자동 켜기는 건너뜀
             bridgeWakeBtn.disabled = true;
-            bridgeWakeBtn.textContent = '끄는 중…';
+            bridgeWakeBtn.textContent = '연결 끊는 중…';
             parent.postMessage({ pluginMessage: { type: 'STOP_BRIDGE' } }, '*');
             return;
           }
@@ -2772,6 +3119,10 @@
       let watcherOld = false;       // 감시자가 옛 버전(/account 없음) — 계정 표시는 다리 폴백에 의존
       let confirmedAccount = null;  // 사용자가 [이 계정으로 시작]으로 확인한 계정 (clientStorage)
       let guestMode = false;        // '로그인 없이 사용하기' — 검토만 쓰고 추천은 잠긴다 (이 세션 한정)
+      // 방금 로그아웃함 — 감시자 캐시(5초)가 낡은 계정을 아직 돌려줄 수 있어, 그 계정 조회를 무시한다.
+      // (안 그러면 로그아웃 직후 낡은 조회가 "로그인됨"으로 읽혀 홈으로 튕기고 확인 팝업이 뜬다)
+      // 사용자가 다시 로그인 버튼을 누르면(openClaudeLogin) 해제 — 그 뒤 잡히는 계정은 진짜다.
+      let justLoggedOut = false;
       let accountInfoSeen = false;  // account-info를 한 번이라도 받았나 (첫 화면 결정용)
       let confirmedSeen = false;    // confirmed-account를 받았나
       function requestAccountInfo() { parent.postMessage({ pluginMessage: { type: 'CHECK_ACCOUNT' } }, '*'); }
@@ -2860,6 +3211,20 @@
           if (barText) barText.textContent = '클로드 계정 확인 안 됨';
           if (barBtn) barBtn.textContent = '확인';
         }
+        // 처음 쓰는 PC(감시자 무응답 = 확인 못 함) — 로그인 실패를 겪기 전에 설치 경로를 먼저 보여준다.
+        // watcherOld(도우미는 있는데 구버전)에도 설치 파일이 도우미를 최신으로 덮으므로 함께 보여준다.
+        {
+          const freshPc = accountInfoSeen && !knownAccount
+            && !(accountSource === 'watcher' || accountSource === 'bridge');
+          const instBtn = document.getElementById('accountInstall');
+          if (instBtn) instBtn.style.display = freshPc ? '' : 'none';
+          const hintEl = document.getElementById('accountHint');
+          if (hintEl) hintEl.textContent = freshPc
+            ? (IS_MAC
+              ? 'AI 추천을 쓰려면 클로드 연결이 필요해요. 이 PC에서 클로드를 처음 쓴다면 설치 파일을 받아 압축을 풀고, 나온 파일을 우클릭 → [열기] 해주세요.'
+              : 'AI 추천을 쓰려면 클로드 연결이 필요해요. 이 PC에서 클로드를 처음 쓴다면 설치 파일을 받아 한 번 실행해 주세요.')
+            : 'AI 추천을 쓰려면 클로드 로그인이 필요해요.';
+        }
         const switchBtn = document.getElementById('accountSwitch');
         if (switchBtn) switchBtn.textContent = '클로드 로그인'; // 이 화면은 로그인 안 됐을 때만 뜬다
       }
@@ -2870,6 +3235,13 @@
         // 다리 깨우기는 code.ts의 OPEN_CLAUDE_LOGIN이 알아서 한다(꺼져 있으면 감시자로 깨우고 재시도).
         openClaudeLogin(true);
         startAccountWatch();
+      };
+      // [클로드 설치 파일 받기] — 처음 쓰는 PC용. 받은 파일 한 번 실행이 이 PC의 유일한 수동 단계다.
+      document.getElementById('accountInstall').onclick = () => {
+        const b = document.getElementById('accountInstall');
+        b.disabled = true;
+        b.textContent = '설치 파일 만드는 중…';
+        parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER', mac: IS_MAC } }, '*');
       };
       // [로그인 없이 사용하기] — 게스트 모드로 홈 진입. 검토만 쓰고 추천은 잠긴다.
       document.getElementById('accountSkip').onclick = () => {
@@ -2889,7 +3261,10 @@
       // 홈의 [계정 전환]/[로그인] — 계정 확인 화면을 거치지 않고 브라우저 로그인을 바로 연다
       // (계정 화면 안의 버튼·🔑 버튼과 동일하게 통일). knownAccount 있으면 전환, 없으면 로그인.
       document.getElementById('homeAccountBtn').onclick = () => {
-        openClaudeLogin(!!knownAccount);
+        // 전환/로그인/확인 — 어느 경우든 '계정을 골라 로그인'하려는 것이므로 항상 계정 선택(switch=true)으로 연다.
+        // 일반 로그인(switch=false)은 브라우저에 이미 로그인된 계정이 있으면 승인 화면으로 직행해 계정을 못 고른다(실측).
+        // 계정 화면의 [클로드 로그인](accountSwitch)이 같은 이유로 이미 true 고정 — 이 버튼도 맞춘다.
+        openClaudeLogin(true);
         startAccountWatch();
       };
       // 로그아웃 — 이 PC의 클로드 CLI 로그인을 해제한다(claude auth logout). 다리가 대신 실행.
@@ -2920,6 +3295,7 @@
       let confirmAskedFor = null; // 같은 계정으로 팝업을 반복해 띄우지 않게 기억
       function openConfirmAccountModal(account) {
         if (!account) return;
+        hideLoginWaiting(); // 확인 팝업이 뜬다 = 로그인이 끝났다 (대기 로딩이 남아 팝업을 가리면 안 된다)
         confirmAskedFor = account;
         document.getElementById('confirmAccountEmail').textContent = account;
         confirmModal.classList.add('active');
@@ -2943,6 +3319,8 @@
       };
       // 로그인된 계정이 아직 확인 안 된 상태면 팝업으로 확인받는다 (계정당 1회)
       function maybeAskConfirmAccount() {
+        if (justLoggedOut) return;                          // 로그아웃 직후 낡은 조회 — 확인 물을 계정이 아니다
+        if (currentView === 'account') return;              // 로그인 화면에선 "이 계정 쓸까요?"가 무의미
         if (!knownAccount || knownAccount === confirmedAccount) return;
         if (confirmAskedFor === knownAccount) return;       // 이미 물어본 계정 — 반복 금지
         if (confirmModal.classList.contains('active')) return;
@@ -2972,6 +3350,7 @@
       // [이 계정 사용]을 눌러야만 AI 추천·번역이 돌아간다 (code.ts의 accountNeedsConfirm 게이트와 짝).
       let pendingConfirmAccount = null;
       function showAccountConfirm(account) {
+        if (justLoggedOut) { hideAccountConfirm(); return; } // 로그아웃 직후 낡은 조회 — 배너를 띄우지 않는다
         pendingConfirmAccount = account;
         document.querySelectorAll('.account-confirm-bar').forEach((bar) => {
           const t = bar.querySelector('.acb-text');
@@ -3000,22 +3379,88 @@
       // switchAccount=true — 이미 로그인된 계정이 있는데 다른 계정으로 바꾸려는 경우.
       // 다리가 시크릿 창으로 열어준다(보통 창은 claude.ai 세션이 살아 있어 그 계정 승인 화면으로 직행해 계정을 못 고름).
       function openClaudeLogin(switchAccount) {
+        justLoggedOut = false; // 다시 로그인하려는 것 — 이후 잡히는 계정은 진짜다 (낡은-조회 무시 해제)
         showToast(switchAccount ? '계정 전환 창을 여는 중…' : '클로드 로그인 창을 여는 중…');
+        showLoginWaiting(switchAccount);
         parent.postMessage({ pluginMessage: { type: 'OPEN_CLAUDE_LOGIN', switchAccount: !!switchAccount } }, '*');
         if (loginWatchTimer) clearInterval(loginWatchTimer); // 연타 시 폴링 중복 방지
         let left = 12; // 10초 × 12회 = 2분간 지켜본다 (로그인에 시간이 걸릴 수 있음)
         loginWatchTimer = setInterval(() => {
           requestBridgeStatus();
-          if (--left <= 0) { clearInterval(loginWatchTimer); loginWatchTimer = null; }
+          // 2분을 다 기다렸는데도 계정이 안 잡히면 로딩을 걷고 알려준다 (영영 도는 로딩은 더 나쁘다)
+          if (--left <= 0) {
+            clearInterval(loginWatchTimer); loginWatchTimer = null;
+            if (isLoginWaiting()) {
+              hideLoginWaiting();
+              showToast('로그인을 확인하지 못했어요. 브라우저에서 로그인을 마쳤다면 잠시 후 다시 눌러 주세요.');
+            }
+          }
         }, 10000);
       }
+      // ── 로그인 기다리는 중 로딩 ──
+      // 브라우저 OAuth는 몇십 초가 걸리는데 그동안 플러그인이 폴링만 해서 죽은 것처럼 보였다.
+      // (토스트는 몇 초 뒤 사라지니 결국 아무 표시도 안 남는다) → 계정이 잡힐 때까지 로딩을 띄운다.
+      let loginWaitSwitch = false; // 마지막으로 연 모드 — [창이 안 열렸어요] 재시도 때 같은 모드로 다시 연다
+      let loginWaitFromAccount = null; // 기다리기 시작한 시점의 계정 — 이게 '바뀌어야' 로그인이 끝난 것
+      function isLoginWaiting() {
+        const el = document.getElementById('loginWaiting');
+        return !!el && el.classList.contains('active');
+      }
+      function showLoginWaiting(switchAccount) {
+        loginWaitSwitch = !!switchAccount;
+        loginWaitFromAccount = knownAccount;
+        const el = document.getElementById('loginWaiting');
+        if (!el) return;
+        el.classList.remove('failed'); // 재시도 — 실패 표시를 걷고 다시 기다리는 상태로
+        document.getElementById('loginWaitingTitle').textContent = '브라우저에서 로그인해 주세요.';
+        document.getElementById('loginWaitingSub').textContent = '로그인이 끝나면 클로드가 자동으로 연결돼요.';
+        el.classList.add('active');
+      }
+      // 로그인 창을 아예 못 연 경우 — 스피너를 걷고 이유·조치를 보여준다.
+      // (다리가 없는 PC에서 실제로 브라우저가 안 뜨는데, 예전엔 오류 토스트가 이 화면에 가려 안 보였다)
+      function setLoginWaitFailed(errText) {
+        const el = document.getElementById('loginWaiting');
+        if (!el) return;
+        el.classList.add('active', 'failed');
+        document.getElementById('loginWaitingTitle').textContent = '로그인 창을 열지 못했어요.';
+        // 맥은 설치 파일이 없다 — 폴더에서 npm install 한 번이 설치 과정이라고 안내한다.
+        document.getElementById('loginWaitingSub').textContent = IS_MAC
+          ? '아래에서 설치 파일을 받아 압축을 풀고, 나온 파일을 우클릭 → [열기] 해주세요. 한 번이면 끝나요.'
+          : (errText || '이 PC에 클로드가 연결돼 있는지 확인해 주세요.');
+        // 창이 안 열렸으니 기다릴 이유가 없다 — 폴링을 멈춘다
+        if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null; }
+        stopAccountWatch();
+      }
+      function hideLoginWaiting() {
+        const el = document.getElementById('loginWaiting');
+        if (el) el.classList.remove('active');
+      }
+      // 우측 상단 X — 대기 로딩을 닫고 클로드 로그인 화면으로 보낸다.
+      // 폴링은 멈춘다(로그인 화면에서 다시 [클로드 로그인]을 누르면 그때 새로 시작) — 뒤에서 돌면 팝업이 불쑥 뜬다.
+      document.getElementById('loginWaitingClose').onclick = () => {
+        hideLoginWaiting();
+        if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null; }
+        stopAccountWatch();
+        showView('account');
+      };
+      document.getElementById('loginWaitingRetry').onclick = () => {
+        openClaudeLogin(loginWaitSwitch); // 같은 모드로 다시 열기 (클릭 제스처 안)
+        startAccountWatch();
+      };
+      // 못 연 이유가 '이 PC에 클로드가 없음'일 때의 실제 해결책 — 설치 파일 내려받기
+      document.getElementById('loginWaitingInstall').onclick = () => {
+        const b = document.getElementById('loginWaitingInstall');
+        b.disabled = true;
+        b.textContent = '설치 파일 만드는 중…';
+        parent.postMessage({ pluginMessage: { type: 'GET_INSTALLER', mac: IS_MAC } }, '*');
+      };
       // [🔑] 계정 바꾸기 — 켜짐 상태에서도 다른 계정으로 로그인할 수 있게 로그인 창을 연다.
       // (다리가 낡은 세션을 버리므로, 재로그인 후 첫 추천부터 새 계정으로 답한다)
       const bridgeLoginBtn = document.getElementById('bridgeLoginBtn');
       if (bridgeLoginBtn) {
         bridgeLoginBtn.onclick = () => {
           if (!bridgeKnownAlive) {
-            showToast('클로드가 꺼져 있어요 — [클로드 꺼짐] 버튼으로 먼저 켠 뒤 다시 눌러 주세요.');
+            showToast('클로드가 연동돼 있지 않아요 — [클로드 연동 안 됨] 버튼으로 먼저 연결한 뒤 다시 눌러 주세요.');
             requestBridgeStatus();
             return;
           }
