@@ -137,7 +137,7 @@ if (!reRec.test(src)) {
 }
 src = src.replace(reRec, recGen);
 
-// ── 클로드다리-설치.bat 생성 + code.ts 주입 ──────────────────
+// ── 클로드-커넥터.bat 생성 + code.ts 주입 ──────────────────
 // 플러그인의 [🔧 설치 파일 받기] 버튼이 이 bat을 다운로드로 내려준다 (폴더 찾아갈 필요 없음).
 // bat은 자기완결형: 다리 js + 예시 md + 런처 vbs를 base64로 품고, 실행하면
 // %LOCALAPPDATA%\ClaudeBridge에 설치 + claudebridge:// 등록 + node/claude 점검 + 다리 켜기까지 전부 한다.
@@ -216,9 +216,9 @@ const batContent = [
   '::END::',
   '',
 ].join('\r\n');
-fs.writeFileSync(path.join(root, '클로드다리-설치.bat'), batContent, 'utf8');
+fs.writeFileSync(path.join(root, '클로드-커넥터.bat'), batContent, 'utf8');
 const instGen = [
-  '// ===== INSTALLER:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드다리-설치.bat을 base64로 주입) =====',
+  '// ===== INSTALLER:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드-커넥터.bat을 base64로 주입) =====',
   `const INSTALLER_B64 = ${JSON.stringify(Buffer.from(batContent, 'utf8').toString('base64'))};`,
   '// ===== INSTALLER:END =====',
 ].join('\n');
@@ -228,7 +228,7 @@ if (!reInst.test(src)) {
 }
 src = src.replace(reInst, instGen);
 
-// ── 클로드다리-설치.command 생성 (맥) + zip으로 code.ts 주입 ──────────
+// ── 클로드-커넥터.command 생성 (맥) + zip으로 code.ts 주입 ──────────
 // 맥에도 윈도우 .bat과 같은 "버튼 → 다운로드 → 더블클릭" 경로를 준다 (폴더 뒤질 필요 없음).
 // .command도 자기완결형: 다리·감시자·예시를 base64로 품고, 실행하면
 // ~/Library/Application Support/ClaudeBridge에 설치 + launchd 감시자 등록·기동 + node/claude 점검까지 한다.
@@ -306,7 +306,7 @@ const macCommandContent = [
   'finish 0',
   '',
 ].join('\n');
-const macCmdPath = path.join(root, '클로드다리-설치.command');
+const macCmdPath = path.join(root, '클로드-커넥터.command');
 fs.writeFileSync(macCmdPath, macCommandContent, 'utf8');
 fs.chmodSync(macCmdPath, 0o755);
 
@@ -359,9 +359,9 @@ function zipSingleExecutable(name, data) {
   eocd.writeUInt32LE(30 + nameBuf.length + data.length, 16); // central directory 시작 오프셋
   return Buffer.concat([lfh, nameBuf, data, cdh, nameBuf, eocd]);
 }
-const macZip = zipSingleExecutable('클로드다리-설치.command', Buffer.from(macCommandContent, 'utf8'));
+const macZip = zipSingleExecutable('클로드-커넥터.command', Buffer.from(macCommandContent, 'utf8'));
 const instMacGen = [
-  '// ===== INSTALLER_MAC:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드다리-설치.command를 zip(+x 보존)으로 주입) =====',
+  '// ===== INSTALLER_MAC:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드-커넥터.command를 zip(+x 보존)으로 주입) =====',
   `const INSTALLER_MAC_ZIP_B64 = ${JSON.stringify(macZip.toString('base64'))};`,
   '// ===== INSTALLER_MAC:END =====',
 ].join('\n');

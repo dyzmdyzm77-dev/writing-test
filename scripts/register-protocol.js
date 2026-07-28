@@ -76,7 +76,7 @@ const ok =
 if (ok) {
   console.log('[protocol] claudebridge:// 등록 완료 → ' + launcher);
 } else {
-  console.log('[protocol] claudebridge:// 등록 실패 — 플러그인의 [설치 파일 받기] 또는 클로드다리-원클릭연결.vbs로 등록하세요.');
+  console.log('[protocol] claudebridge:// 등록 실패 — 플러그인의 ["클로드 커넥터" 설치 파일 받기]로 등록하세요.');
 }
 
 // 감시자: 로그인 자동시작 등록 + 지금 바로 기동 (이미 떠 있으면 EADDRINUSE로 조용히 물러남)

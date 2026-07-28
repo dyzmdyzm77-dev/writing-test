@@ -21,11 +21,11 @@ S-1 UX Writing 피그마 플러그인의 AI 추천 기능은 각 사용자 PC에
   ```bash
   curl -fsSL https://report-admin-amber.vercel.app/api/bridge-setup | bash
   ```
-  (오프라인 배포면 저장소의 `클로드다리-설치.command`를 대신 실행 — 같은 내용)
+  (오프라인 배포면 저장소의 `클로드-커넥터.command`를 대신 실행 — 같은 내용)
   결과: `~/Library/Application Support/ClaudeBridge`에 파일 설치 + 사용자 LaunchAgent
   (`com.claudebridge.watcher`) 등록. 관리자 권한 불필요.
 
-- **윈도우**: 저장소의 `클로드다리-설치.bat`을 사용자 컨텍스트에서 1회 실행 (`CB_SILENT=1` 환경변수를 주면 팝업 없이 조용히 설치).
+- **윈도우**: 저장소의 `클로드-커넥터.bat`을 사용자 컨텍스트에서 1회 실행 (`CB_SILENT=1` 환경변수를 주면 팝업 없이 조용히 설치).
   결과: `%LOCALAPPDATA%\ClaudeBridge` 설치 + HKCU Run 자동시작 + `claudebridge://` 등록.
 
 ### 방법 B (전역): 시스템 영역에 밀어 넣기 (맥)

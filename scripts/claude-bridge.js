@@ -1,6 +1,6 @@
 // 클로드 다리(Claude Bridge) — 피그마 플러그인과 Claude Code를 잇는 로컬 심부름꾼
 // ─────────────────────────────────────────────────────────────
-// 사용법: 클로드다리-켜기.bat 더블클릭 (또는 npm run bridge)
+// 사용법: 평상시엔 감시자가 자동으로 켠다 (수동 시작은 npm run bridge)
 // 켜두면 플러그인의 [추천받기]가 Gemini 키 없이도 클로드로 AI 추천을 받는다.
 //
 // 속도 설계: 클로드를 요청마다 새로 시동하면 30~40초가 그냥 날아간다.
@@ -627,7 +627,7 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
-  // 자기 종료 — 클로드다리-끄기.bat이 호출한다 (로컬에서만 접근 가능하니 안전)
+  // 자기 종료 — 플러그인 STOP_BRIDGE/하트비트가 호출한다 (로컬에서만 접근 가능하니 안전)
   if (req.method === 'POST' && req.url === '/shutdown') {
     json(res, 200, { ok: true });
     console.log('[bridge] 종료 요청 받음 — 다리를 끕니다.');

@@ -71,12 +71,49 @@ function wakeBridge() {
   proc.unref(); // 감시자 이벤트 루프에서 분리 (감시자 종료를 막지 않게)
 }
 
+// 이 PC를 '설치 전(새 PC)' 상태로 되돌린다 — 플러그인 [초기화] 버튼(POST /uninstall)이 부른다.
+// register-protocol.js가 설치한 것을 그대로 되돌린다: 감시자 자동시작 + (있으면) 설치 폴더.
+// ⚠️ 반드시 HTTP 응답을 먼저 보낸 뒤 호출할 것 — macOS launchctl bootout이 이 프로세스를 즉시 종료시킬 수 있다.
+//    그래서 파일(plist·설치 폴더)을 launchctl보다 먼저 지운다 — bootout이 우리를 죽여도 자동시작은 이미 사라진다.
+function uninstallSelf() {
+  const removed = [];
+  try {
+    if (process.platform === 'darwin') {
+      const LABEL = 'com.claudebridge.watcher';
+      const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', LABEL + '.plist');
+      const inst = path.join(os.homedir(), 'Library', 'Application Support', 'ClaudeBridge');
+      try { if (fs.existsSync(plist)) { fs.unlinkSync(plist); removed.push(plist); } } catch (_e) {}
+      try { if (fs.existsSync(inst)) { fs.rmSync(inst, { recursive: true, force: true }); removed.push(inst); } } catch (_e) {}
+      try { spawnSync('launchctl', ['bootout', 'gui/' + process.getuid() + '/' + LABEL], { stdio: 'ignore' }); } catch (_e) {}
+      try { spawnSync('launchctl', ['remove', LABEL], { stdio: 'ignore' }); } catch (_e) {}
+    } else if (process.platform === 'win32') {
+      try { spawnSync('reg', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'ClaudeBridgeWatcher', '/f'], { stdio: 'ignore' }); removed.push('자동시작(ClaudeBridgeWatcher)'); } catch (_e) {}
+      try { spawnSync('reg', ['delete', 'HKCU\\Software\\Classes\\claudebridge', '/f'], { stdio: 'ignore' }); removed.push('claudebridge:// 등록'); } catch (_e) {}
+      try {
+        const inst = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'ClaudeBridge');
+        if (fs.existsSync(inst)) { fs.rmSync(inst, { recursive: true, force: true }); removed.push(inst); }
+      } catch (_e) {}
+    }
+  } catch (_e) { /* fail-soft — 못 지운 게 있어도 플러그인 쪽 기억 삭제는 이미 끝났다 */ }
+  return removed;
+}
+
+// 다리(11888)가 떠 있으면 끈다 — 초기화 시 남은 세션 정리 (없으면 조용히 실패)
+function shutdownBridge() {
+  try {
+    const r = http.request({ host: '127.0.0.1', port: 11888, path: '/shutdown', method: 'POST', timeout: 1500 }, () => {});
+    r.on('error', () => {});
+    r.on('timeout', () => { try { r.destroy(); } catch (_e) {} });
+    r.end();
+  } catch (_e) {}
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.url === '/health') {
     // v: 감시자 코드 버전 — 구버전 프로세스가 계속 돌고 있는지 밖에서 확인하는 용도
-    // (v2 = 창 숨김 수정판, v3 = /account 추가판)
-    return json(res, 200, { ok: true, watcher: true, v: 3 });
+    // (v2 = 창 숨김 수정판, v3 = /account 추가판, v4 = /uninstall 추가판)
+    return json(res, 200, { ok: true, watcher: true, v: 4 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -93,6 +130,18 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/shutdown') {
     json(res, 200, { ok: true });
     setTimeout(() => process.exit(0), 200);
+    return;
+  }
+  // 초기화 — 이 PC를 '새 PC' 상태로 되돌린다 (플러그인 [초기화] 버튼).
+  // 응답을 먼저 흘려보낸 뒤 정리한다 — bootout이 우리를 즉시 죽여도 회신은 도착한다.
+  if (req.method === 'POST' && req.url === '/uninstall') {
+    json(res, 200, { ok: true, platform: process.platform });
+    setTimeout(() => {
+      shutdownBridge();
+      const removed = uninstallSelf();
+      console.log('[watcher] 초기화(uninstall) — 제거:', removed.join(', ') || '(없음)');
+      setTimeout(() => process.exit(0), 200);
+    }, 250);
     return;
   }
   return json(res, 404, { error: 'Not found' });
