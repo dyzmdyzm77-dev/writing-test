@@ -31,7 +31,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 13;
+const BRIDGE_V = 15;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -73,7 +73,7 @@ const STYLE_RULES = [
   '5. 명사+명사 금지: 한자어를 풀어 동사로(이자 환불을 받았어요→이자를 돌려받았어요), 최소한 {명사}가 {명사}해서 형태로(잔액 부족으로→잔액이 부족해서).',
   '6. 표기: 되어요→돼요.',
   '7. 줄 구조: 원본이 한 줄이면 추천도 반드시 한 줄로. 임의로 줄을 늘리지 않는다. 단, 여러 문장을 하나의 긍정형 문장으로 합쳐 더 간결해진다면 줄 수를 줄이는 것은 환영.',
-  '8. 다이얼로그 왼쪽 버튼 라벨은 "닫기"(취소 금지).',
+  '8. 팝업(다이얼로그) 버튼: 결과 통보는 [확인], 예/아니오 판단은 [아니오]/[네], 동작 유도는 [취소]/[{동작}]. "취소"는 동작 버튼과 짝일 때만 쓰고 "닫기·동작"처럼 짝 안 맞는 조합·단독 "취소"는 금지.',
   '9. 이름·전화번호·마스킹은 그대로 보존. 사람을 부를 땐 님을 붙여도 좋다.',
   '10. 제품 용어 유지: 입력에 쓰인 기능성 명사(변경, 지정, 등록, 해제 등)는 화면의 기능명·버튼명일 가능성이 높으므로 쉬운 말로 바꾸지 않는다. 시스템 동작과 다른 동사를 새로 만들지 않는다.',
 ].join('\n');
@@ -386,6 +386,57 @@ function askCompose(messages, model) {
   }, model);
 }
 
+// 팝업 세트 추천 턴 — 한 팝업의 구성요소(역할+문구)를 한 번에 보내고,
+// 요소별 낱개가 아니라 **완성된 팝업 세트(케이스) 2~3개**를 통으로 받는다.
+// 타이틀·안내·버튼이 한 몸으로 일관돼야 하므로(따로 뽑아 조합하면 어긋난다) 세트 단위로 제안하게 한다.
+// elements: [{role, text}] (화면 위→아래 순).
+function askPopup(elements, model) {
+  return runTurn(() => {
+    const roles = (elements || []).map((e) => String((e && e.role) || '')).join(', ');
+    const list = (elements || []).map((e, i) =>
+      (i + 1) + '. [' + String((e && e.role) || '') + '] ' + JSON.stringify(String((e && e.text) || ''))
+    ).join('\n');
+    return (
+      '이번 요청은 "팝업(다이얼로그) 세트 다듬기"다. 아래는 한 팝업을 위→아래로 나열한 구성요소들이다(서로 무관한 별개 문구가 아니다). ' +
+      '요소를 낱개로 고치지 말고, **타이틀·안내·버튼이 서로 일관된 "완성된 팝업 세트" 2~3개**를 제안하라. 각 세트는 서로 다른 접근이어야 한다.\n' +
+      '각 세트는 입력과 **같은 역할·같은 개수·같은 순서**의 요소를 모두 포함한다. 세트 안에서 타이틀·안내·버튼은 한 몸으로 맞아떨어져야 한다(예: 본문이 "~할까요?"면 버튼은 [아니오]/[네]).\n' +
+      '[팝업 문체 규칙 — 위 스타일 가이드의 "8. 팝업" 섹션을 따른다]\n' +
+      '- 타이틀: 짧은 명사구(2~4어절), 종결어미·마침표 없이(~요/~다/~까요? 금지). 반드시 안내(본문) 맥락을 요약해 타이틀만 봐도 무슨 팝업인지 알게 하라. 원본이 "알림/확인"처럼 막연하면 본문을 근거로 구체화하라.\n' +
+      '- 안내(본문): 해요체. 판단이 필요하면 "~할까요?"로 묻고, 되돌릴 수 없는 위험(삭제·탈퇴 등)은 결과를 먼저 경고한다. 결과·상태 통보면 서술형으로 알린다.\n' +
+      '- 버튼: 본문이 "~할까요?"면 [아니오]/[네], 본문이 상황을 서술하고 이 버튼이 실제 동작이면 동작 동사(삭제/저장/연결 해제 등), 통보 팝업의 단일 버튼이면 "확인". "취소"는 동작 버튼과 짝일 때만, "닫기·동작" 조합 금지. 화면 기능명(변경·해제 등)은 그대로 둔다.\n' +
+      '- 원문의 정보·조건(숫자·이상/이하·대상)은 유지하고, 원문에 없는 정보·절차·연락처를 지어내지 마라.\n' +
+      '답은 반드시 JSON 객체 하나만 출력한다. 마크다운·설명·코드펜스 금지:\n' +
+      '{"sets": [{"reason": "이 세트의 방향을 한국어 한 문장으로", "elements": [{"role": "역할", "text": "문구 (줄바꿈은 \\n)"}, ...]}, ...]}\n' +
+      '역할은 입력 순서대로: ' + roles + '\n\n' +
+      '[팝업 요소]\n' + list
+    );
+  }, model);
+}
+
+// 팝업 응답에서 {sets: [{reason, elements:[{role,text}]}]} 추출 (코드펜스·앞뒤 잡담 허용)
+function parsePopup(raw) {
+  let s = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const m = s.match(/\{[\s\S]*\}/);
+  if (m) s = m[0];
+  try {
+    const o = JSON.parse(s);
+    const setsIn = Array.isArray(o && o.sets) ? o.sets : [];
+    const sets = setsIn
+      .map((st) => ({
+        reason: String((st && st.reason) || '').trim(),
+        elements: Array.isArray(st && st.elements)
+          ? st.elements
+              .map((el) => ({ role: String((el && el.role) || '').trim(), text: String((el && el.text) || '').trim() }))
+              .filter((el) => el.text)
+          : [],
+      }))
+      .filter((st) => st.elements.length);
+    return sets.length ? sets : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
 // 대화형 제작 응답에서 {reply, suggestions[]} 추출 (코드펜스·앞뒤 잡담 허용)
 function parseCompose(raw) {
   let s = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
@@ -656,6 +707,33 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { suggestions, engine: 'claude' });
     } catch (e) {
       console.log('[bridge] 실패:', e.message);
+      return json(res, 502, friendlyError(e, '클로드 호출 실패: '));
+    }
+  }
+  // 팝업 요소별 추천 — 한 팝업의 구성요소(역할+문구)를 한 번에 받아 역할별로 다듬는다.
+  // 요소를 함께 보내야 타이틀이 본문 맥락을 참조할 수 있다(요소별 개별 요청과의 차이).
+  if (req.method === 'POST' && req.url === '/recommend-popup') {
+    const { elements, model } = await readBody(req);
+    const list = Array.isArray(elements) ? elements.filter((e) => e && String(e.text || '').trim()) : [];
+    if (list.length < 2) return json(res, 400, { error: '팝업 요소가 부족합니다.' });
+    const started = Date.now();
+    console.log('[bridge] 팝업 추천 요청: 요소 ' + list.length + '개', model ? '(모델: ' + model + ')' : '');
+    try {
+      const raw = await askPopup(list, model);
+      const sets = parsePopup(raw);
+      const sec = ((Date.now() - started) / 1000).toFixed(1);
+      if (!sets) {
+        console.log('[bridge] 팝업 파싱 실패 (' + sec + 's):', String(raw).slice(0, 200));
+        return json(res, 502, { error: '클로드 응답을 해석하지 못했어요.' });
+      }
+      console.log('[bridge] 팝업 세트 ' + sets.length + '개 (' + sec + 's)');
+      stats.served++;
+      stats.lastAt = new Date().toLocaleTimeString('ko-KR');
+      stats.lastText = '[팝업] ' + String((list[0] && list[0].text) || '').slice(0, 24);
+      stats.lastSec = sec;
+      return json(res, 200, { sets, engine: 'claude' });
+    } catch (e) {
+      console.log('[bridge] 팝업 실패:', e.message);
       return json(res, 502, friendlyError(e, '클로드 호출 실패: '));
     }
   }
