@@ -155,3 +155,8 @@ server.on('error', (e) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log('[watcher] 클로드 다리 감시자 켜짐 — http://localhost:' + PORT);
 });
+// IPv6 루프백(::1)에도 함께 듣는다 — 'localhost'가 ::1로 먼저 해석되는 환경에서
+// 피그마 fetch가 IPv4로 폴백하지 않아 다리 깨우기·계정 조회가 조용히 실패하던 문제 대응(다리와 동일).
+const server6 = http.createServer(server.listeners('request')[0]);
+server6.on('error', () => {}); // ::1을 못 잡아도(EADDRINUSE·IPv6 없음) IPv4만으로 계속 동작
+server6.listen(PORT, '::1');

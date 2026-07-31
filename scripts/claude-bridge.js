@@ -886,3 +886,9 @@ server.listen(PORT, '127.0.0.1', () => {
     (e) => console.log('[bridge] 워밍업 실패 (첫 요청 때 재시도):', e.message)
   );
 });
+// IPv6 루프백(::1)에도 함께 듣는다 — macOS 등에서 'localhost'가 ::1로 먼저 해석되는데
+// 피그마(Electron) fetch는 curl과 달리 IPv4로 자동 폴백하지 않아, IPv4만 듣던 다리에 연결이 거부돼
+// 추천·헬스체크가 조용히 실패했다(실측 2026-07). 같은 요청 핸들러를 IPv6 루프백에도 얹는다.
+const server6 = http.createServer(server.listeners('request')[0]);
+server6.on('error', (e) => console.log('[bridge] IPv6(::1) 리슨 생략 — IPv4만 사용:', e && e.message));
+server6.listen(PORT, '::1');
