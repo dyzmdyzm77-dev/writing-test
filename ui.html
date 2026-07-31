@@ -111,10 +111,30 @@
       /* 추천 모드 전환 (다듬기/대화로 만들기) — 전역 button 규칙(width:100%, height:48px!important) 되돌림 필수 */
       /* 모드 토글 — 둥근 칩(pill) 형태, 칩 사이 간격 */
       .mode-toggle {
-        display: inline-flex;
+        display: flex;
+        align-items: center;
         gap: 6px;
         margin: 6px 0 2px 0;
       }
+      /* 대화 메뉴(햄버거) — 탭 줄 오른쪽 끝, 대화 모드에서만. 모드 칩과 같은 규격 */
+      #composeMenuBtn {
+        display: none;
+        margin-left: auto;
+        width: 30px;
+        min-width: 30px;
+        height: 30px !important;
+        line-height: 1 !important;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #D9D9D9;
+        border-radius: 999px;
+        background: #FFFFFF;
+        color: #555555;
+        cursor: pointer;
+      }
+      #recommendHeader.chat-mode #composeMenuBtn { display: inline-flex; }
+      #composeMenuBtn:hover { border-color: #B8CCEF; color: #1D6CEB; }
       .mode-toggle .mode-btn {
         display: inline-flex;
         align-items: center;
@@ -143,9 +163,11 @@
       /* 다듬기 모드처럼 힌트가 비면 여백까지 없앤다 (대화·팝업 모드에선 내용이 있어 그대로 표시) */
       #recommendHint:empty { display: none; margin: 0; }
       /* 대화 모드일 땐 헤더의 큰 입력창·버튼을 숨기고 헤더를 낮춘다 (입력은 하단 고정 바에서) */
-      #recommendHeader.chat-mode { min-height: 0; }
+      #recommendHeader.chat-mode { min-height: 0; padding-bottom: 8px; }
       #recommendHeader.chat-mode #recommendInput,
       #recommendHeader.chat-mode #recommendRun { display: none; }
+      /* 칩 아래 여백 압축 — 제목부 아래 16px은 다듬기 모드 입력창과의 간격용이라 대화 모드엔 과함 */
+      #recommendHeader.chat-mode .title-section { margin-bottom: 4px; }
       /* 하단 고정 입력 바 — 클로드 앱과 같은 위치. 전역 button 규칙(width:100%,height:48px!important) 되돌림 */
       .compose-bar {
         position: fixed;
@@ -238,20 +260,77 @@
       .chat-sugg { margin: 4px 0 10px 0; }
       /* 대화 모드 추천 사유 — 이제 카드 밖이 아니라 .sugg-main 안에 들어간다(다듬기 모드와 같은 구조) */
       .chat-sugg .sugg-reason { font-size: 11.5px; color: #757575; margin: 4px 0 0 0; line-height: 1.4; }
-      .chat-new {
-        display: inline-flex;
-        width: auto;
-        height: auto !important;
-        padding: 0;
-        margin: 0 0 6px 0;
+      /* 대화 메뉴 드롭다운 — body 직속 fixed (헤더 안에 두면 헤더 스택(z:100)에 갇혀
+         입력 바(1500)·탭 바(1600)에 가림). 위치는 열 때 버튼 rect로 계산 */
+      .compose-menu {
+        position: fixed;
+        z-index: 1620;
+        min-width: 230px;
+        max-width: 300px;
+        max-height: 60vh;
+        overflow-y: auto;
+        scrollbar-width: none;
+        background: #FFFFFF;
+        border: 1px solid #E3E3E3;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        padding: 6px;
+      }
+      .compose-menu .cmenu-new {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 8px;
+        width: 100%;
+        height: 34px !important;     /* 전역 button 높이(48px !important) 되돌리기 */
+        line-height: 1 !important;
+        padding: 0 10px;
+        margin: 0;
         background: none;
         border: none;
-        color: #757575;
-        font-size: 11.5px;
-        text-decoration: underline;
+        border-radius: 8px;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: #1D6CEB;
+        text-align: left;
         cursor: pointer;
       }
-      .chat-new:hover { color: #1D6CEB; }
+      .compose-menu .cmenu-new:hover { background: #F5F8FE; }
+      .compose-menu .cmenu-label { font-size: 11px; font-weight: 600; color: #9E9E9E; margin: 8px 10px 4px; }
+      .compose-menu .cmenu-empty { font-size: 12px; color: #9E9E9E; padding: 4px 10px 8px; }
+      .chat-history-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: #FFFFFF;
+        margin-bottom: 2px;
+        cursor: pointer;
+      }
+      .chat-history-item:hover { background: #F7FAFF; }
+      .chat-history-item.now .chat-history-name { color: #1D6CEB; font-weight: 600; }
+      .chat-history-name { flex: 1; font-size: 12.5px; color: #1D1D1D; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .chat-history-time { font-size: 11px; color: #9E9E9E; flex: none; }
+      .chat-history-del {
+        width: 22px;
+        min-width: 22px;
+        height: 22px !important;     /* 전역 button 높이(48px !important) 되돌리기 */
+        line-height: 1 !important;
+        padding: 0;
+        margin: 0;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: none;
+        border-radius: 6px;
+        color: #B5B5B5;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .chat-history-del:hover { background: #FDECEC; color: #D64545; }
       #recommendEntered { display: none; margin-bottom: 12px; }
       #recommendHeader.compact #recommendEntered { display: block; }
       #recommendEntered .entered-head {
@@ -1126,6 +1205,11 @@
       body.has-tabbar.compose-open { padding-bottom: 148px; }
       body.has-tabbar .preview-section { padding-bottom: 148px; } /* 검토 결과 — 하단 버튼(60)+탭바(60) 위로 */
       body.has-tabbar .feature-section { padding-bottom: 120px; } /* 추천 목록 — 탭바 위로 */
+      /* 대화 모드: 입력 바+탭 바 여유는 body(compose-open, 148px)가 이미 확보 —
+         컨테이너 몫까지 겹치면 마지막 말풍선 아래 ~268px 빈 공간이 생긴다 (실측, 2026-07).
+         위쪽도 같은 문제: 헤더 꼬리(16+12px)+컨테이너 머리(16+12px)가 겹쳐 칩 아래가 68px —
+         대화 모드에선 컨테이너 위 여백을 없애 칩~첫 말풍선을 24px로 압축 */
+      body.compose-open .feature-section { padding-bottom: 0; margin-top: 0; padding-top: 0; }
       body.has-tabbar #homeView { padding-bottom: 100px; } /* 하단 고정 초기화 버튼 + 탭바 위로 콘텐츠 여유 */
 
       /* ── 홈 / 기능 화면 (문구 추천) ── */
@@ -1683,6 +1767,10 @@
         <div class="mode-toggle" id="recommendModeToggle">
           <button id="modeRefine" class="mode-btn active" type="button">문구 다듬기</button>
           <button id="modeCompose" class="mode-btn" type="button">대화로 만들기</button>
+          <!-- 대화 메뉴(햄버거) — 대화 모드에서만 표시. 새 대화·최근 대화 목록을 드롭다운으로 -->
+          <button id="composeMenuBtn" type="button" title="대화 메뉴 — 새 대화·최근 대화" aria-label="대화 메뉴" aria-haspopup="true" aria-expanded="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
         </div>
         <div class="hint" id="recommendHint"></div>
         <div class="account-confirm-bar" style="display:none">
@@ -1714,6 +1802,8 @@
       <!-- 대화로 만들기 모드의 대화 기록 (다듬기 모드에선 숨김) -->
       <div id="composeChat" style="display:none"></div>
     </div>
+    <!-- 대화 메뉴 드롭다운 — 햄버거(#composeMenuBtn) 클릭 시 renderComposeMenu가 채운다 -->
+    <div id="composeMenu" class="compose-menu" style="display:none"></div>
 
     <!-- 플러그인을 켠 직후 계정 확인 로딩 — 확인이 끝날 때까지(decideFirstScreen) 로그인/홈을 섣불리 안 보여준다 -->
     <div id="accountChecking" class="account-checking active">
@@ -1921,6 +2011,7 @@
       }
       function showView(name) {
         currentView = name;
+        if (typeof closeComposeMenu === 'function') closeComposeMenu(); // 화면을 옮기면 대화 메뉴 드롭다운은 접는다
         if (name !== 'account') stopSetupWatch(); // 계정 화면을 벗어나면 설치·로그인 대기 폴링 종료
         // 계정 화면은 전용 화면 — 다른 화면 요소를 모두 숨기고 단독으로 보인다
         const accView = document.getElementById('accountView');
@@ -1944,6 +2035,8 @@
           parent.postMessage({ pluginMessage: { type: 'GET_SELECTION_TEXT' } }, '*');
           // 추천 화면은 검토와 무관하므로 캔버스 코멘트 + 검토 결과(previewData) 모두 초기화
           if (previewData && previewData.length > 0) resetReview();
+          // 대화 모드였다면 다른 탭에 다녀와도 새 대화로 시작 (하던 대화는 저장돼 있어 메뉴에서 이어 가기)
+          if (composeMode) { composeMsgs = []; composeActiveId = null; composeBusy = false; renderComposeChat(); }
         }
         document.getElementById('homeView').style.display = name === 'home' ? 'block' : 'none';
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
@@ -1972,6 +2065,7 @@
         if (name === 'review') {
           if (ps) ps.classList.toggle('active', hasResults);
           if (bg) bg.classList.toggle('active', hasResults);
+          setResultHeaderVisible(hasResults); // 결과가 다른 탭에 있는 동안 도착했어도 '검토 결과 N건' 헤더 복원
         } else {
           if (ps) ps.classList.remove('active');
           if (bg) bg.classList.remove('active');
@@ -2286,23 +2380,46 @@
         // 대화형 문구 제작 응답 — 대화에 어시스턴트 말풍선(+제안 카드)으로 덧붙인다
         if (event.data.pluginMessage.type === 'compose-result') {
           const cm = event.data.pluginMessage;
-          composeBusy = false;
-          if (cm.ok) {
-            composeMsgs.push({
-              role: 'assistant',
-              text: cm.reply || (cm.suggestions && cm.suggestions.length ? '이렇게 제안해 봤어요.' : '…'),
-              suggestions: cm.suggestions || [],
-            });
-          } else {
-            composeMsgs.push({ role: 'assistant', text: '⚠ ' + (cm.error || '요청에 실패했어요. 잠시 후 다시 시도해주세요.') });
+          const assistantMsg = cm.ok
+            ? {
+                role: 'assistant',
+                text: cm.reply || (cm.suggestions && cm.suggestions.length ? '이렇게 제안해 봤어요.' : '…'),
+                suggestions: cm.suggestions || [],
+              }
+            : { role: 'assistant', text: '⚠ ' + (cm.error || '요청에 실패했어요. 잠시 후 다시 시도해주세요.') };
+          // 답을 기다리는 사이 [새 대화 시작]/다른 대화 열기를 했으면, 화면이 아니라
+          // 원래 대화(히스토리 항목)에 붙여 저장만 한다 — 엉뚱한 대화가 오염되지 않게.
+          const cid = cm.convoId ? String(cm.convoId) : '';
+          if (cid && String(composeActiveId) !== cid) {
+            const c = composeHistory.find((x) => x && String(x.id) === cid);
+            if (c) { // 그새 삭제된 대화면 답을 버린다
+              c.msgs = (c.msgs || []).concat([assistantMsg]).slice(-40);
+              c.updatedAt = Date.now();
+              composeHistory = [c].concat(composeHistory.filter((x) => x && String(x.id) !== cid));
+              parent.postMessage({ pluginMessage: { type: 'SAVE_COMPOSE_HISTORY', list: composeHistory } }, '*');
+              if (composeMode && !composeMsgs.length) renderComposeChat(); // 첫 화면 목록 갱신
+            }
+            return;
           }
+          composeBusy = false;
+          composeMsgs.push(assistantMsg);
+          persistCompose(); // 답까지 받은 대화를 최근 목록에 저장
           renderComposeChat();
           updateComposeSendState();
+        }
+
+        // 최근 대화 목록 로드 (플러그인 시작 때 한 번) — 목록은 햄버거 메뉴에서만 쓴다.
+        // 마지막 대화 자동 복원은 하지 않는다 (대화 모드 진입 = 항상 새 대화, 2026-07 사용자 결정)
+        if (event.data.pluginMessage.type === 'compose-history') {
+          const list = Array.isArray(event.data.pluginMessage.list) ? event.data.pluginMessage.list : [];
+          composeHistory = list.filter((c) => c && Array.isArray(c.msgs) && c.msgs.length).slice(0, 10);
         }
 
         if (event.data.pluginMessage.type === 'recommend-result') {
           const recMsg = event.data.pluginMessage;
           const recOrig = recMsg.original || '';
+          // 결과는 다듬기 UI(#recommendList)에 그려진다 — 대화 모드가 목록을 숨겨둔 채 오면 안 보인다
+          if (composeMode) setRecommendMode(false);
           renderRecommend(recOrig, recMsg.suggestions || [], {
             appendAi: !!recMsg.appendAi,   // [AI 추천 더 받기] 결과 — 기존 카드 아래에 덧붙임
             canAskAi: !!recMsg.canAskAi,   // 사전 답안 카드 밑에 [AI 추천 더 받기] 버튼 노출
@@ -2313,6 +2430,9 @@
         // 팝업 추천 결과 — 위엔 예시(미리보기)를 그대로 두고, 아래에 케이스별 세트를 붙인다.
         // 결과 헤더에 [초기화]가 있어 결과만 지우고 다시 추천할 수 있다. (컴팩트로 안 가서 예시가 안 사라짐)
         if (event.data.pluginMessage.type === 'popup-recommend-result') {
+          // 결과는 다듬기 UI(#recommendList)에 그려진다 — 대화 모드가 목록을 display:none으로
+          // 숨겨둔 채 결과가 오면 "눌렀는데 아무것도 안 나옴"이 된다(실제 신고) → 다듬기로 전환하고 그린다
+          if (composeMode) setRecommendMode(false);
           renderPopupRecommend(event.data.pluginMessage.sets || [], event.data.pluginMessage.error);
           if (typeof adjustTopPadding === 'function') adjustTopPadding();
         }
@@ -2425,6 +2545,13 @@
           }
           // 계정 확인이 필요하면 배너 표시, 확인됐거나 계정 정보가 없으면 숨김
           if (bs.needConfirm && bs.account) showAccountConfirm(bs.account); else hideAccountConfirm();
+          // 다리는 계정까지 알려주는데 계정 줄이 "확인 안 됨"으로 남아 있다 = 시작 때 감시자가
+          // 잠깐 죽어 있어 첫 조회가 실패한 것 — 계정 조회를 다시 돌려 줄을 맞춘다(성공하면 조건이 풀려 반복 안 됨).
+          // 로그아웃 직후(justLoggedOut)·게스트 모드는 건드리지 않는다.
+          if (bs.alive && bs.account && !justLoggedOut && !guestMode
+              && !knownAccount && accountSource !== 'watcher' && accountSource !== 'bridge') {
+            requestAccountInfo();
+          }
           // [클로드 켜짐] 재클릭으로 끄는 중이었다면 결과 안내.
           // 주기 갱신(periodic)은 제외 — 끄는 도중 주기 응답이 먼저 오면 "끄지 못했어요"가 잘못 뜬다.
           if (bridgeStopping && !bs.periodic) {
@@ -2540,7 +2667,9 @@
             lastSelectionText = '';
             const inp = document.getElementById('recommendInput');
             renderPopupPreview(event.data.pluginMessage.popupElements || []);
-            if (pv) pv.style.display = 'block';
+            // 대화 모드에선 미리보기도 숨긴다 (캔버스 선택을 대화 UI에 반영하지 않는 설계) —
+            // 다듬기로 돌아오면 setRecommendMode(false)가 다시 켜 준다
+            if (pv) pv.style.display = composeMode ? 'none' : 'block';
             if (inp) inp.style.display = 'none';
             if (rHint && !composeMode) rHint.innerHTML = '팝업이 선택됐어요 — 아래 문구들을 <b>역할별로</b> 추천해요. <b>[추천받기]</b>를 누르세요.';
             updateFeatureButtonState();
@@ -2693,7 +2822,11 @@
         const previewList = document.getElementById('previewList');
         const previewSection = document.getElementById('previewSection');
         const btnGroupEl = document.querySelector('.button-group');
-        
+        // 검토 결과 도착(preview-add)·캔버스 변경(remove-changed-items)은 비동기라 다른 탭에서도 온다.
+        // 여기서 무조건 .active를 켜면 홈/추천 화면 위에 검토 결과가 겹쳐 뜨므로,
+        // 목록 DOM만 갱신하고 표시는 '검토' 탭일 때만 켠다 (돌아오면 showView가 복원).
+        const inReviewTab = currentView === 'review';
+
         // 변경점이 없으면 미리보기 섹션 및 플로팅 버튼 숨기기
         if (data.length === 0) {
           previewSection.classList.remove('active');
@@ -2705,8 +2838,8 @@
           return;
         }
 
-        // 플로팅 버튼 그룹 표시
-        if (btnGroupEl) {
+        // 플로팅 버튼 그룹 표시 (검토 탭에서만)
+        if (btnGroupEl && inReviewTab) {
           btnGroupEl.classList.add('active');
         }
 
@@ -3071,13 +3204,15 @@
           previewList.appendChild(groupEl);
         }
 
-        previewSection.classList.add('active');
+        if (inReviewTab) {
+          previewSection.classList.add('active');
+          setResultHeaderVisible(data.length > 0);
+        }
         updateReviewGuide(); // 결과가 뜨면 사용법 예시 숨김
-        setResultHeaderVisible(data.length > 0);
 
-        // 플로팅 버튼 그룹 표시
+        // 플로팅 버튼 그룹 표시 (검토 탭에서만)
         const btnGroup = document.querySelector('.button-group');
-        if (btnGroup && data.length > 0) {
+        if (btnGroup && data.length > 0 && inReviewTab) {
           btnGroup.classList.add('active');
         }
       }
@@ -3150,9 +3285,31 @@
       let composeMode = false;
       let composeMsgs = [];   // [{role:'user'|'assistant', text, suggestions?}]
       let composeBusy = false;
+      // 최근 대화 목록 — figma.clientStorage에 저장(code.ts 경유), 최대 10개.
+      // 마지막 대화는 플러그인을 다시 켜도 이어지고, [새 대화 시작]을 해도 이전 대화는 목록에 남는다.
+      let composeHistory = [];      // [{id, title, updatedAt, msgs}]
+      let composeActiveId = null;   // 지금 이어 가는 대화의 id (새 대화면 null → 첫 저장 때 발급)
+      function persistCompose() {
+        if (!composeMsgs.length) return;
+        const firstUser = composeMsgs.find((m) => m.role === 'user');
+        const title = String((firstUser && firstUser.text) || '새 대화').replace(/\s+/g, ' ').slice(0, 40);
+        if (!composeActiveId) composeActiveId = 'c' + Date.now() + Math.random().toString(36).slice(2, 6);
+        // 메시지는 대화당 최근 40개까지만 저장 (클로드에 보내는 것도 최근 12개뿐 — 저장소 낭비 방지)
+        const entry = { id: composeActiveId, title, updatedAt: Date.now(), msgs: composeMsgs.slice(-40) };
+        composeHistory = [entry].concat(composeHistory.filter((c) => c && c.id !== composeActiveId)).slice(0, 10);
+        parent.postMessage({ pluginMessage: { type: 'SAVE_COMPOSE_HISTORY', list: composeHistory } }, '*');
+      }
+      function composeTimeAgo(ts) {
+        const d = Date.now() - (ts || 0);
+        if (d < 60000) return '방금';
+        if (d < 3600000) return Math.floor(d / 60000) + '분 전';
+        if (d < 86400000) return Math.floor(d / 3600000) + '시간 전';
+        return Math.floor(d / 86400000) + '일 전';
+      }
       function setRecommendMode(compose) {
         if (composeMode === compose) return;
         composeMode = compose;
+        closeComposeMenu(); // 모드가 바뀌면 대화 메뉴 드롭다운은 접는다
         // 다듬기 컴팩트 모드와는 상호배타 — 대화 모드로 갈 땐 컴팩트 해제
         if (compose) setRecommendCompact(false);
         document.getElementById('modeRefine').classList.toggle('active', !compose);
@@ -3160,11 +3317,27 @@
         document.getElementById('recommendHint').innerHTML = ''; // 대화 모드 안내는 중앙 인사말(#composeGreeting)이 대신한다
         document.getElementById('recommendList').style.display = compose ? 'none' : 'block';
         document.getElementById('composeChat').style.display = compose ? 'block' : 'none';
+        // 팝업 미리보기는 다듬기 전용 — 대화 모드로 가면 숨기고, 돌아오면 선택이 살아 있을 때 복원
+        {
+          const pvEl = document.getElementById('popupPreview');
+          if (pvEl) pvEl.style.display = (!compose && popupSelected) ? 'block' : 'none';
+          const inpEl = document.getElementById('recommendInput');
+          if (inpEl) inpEl.style.display = (!compose && popupSelected) ? 'none' : '';
+        }
         // 대화 모드: 헤더의 큰 입력창·버튼 숨기고, 하단 고정 입력 바를 띄운다 (클로드 앱과 동일)
         document.getElementById('recommendHeader').classList.toggle('chat-mode', compose);
         document.getElementById('composeBar').classList.toggle('visible', compose);
         document.body.classList.toggle('compose-open', compose);
-        if (compose) { renderComposeChat(); adjustTopPadding(); setTimeout(() => document.getElementById('composeInput').focus(), 50); }
+        if (compose) {
+          // 대화 모드 진입은 항상 새 대화로 시작 (2026-07 사용자 결정) — 하던 대화는
+          // persistCompose가 이미 저장해 둬서 햄버거 메뉴 [최근 대화]에서 언제든 이어 갈 수 있다
+          composeMsgs = [];
+          composeActiveId = null;
+          composeBusy = false;
+          renderComposeChat();
+          adjustTopPadding();
+          setTimeout(() => document.getElementById('composeInput').focus(), 50);
+        }
         else { document.body.classList.remove('compose-empty'); adjustTopPadding(); }
         updateFeatureButtonState();
       }
@@ -3176,7 +3349,7 @@
         // 첫 진입(메시지 없음)이면 인사말+입력창을 중앙에 (클로드 챗 랜딩), 대화 시작하면 하단으로
         document.body.classList.toggle('compose-empty', composeMode && composeMsgs.length === 0);
         let html = '';
-        if (composeMsgs.length) html += '<button class="chat-new" id="composeNew" type="button">새 대화 시작</button>';
+        // 새 대화·최근 대화는 탭 줄 오른쪽 햄버거 메뉴(#composeMenuBtn)로 이동 (2026-07 사용자 요청)
         // 대화 모드엔 '원본 문구'가 없다 — 좋아요의 before로는 이 제안을 부른 사용자 요청을 쓴다.
         // (sync-feedback.js가 before를 기준으로 묶고, 비어 있으면 후보에서 통째로 버린다)
         let lastUserText = '';
@@ -3204,17 +3377,99 @@
         box.innerHTML = html;
         wireCopyButtons(box);
         wireLikeButtons(box);
-        const nb = document.getElementById('composeNew');
-        if (nb) nb.onclick = () => { composeMsgs = []; composeBusy = false; renderComposeChat(); };
         // 새 메시지가 보이도록 아래로
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
       }
+      // ── 대화 메뉴(햄버거) — 새 대화 + 최근 대화 목록 드롭다운 ──
+      function composeStartNew() {
+        // 대화를 비우되 이전 대화는 목록에 남는다 (persistCompose가 이미 저장해 둠)
+        composeMsgs = [];
+        composeActiveId = null;
+        composeBusy = false;
+        renderComposeChat();
+        updateComposeSendState();
+      }
+      function composeOpenConvo(id) {
+        const c = composeHistory.find((x) => x && String(x.id) === String(id));
+        if (!c) return;
+        composeActiveId = c.id;
+        composeMsgs = (c.msgs || []).map((m) => ({ role: m.role, text: m.text, suggestions: m.suggestions }));
+        composeBusy = false;
+        renderComposeChat();
+        updateComposeSendState();
+      }
+      function renderComposeMenu() {
+        const menu = document.getElementById('composeMenu');
+        let html = '<button class="cmenu-new" id="composeMenuNew" type="button">＋ 새 대화</button>';
+        html += '<div class="cmenu-label">최근 대화</div>';
+        if (!composeHistory.length) {
+          html += '<div class="cmenu-empty">저장된 대화가 없어요.</div>';
+        } else {
+          composeHistory.forEach((c) => {
+            const now = composeMsgs.length && String(c.id) === String(composeActiveId);
+            html += '<div class="chat-history-item' + (now ? ' now' : '') + '" data-open-convo="' + escapeHtml(String(c.id)) + '" role="button" tabindex="0">' +
+              '<span class="chat-history-name">' + escapeHtml(c.title || '(제목 없음)') + '</span>' +
+              '<span class="chat-history-time">' + (now ? '지금' : composeTimeAgo(c.updatedAt)) + '</span>' +
+              '<button class="chat-history-del" type="button" data-del-convo="' + escapeHtml(String(c.id)) + '" title="이 대화 삭제" aria-label="이 대화 삭제">×</button>' +
+              '</div>';
+          });
+        }
+        menu.innerHTML = html;
+        document.getElementById('composeMenuNew').onclick = () => { composeStartNew(); closeComposeMenu(); };
+        menu.querySelectorAll('[data-open-convo]').forEach((row) => {
+          const open = () => { composeOpenConvo(row.dataset.openConvo); closeComposeMenu(); };
+          row.addEventListener('click', open);
+          row.addEventListener('keydown', (e) => {
+            // 삭제(×) 버튼에 포커스가 있으면 버튼의 기본 동작(클릭)에 맡긴다 — 가로채면 삭제 대신 열려버림
+            if (e.target && e.target.closest && e.target.closest('.chat-history-del')) return;
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+          });
+        });
+        menu.querySelectorAll('[data-del-convo]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 행 클릭(열기)으로 번지지 않게
+            const id = btn.dataset.delConvo;
+            composeHistory = composeHistory.filter((x) => x && String(x.id) !== id);
+            if (String(composeActiveId) === String(id)) composeActiveId = null;
+            parent.postMessage({ pluginMessage: { type: 'SAVE_COMPOSE_HISTORY', list: composeHistory } }, '*');
+            renderComposeMenu(); // 메뉴는 열어 둔 채 목록만 갱신 (연달아 지울 수 있게)
+          });
+        });
+      }
+      function openComposeMenu() {
+        renderComposeMenu();
+        const menu = document.getElementById('composeMenu');
+        const btn = document.getElementById('composeMenuBtn');
+        const r = btn.getBoundingClientRect();
+        menu.style.display = 'block';
+        menu.style.top = (r.bottom + 6) + 'px';
+        menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+        menu.style.left = 'auto';
+        btn.setAttribute('aria-expanded', 'true');
+      }
+      function closeComposeMenu() {
+        const menu = document.getElementById('composeMenu');
+        if (menu) menu.style.display = 'none';
+        const btn = document.getElementById('composeMenuBtn');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      }
+      document.getElementById('composeMenuBtn').addEventListener('click', (e) => {
+        e.stopPropagation(); // 바깥 클릭 닫기로 곧장 다시 닫히지 않게
+        const menu = document.getElementById('composeMenu');
+        if (menu.style.display === 'none') openComposeMenu(); else closeComposeMenu();
+      });
+      // 메뉴 밖을 누르면 닫힌다 (메뉴 안 클릭은 유지 — 삭제 연타 허용)
+      document.addEventListener('click', (e) => {
+        const menu = document.getElementById('composeMenu');
+        if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) closeComposeMenu();
+      });
       function sendCompose() {
         if (composeBusy) return;
         const el = document.getElementById('composeInput');
         const text = el.value.trim();
         if (!text) return;
         composeMsgs.push({ role: 'user', text });
+        persistCompose(); // 답이 오기 전에도 저장 — 도중에 닫아도 질문은 남는다
         el.value = '';
         el.style.height = 'auto'; // 자동 높이 초기화
         composeBusy = true;
@@ -3224,6 +3479,7 @@
           type: 'COMPOSE',
           messages: composeMsgs.map((m) => ({ role: m.role, text: m.text })),
           model: getSelectedModel(),
+          convoId: composeActiveId, // persistCompose가 방금 발급 — 응답이 이 대화로 돌아오게
         } }, '*');
       }
       // 하단 입력창: 자동 높이 + Enter 전송(Shift+Enter 줄바꿈) + 보내기 버튼 상태
@@ -3887,6 +4143,7 @@
       // 응답이 안 오는 환경(감시자 없음)에서도 멈춰 있지 않도록 4초 뒤엔 계정 화면을 그대로 보여준다.
       showView('account');
       requestAccountInfo();
+      parent.postMessage({ pluginMessage: { type: 'LOAD_COMPOSE_HISTORY' } }, '*'); // 최근 대화 목록 복원
       setTimeout(() => {
         if (!accountInfoSeen) { accountInfoSeen = true; renderAccountViews(); decideFirstScreen(); }
       }, 4000);

@@ -27,11 +27,28 @@ const CLAUDE_ENV = Object.assign({}, process.env, {
   DISABLE_TELEMETRY: '1',
 });
 
+// 숨김 실행(감시자 스폰은 stdio ignore)에서도 문제를 추적할 수 있게 콘솔 로그를 파일에도 남긴다.
+// 위치: 임시 폴더의 claude-bridge.log (윈도우 %TEMP%, 맥 $TMPDIR). 2MB 넘으면 .old로 한 세대만 보관.
+const LOG_FILE = path.join(os.tmpdir(), 'claude-bridge.log');
+const _origLog = console.log.bind(console);
+console.log = function () {
+  const args = Array.prototype.slice.call(arguments);
+  _origLog.apply(null, args);
+  try {
+    try {
+      if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > 2 * 1024 * 1024) fs.renameSync(LOG_FILE, LOG_FILE + '.old');
+    } catch (_e) { /* 회전 실패는 무시 */ }
+    const line = '[' + new Date().toLocaleString('ko-KR') + '] ' +
+      args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n';
+    fs.appendFileSync(LOG_FILE, line);
+  } catch (_e) { /* 파일 로그 실패해도 다리는 계속 */ }
+};
+
 const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스트용 (평소엔 11888 고정)
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 15;
+const BRIDGE_V = 19;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -228,7 +245,14 @@ function killLoginProc() {
   } catch (_e) { /* 무시 */ }
 }
 
-function killProc() {
+// 턴 도중 클로드 프로세스가 죽었을 때의 실패 메시지 — runTurn이 이 메시지일 때만 1회 자동 재시도한다
+const SESSION_DIED = '클로드 세션이 종료됐어요.';
+let shuttingDown = false; // /shutdown 진행 중 — 재시도로 세션을 되살리지 않게 표시
+
+// reason을 주면 '의도적 종료'(계정 전환·로그아웃 등) — 진행 중이던 턴을 그 메시지로 끝내서
+// runTurn의 SESSION_DIED 자동 재시도가 옛 자격증명으로 세션을 되살리지 않게 한다.
+// (안 그러면 계정 전환 직후 옛 계정 세션이 부활해 MAX_TURNS까지 계속 쓰이는 버그 — 2026-07 리뷰에서 확인)
+function killProc(reason) {
   if (proc) {
     try {
       if (process.platform === 'win32') {
@@ -244,7 +268,7 @@ function killProc() {
   }
   proc = null;
   warmedUp = false;
-  if (waiter) { clearTimeout(waiter.timer); waiter.reject(new Error('클로드 세션이 종료됐어요.')); waiter = null; }
+  if (waiter) { clearTimeout(waiter.timer); waiter.reject(new Error(reason || SESSION_DIED)); waiter = null; }
 }
 
 function startProc() {
@@ -304,6 +328,12 @@ function sendTurn(text) {
     if (waiter) return reject(new Error('앞선 요청이 진행 중이에요.'));
     const timer = setTimeout(() => {
       console.log('[bridge] 턴 시간 초과 — 세션을 재시작합니다.');
+      // 시간 초과는 '세션 종료'와 구분되는 제 메시지로 끝낸다 — killProc의 세션 종료 reject가
+      // runTurn의 자동 재시도를 부르면 안 되기 때문(느린 턴을 두 번 돌면 플러그인 130초 제한을 넘긴다)
+      if (waiter) {
+        const w = waiter; waiter = null;
+        w.reject(new Error('클로드 응답이 너무 오래 걸려 요청을 중단했어요 — 다시 시도해 주세요.'));
+      }
       killProc();
     }, TURN_TIMEOUT_MS);
     waiter = { resolve, reject, timer };
@@ -317,8 +347,14 @@ const askedCount = new Map();
 
 // 세션 준비(시동+지시문 주입)를 보장한 뒤 한 턴 실행 — 모든 호출은 queue로 직렬화.
 // model을 주면 그 모델로 (다르면 세션 재시작). 한 모델을 계속 쓰면 재시작은 최초 1회뿐.
-function runTurn(buildAsk, model) {
+// reparse={parse, formatDesc}를 주면 파싱까지 이 잡 안에서 처리하고 {raw, parsed}를 돌려준다:
+// 형식 이탈 시 같은 세션에 "형식대로 다시"를 요구하는 재요청 턴을 **같은 큐 잡 안에서** 붙인다.
+// 별도 잡으로 빼면 (a) 사이에 다른 요청 턴이 끼어 '방금 답'이 남의 답이 되고(내용 오염),
+// (b) MAX_TURNS 경계에서 세션이 재시작돼 '방금 답'이 없는 새 세션이 내용을 지어낼 수 있다 (2026-07 리뷰에서 확인).
+const REPARSE_BAD = (v) => v == null || (Array.isArray(v) && v.length === 0);
+function runTurn(buildAsk, model, reparse) {
   const job = queue.then(async () => {
+    const jobStart = Date.now(); // 시간 예산 — 플러그인 쪽 제한(130초)을 넘길 재시도는 포기한다
     if (model && ALLOWED_MODELS.indexOf(model) !== -1 && model !== currentModel) {
       console.log('[bridge] 모델 변경: ' + currentModel + ' → ' + model);
       currentModel = model;
@@ -333,7 +369,36 @@ function runTurn(buildAsk, model) {
       console.log('[bridge] 세션 준비 완료 (' + ((Date.now() - t0) / 1000).toFixed(1) + 's) — 이후 요청은 빨라요.');
     }
     turns++;
-    return sendTurn(buildAsk());
+    const ask = buildAsk(); // 재시도 때 같은 질문을 다시 쓴다 (askedCount 이중 증가 방지)
+    let raw;
+    try {
+      raw = await sendTurn(ask);
+    } catch (e) {
+      // 턴 도중 클로드 프로세스가 죽은 경우(SESSION_DIED) 1회 자동 재시도 — 사용자에겐 실패로 안 보이게.
+      // 시간 초과·로그인 만료·클로드 오류·의도적 종료(계정 전환/로그아웃, killProc(reason))는
+      // 제 메시지가 따로 있어 여기 안 걸린다. 종료 요청 중이거나 시간 예산이 얼마 안 남았으면 되살리지 않는다.
+      if (shuttingDown || !(e && e.message === SESSION_DIED) || Date.now() - jobStart > 40000) throw e;
+      console.log('[bridge] 세션이 턴 도중 끊김 — 재시동 후 1회 재시도합니다.');
+      startProc();
+      await sendTurn(instructionMessage());
+      warmedUp = true;
+      turns = 2; // 워밍업 1 + 이번 턴 (startProc이 0으로 초기화)
+      raw = await sendTurn(ask);
+    }
+    if (!reparse) return raw;
+    let parsed = reparse.parse(raw);
+    // 형식 이탈이면 같은 세션·같은 잡에서 곧장 재요청 — 이 턴이 죽으면 새 세션은 '방금 답'을 몰라
+    // 지어낼 수 있으므로 세션 사망 재시도는 하지 않고 그대로 실패시킨다(파싱 실패로 귀결).
+    if (REPARSE_BAD(parsed) && Date.now() - jobStart < 70000) {
+      console.log('[bridge] 파싱 실패 — 형식 재요청:', String(raw).slice(0, 300));
+      turns++;
+      try {
+        raw = await sendTurn('방금 답이 요구한 형식에 어긋났다. 방금 답한 내용을 설명·사과·코드펜스 없이 아래 JSON으로만 다시 출력하라: ' + reparse.formatDesc);
+        parsed = reparse.parse(raw);
+      } catch (_e) { /* 재요청 실패 — 아래에서 파싱 실패로 처리 */ }
+    }
+    if (REPARSE_BAD(parsed)) console.log('[bridge] 파싱 실패 (재요청 후에도):', String(raw).slice(0, 300));
+    return { raw, parsed: REPARSE_BAD(parsed) ? null : parsed };
   });
   // 한 요청이 실패해도 다음 요청이 이어지도록 큐는 항상 성공으로 정리
   queue = job.catch(() => {});
@@ -341,7 +406,7 @@ function runTurn(buildAsk, model) {
 }
 
 // 문구 추천 턴
-function askClaude(text, model) {
+function askClaude(text, model, reparse) {
   return runTurn(() => {
     const attempt = (askedCount.get(text) || 0) + 1;
     askedCount.set(text, attempt);
@@ -349,11 +414,11 @@ function askClaude(text, model) {
     return attempt > 1
       ? '같은 문구를 다시 요청한다. 이 세션에서 이전에 제안했던 것들과 겹치지 않는, 구조나 어휘가 확실히 다른 새로운 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text)
       : '다음 UI 문구의 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text);
-  }, model);
+  }, model, reparse);
 }
 
 // 번역 턴 — 같은 세션을 쓰되, 이번 턴만 추천 형식(JSON 배열) 대신 번역 형식(JSON 객체)을 요구한다
-function askTranslate(text, model) {
+function askTranslate(text, model, reparse) {
   return runTurn(() => (
     '이번 요청은 번역 작업이다 (문구 다듬기 아님 — 대안 3개 규칙은 이번 턴에 적용하지 않는다). ' +
     '다음 UI 문구가 한국어면 자연스러운 영어로, 영어면 자연스러운 한국어로 번역하라. ' +
@@ -361,13 +426,13 @@ function askTranslate(text, model) {
     '원문의 줄 수를 그대로 유지한다 — 원문이 한 줄이면 번역도 한 줄로, 줄바꿈을 임의로 추가하지 않는다. ' +
     '답은 반드시 JSON 객체 하나만 출력한다. 마크다운·설명 금지: ' +
     '{"translated": "번역문 (줄바꿈은 \\n)", "direction": "ko→en 또는 en→ko"}: ' + JSON.stringify(text)
-  ), model);
+  ), model, reparse);
 }
 
 // 대화형 문구 제작 턴 — 사용자가 상황을 설명하면 맥락에 맞는 문구를 만들어준다.
 // messages: [{role:'user'|'assistant', text}] 전체 대화를 매번 받는다(다리는 무상태 —
 // 워밍업 지시문의 "요청들은 서로 무관" 전제를 지키기 위해 대화 맥락을 턴 안에 몽땅 싣는다).
-function askCompose(messages, model) {
+function askCompose(messages, model, reparse) {
   return runTurn(() => {
     const transcript = (messages || []).map((m) =>
       (m.role === 'assistant' ? '어시스턴트: ' : '사용자: ') + String(m.text || '').slice(0, 1500)
@@ -375,7 +440,8 @@ function askCompose(messages, model) {
     return (
       '이번 요청은 "대화형 문구 제작"이다 (기존 문구 다듬기 아님 — 아래 대화가 이번 턴의 전체 맥락이다). ' +
       '사용자가 화면 상황·맥락을 설명하면, 스타일 규칙과 예시 톤에 맞는 UI 문구를 만들어 제안하라.\n' +
-      '- 맥락이 문구를 쓰기에 부족하면(어느 화면인지, 무슨 상황인지 등) 꼭 필요한 것 1가지만 짧게 되물어라. 이때 suggestions는 빈 배열.\n' +
+      '- 맥락이 부족하면 편하게 되물어라: 어떤 화면·기능의 문구인지, 들어갈 자리는 어디인지(팝업 타이틀/본문/버튼, 토스트, 빈 화면 안내, 배너 등), 어떤 상황인지(성공 통보/오류/확인 요청/안내) 같은 것. 꼭 필요한 것만 골라 한 번에 최대 2개까지, 짧게. 이때 suggestions는 빈 배열.\n' +
+      '- 감이 어느 정도 오면 묻기만 하지 마라 — 가정을 세우고 초안 suggestions를 함께 내면서, reply에 가정을 밝히고 무엇을 알려주면 더 맞출 수 있는지 한 문장으로 덧붙여라(예: "확인 팝업이라고 가정했어요 — 토스트라면 알려주세요").\n' +
       '- 문구를 제안할 땐 서로 접근이 다른 2~3개. 각 제안엔 왜 그렇게 썼는지 이유를 붙인다.\n' +
       '- 사용자가 언급하지 않은 구체 정보(전화번호·URL·금액·횟수 등)를 지어내 넣지 마라.\n' +
       '- 후속 요청("더 짧게", "버튼용으로" 등)이면 직전 제안을 그 방향으로 고쳐 다시 제안하라.\n' +
@@ -383,14 +449,14 @@ function askCompose(messages, model) {
       '{"reply": "대화 응답 한두 문장 (해요체)", "suggestions": [{"text": "문구 (줄바꿈은 \\n)", "reason": "이유 한 문장"}]}\n\n' +
       '[대화]\n' + transcript
     );
-  }, model);
+  }, model, reparse);
 }
 
 // 팝업 세트 추천 턴 — 한 팝업의 구성요소(역할+문구)를 한 번에 보내고,
 // 요소별 낱개가 아니라 **완성된 팝업 세트(케이스) 2~3개**를 통으로 받는다.
 // 타이틀·안내·버튼이 한 몸으로 일관돼야 하므로(따로 뽑아 조합하면 어긋난다) 세트 단위로 제안하게 한다.
 // elements: [{role, text}] (화면 위→아래 순).
-function askPopup(elements, model) {
+function askPopup(elements, model, reparse) {
   return runTurn(() => {
     const roles = (elements || []).map((e) => String((e && e.role) || '')).join(', ');
     const list = (elements || []).map((e, i) =>
@@ -410,7 +476,7 @@ function askPopup(elements, model) {
       '역할은 입력 순서대로: ' + roles + '\n\n' +
       '[팝업 요소]\n' + list
     );
-  }, model);
+  }, model, reparse);
 }
 
 // 팝업 응답에서 {sets: [{reason, elements:[{role,text}]}]} 추출 (코드펜스·앞뒤 잡담 허용)
@@ -573,7 +639,8 @@ const server = http.createServer(async (req, res) => {
         if (!openLoginTerminal()) {
           return json(res, 501, { error: '이 OS에선 자동으로 못 열어요 — 터미널에서 claude 실행 후 /login 해 주세요.' });
         }
-        killProc();
+        // 의도적 종료(reason 지정) — 진행 중 턴을 SESSION_DIED로 끝내면 자동 재시도가 옛 계정 세션을 되살린다
+        killProc('로그인을 진행하는 중이라 요청을 중단했어요 — 로그인 후 다시 시도해 주세요.');
         accountCache.at = 0;
         console.log('[bridge] 로그인 폴백 — 터미널 방식으로 전환.');
         return json(res, 200, { ok: true, mode: 'terminal' });
@@ -603,8 +670,10 @@ const server = http.createServer(async (req, res) => {
         }
       });
       loginProcTimer = setTimeout(() => { console.log('[bridge] 로그인 10분 경과 — 대기 프로세스 정리.'); killLoginProc(); }, 600000);
-      // 낡은 입장권을 물고 있는 대기 세션은 버린다 — 재로그인 후 다음 요청이 새 세션(새 입장권)으로 시작하게
-      killProc();
+      // 낡은 입장권을 물고 있는 대기 세션은 버린다 — 재로그인 후 다음 요청이 새 세션(새 입장권)으로 시작하게.
+      // 의도적 종료(reason 지정) — SESSION_DIED로 끝내면 자동 재시도가 옛 계정 세션을 되살려
+      // 재로그인 뒤에도 MAX_TURNS까지 옛 계정으로 처리되는 버그가 된다 (2026-07 리뷰에서 확인)
+      killProc('로그인을 진행하는 중이라 요청을 중단했어요 — 로그인 후 다시 시도해 주세요.');
       accountCache.at = 0;
       console.log('[bridge] 브라우저 로그인 시작' + (switchMode ? ' (계정 전환 — 시크릿 창)' : '') + ' — 로그인하면 자동 연결됩니다.');
       return json(res, 200, { ok: true, mode: switchMode ? 'browser-switch' : 'browser' });
@@ -668,7 +737,7 @@ const server = http.createServer(async (req, res) => {
     lo.stderr.on('data', (d) => { err += d.toString(); });
     lo.on('error', (e) => { json(res, 500, { ok: false, error: '로그아웃 실행 실패: ' + e.message }); });
     lo.on('close', (code) => {
-      killProc();                 // 로그아웃된 계정을 물던 대기 세션을 버린다
+      killProc('로그아웃해서 요청을 중단했어요.'); // 의도적 종료 — 자동 재시도가 세션을 되살리면 안 됨
       accountCache.at = 0;        // 다음 /account·/health에서 계정을 새로(=없음으로) 읽게
       claudeStatus = null;        // 상태 재판정(다음 턴에서 미로그인 감지)
       console.log('[bridge] 클로드 로그아웃 (code ' + code + ')');
@@ -682,6 +751,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/shutdown') {
     json(res, 200, { ok: true });
     console.log('[bridge] 종료 요청 받음 — 다리를 끕니다.');
+    shuttingDown = true;
     killProc();
     setTimeout(() => process.exit(0), 200);
     return;
@@ -692,11 +762,10 @@ const server = http.createServer(async (req, res) => {
     const started = Date.now();
     console.log('[bridge] 추천 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…', model ? '(모델: ' + model + ')' : '');
     try {
-      const raw = await askClaude(String(text).trim(), model);
-      const suggestions = parseSuggestions(raw);
+      const r = await askClaude(String(text).trim(), model, { parse: parseSuggestions, formatDesc: '[{"text": "문구", "reason": "이유"}, ...]' });
+      const suggestions = r.parsed || [];
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!suggestions.length) {
-        console.log('[bridge] 파싱 실패 (' + sec + 's):', String(raw).slice(0, 200));
         return json(res, 502, { error: '클로드 응답을 해석하지 못했어요.' });
       }
       console.log('[bridge] 제안 ' + suggestions.length + '개 (' + sec + 's)');
@@ -719,11 +788,10 @@ const server = http.createServer(async (req, res) => {
     const started = Date.now();
     console.log('[bridge] 팝업 추천 요청: 요소 ' + list.length + '개', model ? '(모델: ' + model + ')' : '');
     try {
-      const raw = await askPopup(list, model);
-      const sets = parsePopup(raw);
+      const r = await askPopup(list, model, { parse: parsePopup, formatDesc: '{"sets": [{"reason": "방향 한 문장", "elements": [{"role": "역할", "text": "문구"}, ...]}, ...]}' });
+      const sets = r.parsed;
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!sets) {
-        console.log('[bridge] 팝업 파싱 실패 (' + sec + 's):', String(raw).slice(0, 200));
         return json(res, 502, { error: '클로드 응답을 해석하지 못했어요.' });
       }
       console.log('[bridge] 팝업 세트 ' + sets.length + '개 (' + sec + 's)');
@@ -746,11 +814,11 @@ const server = http.createServer(async (req, res) => {
     const lastUser = [...list].reverse().find((m) => m.role !== 'assistant');
     console.log('[bridge] 제작 대화 요청:', String((lastUser && lastUser.text) || '').slice(0, 50).replace(/\n/g, ' ') + '… (대화 ' + list.length + '개)');
     try {
-      const raw = await askCompose(list.slice(-12), model); // 대화가 길어지면 최근 12개만 (프롬프트 폭주 방지)
-      const out = parseCompose(raw);
+      // 대화가 길어지면 최근 12개만 (프롬프트 폭주 방지)
+      const r = await askCompose(list.slice(-12), model, { parse: parseCompose, formatDesc: '{"reply": "대화 응답 한두 문장", "suggestions": [{"text": "문구", "reason": "이유"}, ...]}' });
+      const out = r.parsed;
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!out) {
-        console.log('[bridge] 제작 파싱 실패 (' + sec + 's):', String(raw).slice(0, 200));
         return json(res, 502, { error: '클로드 응답을 해석하지 못했어요.' });
       }
       console.log('[bridge] 제작 응답 (' + sec + 's, 제안 ' + out.suggestions.length + '개)');
@@ -771,11 +839,10 @@ const server = http.createServer(async (req, res) => {
     const started = Date.now();
     console.log('[bridge] 번역 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…');
     try {
-      const raw = await askTranslate(String(text).trim(), model);
-      const out = parseTranslate(raw);
+      const r = await askTranslate(String(text).trim(), model, { parse: parseTranslate, formatDesc: '{"translated": "번역문 (줄바꿈은 \\n)", "direction": "ko→en 또는 en→ko"}' });
+      const out = r.parsed;
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!out) {
-        console.log('[bridge] 번역 파싱 실패 (' + sec + 's):', String(raw).slice(0, 200));
         return json(res, 502, { error: '클로드 번역 응답을 해석하지 못했어요.' });
       }
       console.log('[bridge] 번역 완료 (' + sec + 's, ' + (out.direction || '?') + ')');
