@@ -3294,7 +3294,9 @@
           // 다듬기로 돌아오면 setRecommendMode(false)가 다시 켜 준다
           if (pv) pv.style.display = composeMode ? 'none' : 'block';
           if (inp) inp.style.display = 'none';
-          if (rHint && !composeMode) rHint.innerHTML = '팝업이 선택됐어요 — 아래 문구들을 <b>역할별로</b> 추천해요. <b>[추천받기]</b>를 누르세요.';
+          // 안내 문구는 두지 않는다 — 미리보기 헤더('팝업 문구 N개 감지')와 역할 라벨이
+          // 이미 같은 내용을 보여주고, [추천받기] 버튼도 화면에 그대로 보인다
+          if (rHint && !composeMode) rHint.innerHTML = '';
           updateFeatureButtonState();
           if (typeof adjustTopPadding === 'function') adjustTopPadding();
           return;
