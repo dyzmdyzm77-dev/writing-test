@@ -111,6 +111,8 @@
       #recommendHeader.compact { min-height: 0; }
       #recommendHeader.compact .hint,
       #recommendHeader.compact #recommendInput { display: none; }
+      /* #framePreview는 인라인 display로 켜고 끄므로 CSS로 숨길 수 없다 —
+         팝업 미리보기와 같이 JS(setRecommendCompact/setRecommendMode)에서 다룬다 */
       /* 결과를 보는 중 캔버스에서 다른 대상을 고르면 그 사실만 알려 준다 — 결과는 그대로 두므로
          이 안내가 없으면 [추천받기]를 눌러도 화면이 안 바뀌는 것처럼 보인다 */
       #recommendHeader.compact .hint.pending-note { display: block; }
@@ -262,7 +264,69 @@
       }
       .chat-user { margin-left: auto; background: #EAF1FD; color: #1D1D1D; }
       .chat-ai { margin-right: auto; background: #F5F5F5; color: #1D1D1D; }
-      .chat-typing { color: #999999; font-size: 12px; margin: 8px 0; }
+      /* 답 기다리는 중 한 줄 — 가만히 있는 글자 대신 '반응하는' 표시(2026-08 사용자 요청).
+         별표가 돌면서 뒤에 숨결이 커졌다 작아지고, 문구엔 빛이 흐르고, 오른쪽에 경과 초가 오른다.
+         (클로드 CLI의 대기 표시와 같은 결 — 몇 초째인지 보이면 멈춘 게 아니란 걸 알 수 있다) */
+      .chat-typing {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0 10px;
+        font-size: 12.5px;
+        color: #999999;
+      }
+      .ct-orb {
+        position: relative;
+        flex: 0 0 auto;
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* 별표 뒤 숨결 — 생각하는 동안 부드럽게 부풀었다 줄어든다 */
+      .ct-orb::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(29, 108, 235, 0.25) 0%, rgba(29, 108, 235, 0) 70%);
+        animation: ctBreath 1.6s ease-in-out infinite;
+      }
+      .ct-star {
+        position: relative;
+        display: block;
+        width: 16px;
+        height: 16px;
+        color: #1D6CEB;
+        animation: ctSpin 2.6s linear infinite;
+      }
+      .ct-star svg { display: block; width: 16px; height: 16px; }
+      /* 문구 위로 빛이 흐르는 느낌 — 글자를 마스크로 써서 밝은 띠가 지나간다 */
+      .ct-label {
+        background-image: linear-gradient(90deg, #ABABAB 0%, #ABABAB 35%, #353535 50%, #ABABAB 65%, #ABABAB 100%);
+        background-size: 220% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+        animation: ctShimmer 1.8s linear infinite;
+      }
+      .ct-sec { flex: 0 0 auto; color: #BDBDBD; font-variant-numeric: tabular-nums; }
+      @keyframes ctSpin { to { transform: rotate(360deg); } }
+      @keyframes ctBreath {
+        0%, 100% { transform: scale(0.75); opacity: 0.5; }
+        50% { transform: scale(1.25); opacity: 1; }
+      }
+      @keyframes ctShimmer {
+        from { background-position: 100% 0; }
+        to { background-position: -100% 0; }
+      }
+      /* 움직임을 줄이는 설정이면 애니메이션을 끄고 글자는 회색으로 되돌린다 */
+      @media (prefers-reduced-motion: reduce) {
+        .ct-orb::before, .ct-star, .ct-label { animation: none; }
+        .ct-label { -webkit-text-fill-color: #999999; color: #999999; }
+      }
       .chat-sugg { margin: 4px 0 10px 0; }
       /* 대화 모드 추천 사유 — 이제 카드 밖이 아니라 .sugg-main 안에 들어간다(다듬기 모드와 같은 구조) */
       .chat-sugg .sugg-reason { font-size: 11.5px; color: #757575; margin: 4px 0 0 0; line-height: 1.4; }
@@ -789,11 +853,13 @@
         margin-bottom: 0;
         flex: 1;
       }
-      /* 맨 위로 플로팅 버튼 — 스크롤 중에만 보임 */
+      /* 맨 위로 플로팅 버튼 — 스크롤 중에만 보임.
+         위치는 하단 탭 바(60px)에서 20px 띄운 자리로 고정 — 화면마다 하단 버튼 바가 있고 없고에 따라
+         버튼이 위아래로 튀지 않게 한 자리에 둔다(2026-08 사용자 결정). 탭 바가 없는 화면에서도 같은 값. */
       .scroll-top-btn {
         position: fixed;
         right: 20px;
-        bottom: 72px; /* 하단 버튼 바 위 */
+        bottom: 80px;
         width: 50px !important; /* 전역 button 규칙(width 100%, height 48px !important)에 안 찌그러지게 고정 — 가로세로 동일 */
         height: 50px !important;
         min-width: 0 !important; /* 전역 button의 min-width:64px 때문에 폭이 64로 늘어나던 것 방지 */
@@ -1205,7 +1271,7 @@
       /* 하단 탭 바(60px) 위로 고정 요소들을 올린다 (탭 바에 안 가리게) */
       body.has-tabbar .button-group { bottom: 60px; }
       body.has-tabbar .compose-bar { bottom: 60px; }
-      body.has-tabbar .scroll-top-btn { bottom: 132px; }
+      /* .scroll-top-btn은 위에서 탭 바 기준 80px로 고정 — 여기서 다시 올리지 않는다(위치가 튀지 않게) */
       body.has-tabbar .bridge-loading { bottom: 60px; }
       /* 스크롤 콘텐츠가 하단 탭 바·버튼에 안 가리게 여유를 더 준다 */
       body.has-tabbar.compose-open { padding-bottom: 148px; }
@@ -1573,6 +1639,34 @@
       .pp-set-row:hover { background: #F1F6FF; }
       .pp-set-text { font-size: 14px; color: #1a1a1a; word-break: break-word; }
       /* 팝업 선택 시 입력창 대신 뜨는 미리보기 */
+      /* 하위 프레임별 문구 묶음 미리보기 — 팝업 미리보기(#popupPreview)와 같은 톤이지만
+         입력창을 대체하지 않고 그 위에 얹힌다(입력창은 고른 그룹 문구를 담아 그대로 다듬는 대상). */
+      #framePreview { display: none; border: 1px solid #E4E4E4; background: #FAFAFA; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
+      #framePreview .fp-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: #555; margin-bottom: 8px; }
+      #framePreview .fp-all {
+        width: auto !important; height: 24px !important; min-width: 0; line-height: normal !important;
+        padding: 0 9px !important; margin: 0; font-size: 11px; font-weight: 700;
+        background: #FFFFFF; color: #555; border: 1px solid #DDDDDD; border-radius: 6px; cursor: pointer;
+      }
+      #framePreview .fp-all.sel { background: #1D6CEB; border-color: #1D6CEB; color: #FFFFFF; }
+      .fp-group { border: 1px solid #E8E8E8; background: #FFFFFF; border-radius: 7px; padding: 7px 9px; margin-bottom: 6px; cursor: pointer; }
+      .fp-group:last-child { margin-bottom: 0; }
+      .fp-group:hover { border-color: #C9D9F6; background: #FCFDFF; }
+      .fp-group.sel { border-color: #1D6CEB; background: #F4F8FF; }
+      .fp-group-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+      /* 이름은 '헤더 › 타이틀' 경로라 길어질 수 있다 — 낱자 단위로 끊지 않고 단어 단위로 접는다 */
+      .fp-name { font-size: 11px; font-weight: 700; color: #1D6CEB; background: #E9F1FE; padding: 2px 7px; border-radius: 999px; word-break: break-word; line-height: 1.45; }
+      /* 역할 칩 — 지금은 '버튼'만. 팝업 미리보기의 버튼(주요) 역할 색(.pv-role.t-btnp)과 같은 톤 */
+      .role-chip { font-size: 10.5px; font-weight: 700; color: #1D6CEB; background: #E4EEFE; padding: 2px 7px; border-radius: 999px; white-space: nowrap; flex: 0 0 auto; }
+      /* '이 프레임 문구' — 하위 프레임 그룹과 섞여 보이지 않게 회색 칩으로 구분 */
+      .fp-own { font-size: 10.5px; font-weight: 700; color: #8A8A8A; background: #EFEFEF; padding: 2px 6px; border-radius: 999px; white-space: nowrap; flex: 0 0 auto; }
+      .fp-count { font-size: 10.5px; color: #ABABAB; flex: 0 0 auto; }
+      .fp-line { font-size: 12.5px; color: #444; line-height: 1.5; word-break: break-word; }
+      /* 프레임별 추천 결과 — 영역마다 이름 + 원문 한 줄 + 제안 카드들 */
+      .gr-block { margin-bottom: 14px; }
+      .gr-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+      .gr-orig { font-size: 11px; color: #ABABAB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .gr-none { font-size: 12px; color: #ABABAB; padding: 2px 0 4px; }
       #popupPreview { display: none; border: 1px solid #D6E2FA; background: #F6F9FF; border-radius: 8px; padding: 10px 12px; margin-bottom: 4px; }
       #popupPreview .pv-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: #1D6CEB; margin-bottom: 8px; }
       #popupPreview .pv-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; }
@@ -1798,6 +1892,9 @@
         </div>
         <div id="recommendEnteredText" class="result-original"></div>
       </div>
+      <!-- 프레임 안에 프레임이 여럿인 선택 — 어느 하위 프레임 문구인지 구분해서 보여준다.
+           그룹을 누르면 그 그룹 문구만 아래 입력창에 들어가 그 부분만 다듬을 수 있다 -->
+      <div id="framePreview"></div>
       <textarea id="recommendInput" class="feature-input" placeholder="추천받을 문구를 입력하거나, 프레임을 선택해 주세요."></textarea>
       <!-- 팝업(컴포넌트) 선택 시 — 입력창 대신 감지된 문구를 역할별로 미리 보여준다 -->
       <div id="popupPreview"></div>
@@ -2439,8 +2536,29 @@
           // 결과는 다듬기 UI(#recommendList)에 그려진다 — 대화 모드가 목록을 display:none으로
           // 숨겨둔 채 결과가 오면 "눌렀는데 아무것도 안 나옴"이 된다(실제 신고) → 다듬기로 전환하고 그린다
           if (composeMode) setRecommendMode(false);
-          renderPopupRecommend(event.data.pluginMessage.sets || [], event.data.pluginMessage.error);
+          renderPopupRecommend(
+            event.data.pluginMessage.sets || [],
+            event.data.pluginMessage.error,
+            !!event.data.pluginMessage.append // [다른 케이스 더 받기] 결과는 기존 카드 아래에 덧붙임
+          );
           if (typeof adjustTopPadding === 'function') adjustTopPadding();
+        }
+
+        // 팝업 [다른 케이스 더 받기]가 끝났다는 신호 — 실패로 끝났으면 버튼을 원상 복구
+        if (event.data.pluginMessage.type === 'popup-more-end') {
+          restorePopupMoreButton();
+        }
+
+        // 프레임별 추천 결과 — 영역(하위 프레임)마다 제안을 묶어 보여준다
+        if (event.data.pluginMessage.type === 'groups-recommend-result') {
+          const gm = event.data.pluginMessage;
+          if (composeMode) setRecommendMode(false); // 대화 모드가 목록을 숨겨둔 채 오면 안 보인다
+          setGroupsRunning(false);
+          renderGroupsRecommend(gm.groups || [], gm.sent || [], gm.error);
+        }
+        // 다리 꺼짐·계정 확인 같은 조기 반환 — 버튼이 '다듬는 중…'에 갇히지 않게
+        if (event.data.pluginMessage.type === 'groups-recommend-end') {
+          setGroupsRunning(false);
         }
 
         // 로그아웃 결과 — 버튼 원복하고 계정 상태 다시 조회(성공하면 '로그인 없음'으로 바뀜)
@@ -2573,7 +2691,10 @@
               // (주기 갱신은 제외 — 켜기 폴링이 자체 조회로 잡으므로 토스트가 두 번 뜨지 않게)
               stopBridgeWakePoll();
               if (bs.problem === 'bridge-old') {
-                showToast('옛 버전 클로드가 연동돼 있어요 — [업데이트 필요] 버튼을 누르면 새 버전으로 다시 연결해요.');
+                // 자동 업데이트가 바로 이어진다(아래 restartBridgeForUpdate) — 실패 기억이 있을 때만 버튼 안내
+                showToast(bridgeRestartFailed
+                  ? '옛 버전 클로드가 연동돼 있어요 — [업데이트 필요] 버튼을 누르면 새 버전으로 다시 연결해요.'
+                  : '옛 버전 클로드가 연동됐어요 — 새 버전으로 다시 연결할게요.');
               } else if (bs.problem === 'claude-missing') {
                 showToast('연결은 됐지만 Claude Code가 없어요. 터미널에서 claude --version 이 되는지(설치·로그인) 확인해 주세요.');
               } else if (bs.problem === 'claude-logout') {
@@ -2591,8 +2712,15 @@
             // 예전엔 userTurnedOff(직접 껌)만 처리해서, '그냥 꺼진'(정상 off·죽었다 다시 켜지기 전 등) 경우엔
             // 헤더 배지만 '⚫ 연동 안 됨'으로 뜨고 화면은 멀쩡해 추천이 안 되는 것처럼 보였다(커버 안 뜸 = 실측 버그).
             // 깨우기는 fetch(WAKE_BRIDGE)라 제스처 밖에서도 안 막히고, currentView 가드로 홈·검토에선 안 켠다.
-            if (!bs.alive && !bridgeWakePoll && bridgeLoadState === 'off' && currentView === 'recommend' && !bridgeDismissed) {
+            // 재시작 중(bridgeRestarting)엔 건너뛴다 — 껐다 켜는 중간의 '꺼짐'을 보고 또 깨우면 이중 기동이 된다
+            if (!bs.alive && !bridgeWakePoll && !bridgeRestarting && bridgeLoadState === 'off' && currentView === 'recommend' && !bridgeDismissed) {
               ensureBridgeFromGesture();
+            }
+            // 켜져 있는데 옛 버전이고 추천 화면이면, 버튼을 누르길 기다리지 않고 자동으로 새 코드로 갈아탄다
+            // (탭 전환 없이 화면에 머무는 동안 다리가 옛 버전으로 살아난 경우 — 진입 경로와 같은 처리)
+            if (bs.alive && bs.problem === 'bridge-old' && !bridgeRestarting && !bridgeRestartFailed
+                && !bridgeWakePoll && currentView === 'recommend' && !bridgeDismissed) {
+              restartBridgeForUpdate(true);
             }
             if (!bridgeWakePoll && !installOffer) {
               // 켜져 있어도 로그인 만료·claude 없음이면 초록 대신 주황으로 조치를 안내한다
@@ -2618,6 +2746,23 @@
                 : (bs.account ? bs.account + ' 계정의 클로드로 답해요 — 누르면 연결 끊기' : '클로드 연동됨 — 누르면 연결 끊기');
             }
           }
+        }
+
+        // 새 코드로 재시작이 끝났다 — 덮개를 걷고(성공) 또는 조치 화면으로 바꾼다(실패).
+        // 이 신호가 없으면 '연결하는 중' 덮개가 영영 돌 수 있다 (재시작엔 켜기 폴링이 없어서).
+        if (event.data.pluginMessage.type === 'bridge-restart-done') {
+          const done = event.data.pluginMessage;
+          bridgeRestarting = false;
+          if (done.ok) {
+            bridgeRestartFailed = false;
+            if (bridgeLoadState === 'waking') setBridgeLoadState('off');
+          } else {
+            // 아직 옛 버전(다른 폴더의 다리) 또는 아예 안 켜짐 — 실패를 기억해 진입마다 껐다 켜지 않는다.
+            // 사유는 code.ts가 이미 토스트로 알렸다(폴더 경로 등). 꺼졌으면 조치 버튼이 있는 화면으로.
+            bridgeRestartFailed = true;
+            if (bridgeLoadState === 'waking') setBridgeLoadState(done.alive ? 'off' : 'failed');
+          }
+          requestBridgeStatus(); // 버튼 라벨을 최신 상태로
         }
 
         // 클로드다리 설치 파일 수신 — 다운로드로 내려준다 (새 PC 첫 설정)
@@ -2725,6 +2870,7 @@
             askBtn.disabled = false;
             askBtn.textContent = 'AI 추천 더 받기 ✨';
           }
+          if (typeof restorePopupMoreButton === 'function') restorePopupMoreButton(); // 팝업 쪽도 같이 원복
           // 검토가 완전히 끝난 시점에 예약된 스크롤 확정
           if (pendingScroll) {
             requestAnimationFrame(() => {
@@ -3286,6 +3432,7 @@
         const pv = document.getElementById('popupPreview');
         if (popupSelected) {
           // 팝업 컴포넌트 — 입력창 대신 감지된 문구를 역할별로 미리보기로 보여준다.
+          hideFramePreview(); // 팝업 미리보기와 겹치지 않게
           if (el && (!el.value.trim() || el.value === lastSelectionText)) el.value = '';
           lastSelectionText = '';
           const inp = document.getElementById('recommendInput');
@@ -3311,10 +3458,19 @@
           // 캔버스에서 선택을 바꾼 경우(onEnter=false)는 바뀐 프레임 내용으로 갱신한다.
           if (el && (!onEnter || !el.value.trim() || el.value === lastSelectionText)) el.value = text;
           lastSelectionText = text;
+          selectionRole = m.role || null;
+          // 버튼을 골랐으면 알아봤다는 것을 보여준다 — 문장이 아니라 동작 이름으로 추천된다
+          if (rHint && !composeMode && selectionRole === '버튼') {
+            rHint.innerHTML = '<span class="role-chip">버튼</span> 버튼 문구로 봤어요 — 짧은 동작 이름으로 추천해요.';
+          }
+          // '프레임 안에 프레임이 여럿'이면 하위 프레임별 묶음을 입력창 위에 보여준다 (없으면 빈 배열 → 숨김)
+          renderFramePreview(m.groups || [], text);
         } else if (!onEnter) {
           // 선택을 해제한 경우에만 비운다 — 진입 조회에서 선택이 없다고 사용자 입력을 지우면 안 된다
           if (el && lastSelectionText && el.value === lastSelectionText) el.value = '';
           lastSelectionText = '';
+          selectionRole = null;
+          hideFramePreview();
         }
         updateFeatureButtonState();
         if (typeof adjustTopPadding === 'function') adjustTopPadding();
@@ -3334,12 +3490,16 @@
         // 팝업 미리보기 vs 입력창 표시 정리 — 결과(compact)에선 미리보기 숨김,
         // 초기 화면 복귀 시엔 지금 팝업이 선택돼 있으면 미리보기, 아니면 입력창.
         const pv = document.getElementById('popupPreview');
+        const fp = document.getElementById('framePreview');
         const inp = document.getElementById('recommendInput');
         if (on) {
           if (pv) pv.style.display = 'none';
+          if (fp) fp.style.display = 'none'; // 결과 화면에선 하위 프레임 묶음도 접는다
         } else {
           if (pv) pv.style.display = popupSelected ? 'block' : 'none';
           if (inp) inp.style.display = popupSelected ? 'none' : '';
+          // 초기 화면으로 돌아오면 잡아 둔 하위 프레임 묶음을 다시 보여준다
+          if (fp) fp.style.display = (!popupSelected && !composeMode && frameGroups.length) ? 'block' : 'none';
         }
         document.getElementById('recommendRun').textContent = on ? '다시 추천받기' : '추천받기';
         updateFeatureButtonState();
@@ -3389,6 +3549,9 @@
           if (pvEl) pvEl.style.display = (!compose && popupSelected) ? 'block' : 'none';
           const inpEl = document.getElementById('recommendInput');
           if (inpEl) inpEl.style.display = (!compose && popupSelected) ? 'none' : '';
+          // 하위 프레임 묶음도 다듬기 전용 — 같은 규칙으로 접고 복원한다
+          const fpEl = document.getElementById('framePreview');
+          if (fpEl) fpEl.style.display = (!compose && !popupSelected && frameGroups.length) ? 'block' : 'none';
         }
         // 대화 모드: 헤더의 큰 입력창·버튼 숨기고, 하단 고정 입력 바를 띄운다 (클로드 앱과 동일)
         document.getElementById('recommendHeader').classList.toggle('chat-mode', compose);
@@ -3410,8 +3573,31 @@
       document.getElementById('modeRefine').onclick = () => setRecommendMode(false);
       document.getElementById('modeCompose').onclick = () => setRecommendMode(true);
 
+      // 클로드 별표 — 대기 표시에서 천천히 돈다 (6갈래 애스터리스크)
+      const CLAUDE_STAR_ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<path d="M12 3.2v17.6M4.4 7.6l15.2 8.8M19.6 7.6L4.4 16.4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+      let composeBusyStartedAt = 0;  // 답을 기다리기 시작한 시각 — 경과 초 표시용(다시 그려도 이어진다)
+      let composeTypingTimer = null; // 경과 초 갱신 타이머 (renderComposeChat 한 곳에서만 켜고 끈다)
+      function composeElapsedSec() {
+        return composeBusyStartedAt ? Math.max(0, Math.round((Date.now() - composeBusyStartedAt) / 1000)) : 0;
+      }
+      function syncComposeTypingSec() {
+        const el = document.getElementById('composeTypingSec');
+        if (el) el.textContent = '· ' + composeElapsedSec() + '초';
+      }
+      // 답 기다리는 중 한 줄 — 별표(회전+숨결) + 흐르는 문구 + 경과 초
+      function composeTypingHtml() {
+        return '<div class="chat-typing" role="status" aria-live="polite">' +
+          '<span class="ct-orb"><span class="ct-star">' + CLAUDE_STAR_ICON + '</span></span>' +
+          '<span class="ct-label">문구를 만드는 중</span>' +
+          // 초는 매초 바뀌므로 aria-hidden — 스크린리더가 1초마다 읽어대지 않게 (문구만 알린다)
+          '<span class="ct-sec" id="composeTypingSec" aria-hidden="true">· ' + composeElapsedSec() + '초</span>' +
+          '</div>';
+      }
       function renderComposeChat() {
         const box = document.getElementById('composeChat');
+        // 기다리기 시작한 시각은 html을 만들기 전에 정해야 첫 그림에도 초가 맞는다
+        if (composeBusy && !composeBusyStartedAt) composeBusyStartedAt = Date.now();
         // 첫 진입(메시지 없음)이면 인사말+입력창을 중앙에 (클로드 챗 랜딩), 대화 시작하면 하단으로
         document.body.classList.toggle('compose-empty', composeMode && composeMsgs.length === 0);
         let html = '';
@@ -3439,8 +3625,15 @@
             html += '</div>';
           }
         });
-        if (composeBusy) html += '<div class="chat-typing">클로드가 문구를 만드는 중…</div>';
+        if (composeBusy) html += composeTypingHtml();
         box.innerHTML = html;
+        // 경과 초 타이머는 이 한 곳에서만 켜고 끈다 (다시 그릴 때마다 새 타이머가 쌓이지 않게)
+        if (composeBusy) {
+          if (!composeTypingTimer) composeTypingTimer = setInterval(syncComposeTypingSec, 1000);
+        } else {
+          if (composeTypingTimer) { clearInterval(composeTypingTimer); composeTypingTimer = null; }
+          composeBusyStartedAt = 0; // 다음 질문은 0초부터
+        }
         wireCopyButtons(box);
         wireLikeButtons(box);
         // 새 메시지가 보이도록 아래로
@@ -3576,6 +3769,8 @@
           document.getElementById('recommendInput').value = '';
           setRecommendCompact(false);
           flushPendingSelection(); // 결과를 보는 동안 새로 고른 대상이 있으면 지금 반영
+          // 프레임(하위 묶음) 선택이면 처음 눌렀을 때처럼 '전체'로 되돌린다 — 입력창도 전체 문구로
+          if (frameGroups.length) selectFrameGroup(-1);
           window.scrollTo({ top: 0, behavior: 'auto' });
           if (!popupSelected) document.getElementById('recommendInput').focus();
           return;
@@ -3584,10 +3779,27 @@
         // 어긋나면 안 된다(요청은 code가 캔버스의 '지금' 선택으로 만든다)
         flushPendingSelection();
         const text = document.getElementById('recommendInput').value.trim();
+        // 하위 프레임으로 나뉜 선택에서 [전체]로 받으면 → 영역마다 따로 결과를 만든다.
+        // (한 덩어리로 다듬으면 화면 전체가 한 문구처럼 섞여 나온다 — 사용자 지적)
+        // 특정 그룹을 골라 둔 경우엔 그 문구만 평소처럼 다듬는다.
+        if (frameGroups.length >= 2 && frameGroupSel < 0 && text === frameGroupsAllText) {
+          ensureBridgeFromGesture();
+          setGroupsRunning(true);
+          parent.postMessage({ pluginMessage: {
+            type: 'RECOMMEND_GROUPS',
+            // own('이 프레임 문구')·role('버튼')도 실어 보낸다 —
+            // own은 결과 화면이 미리보기와 같은 표시를 되돌려 받게, role은 버튼 영역을 버튼 규칙으로 다듬게
+            groups: frameGroups.map((g) => ({ name: g.name, texts: g.texts, own: !!g.own, role: g.role || undefined })),
+            model: getSelectedModel(),
+          } }, '*');
+          return;
+        }
         // 입력이 없어도 팝업(컴포넌트)이 선택돼 있으면 진행 — code가 요소별로 갈라준다.
         if (!text && !popupSelected) return;
         ensureBridgeFromGesture(); // 제스처 안에서 커넥터 깨우기(꺼져 있으면)
-        parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text, model: getSelectedModel() } }, '*');
+        // 고른 영역의 역할('버튼')을 함께 보낸다. 특정 그룹을 골랐으면 그 그룹의 역할로.
+        const role = (frameGroupSel >= 0 && frameGroups[frameGroupSel]) ? (frameGroups[frameGroupSel].role || null) : selectionRole;
+        parent.postMessage({ pluginMessage: { type: 'RECOMMEND', text, role: role || undefined, model: getSelectedModel() } }, '*');
       };
       // [초기화] = 말 그대로 처음 상태로 — 결과·입력·직전 문구 모두 비우고 초기 화면 복귀
       document.getElementById('recommendEdit').onclick = () => {
@@ -3596,6 +3808,7 @@
         document.getElementById('recommendInput').value = '';
         setRecommendCompact(false);
         flushPendingSelection(); // 결과를 보는 동안 새로 고른 대상이 있으면 지금 반영
+        if (frameGroups.length) selectFrameGroup(-1); // 프레임 선택이면 '전체'로 되돌린다
         window.scrollTo({ top: 0, behavior: 'auto' });
         if (!popupSelected) document.getElementById('recommendInput').focus();
       };
@@ -3629,6 +3842,8 @@
       let bridgeProblem = null;    // 마지막으로 확인된 다리 problem (claude-logout이면 버튼 클릭이 로그인 창을 연다)
       let bridgeWakeWaited = 0;
       let bridgeWakeFailed = false; // 이미 20초 기다려 실패함 — 들어올 때마다 또 20초 돌리지 않는다
+      let bridgeRestarting = false;    // 새 코드로 재시작 중(RESTART_BRIDGE 응답 대기) — 중복 재시작·자동 켜기 차단
+      let bridgeRestartFailed = false; // 자동 업데이트가 실패했음 — 들어올 때마다 또 껐다 켜지 않는다(직접 누르면 해제)
       let installOffer = false;    // 켜기 실패 → 버튼이 [설치 파일 받기]로 바뀐 상태
       function requestBridgeStatus() {
         parent.postMessage({ pluginMessage: { type: 'CHECK_BRIDGE' } }, '*');
@@ -3719,14 +3934,35 @@
       };
       // 클로드 없이도 예시·규칙 폴백으로 추천은 되므로, 덮개는 닫고 계속 쓸 수 있어야 한다
       document.getElementById('bridgeLoadingClose').onclick = () => { bridgeDismissed = true; setBridgeLoadState('off'); };
+      // 옛 코드로 떠 있는 다리를 새 코드로 재시작한다 (다리는 코드를 pull·복사해도 스스로 갱신되지 않는다).
+      // auto=true는 추천·번역 화면 진입 때의 자동 호출 — 사용자가 [업데이트 필요] 버튼을 찾아 누를 이유가 없다
+      // (새 버전이어야 추천이 되니 물어볼 결정이 아니다). 실패하면 bridgeRestartFailed로 기억해
+      // 들어올 때마다 다리를 껐다 켜지 않고 버튼 조치로 남긴다.
+      function restartBridgeForUpdate(auto) {
+        if (bridgeRestarting) {
+          if (!auto) showToast('새 버전으로 다시 연결하는 중이에요 — 잠시만 기다려 주세요.');
+          return;
+        }
+        bridgeRestarting = true;
+        if (!auto) bridgeRestartFailed = false; // 직접 눌렀으면 다시 시도하겠다는 뜻
+        setBridgeLoadState('waking'); // 10초쯤 걸린다 — 추천 화면이면 덮개로 알린다
+        parent.postMessage({ pluginMessage: { type: 'RESTART_BRIDGE' } }, '*');
+      }
       // 추천 화면 진입(제스처) 시 호출.
       // 규칙: 다리가 꺼져 있으면 추천 화면은 **항상** 덮개로 상태를 알린다 — 아무것도 안 뜨는 경우는 없다.
       //   켜짐 / 이미 켜는 중  → 그대로 둔다
+      //   옛 버전(bridge-old)  → 묻지 않고 새 코드로 재시작 (waking)
       //   직접 껐음            → 몰래 다시 켜지 않고 [클로드 켜기]만 보여준다 (stopped)
       //   전에 20초 실패       → 또 20초 태우지 않고 조치 화면 (failed)
       //   그 외                → 지금 깨우면서 로딩 (waking)
       function ensureBridgeFromGesture() {
         bridgeDismissed = false; // 추천을 다시 쓰려는 의사 — 닫음 기억 해제 (제스처 재진입 시 커버 다시 허용)
+        if (bridgeRestarting) return;
+        // 켜져 있지만 옛 코드 — 화면에 들어온 것만으로 알아서 새 버전으로 갈아탄다
+        if (bridgeKnownAlive && bridgeProblem === 'bridge-old' && !bridgeRestartFailed) {
+          restartBridgeForUpdate(true);
+          return;
+        }
         if (bridgeKnownAlive || bridgeWakePoll) return;
         if (userTurnedOff) { setBridgeLoadState('stopped'); return; }
         if (bridgeWakeFailed) { setBridgeLoadState('failed'); return; }
@@ -3744,8 +3980,9 @@
           }
           if (bridgeWakeBtn.classList.contains('bridge-warn')) {
             if (bridgeProblem === 'bridge-old') {
-              // 옛 코드로 떠 있는 다리 — 껐다 새 코드로 켠다 (pull·복사만으론 갱신 안 되므로)
-              parent.postMessage({ pluginMessage: { type: 'RESTART_BRIDGE' } }, '*');
+              // 옛 코드로 떠 있는 다리 — 껐다 새 코드로 켠다 (pull·복사만으론 갱신 안 되므로).
+              // 보통은 화면 진입 때 자동으로 되고, 자동이 실패했을 때 이 버튼이 남는다.
+              restartBridgeForUpdate(false);
             } else if (bridgeProblem === 'claude-logout') {
               // 로그인 필요(만료·미로그인) — 같은 계정 재로그인이 대부분이라 보통 창으로 연다
               openClaudeLogin(false);
@@ -4273,6 +4510,172 @@
           showToast('복사했어요.');
         } catch (e) { showToast('복사 실패했어요.'); }
       }
+      // ── 하위 프레임별 문구 묶음 미리보기 (문구 다듬기) ──
+      // 프레임 안에 프레임이 여럿인 선택은 문구가 한 덩어리로 들어와 어느 영역 것인지 알 수 없었다(2026-08 사용자 요청).
+      // 그룹 카드를 누르면 그 그룹 문구만 입력창에 들어가 그 부분만 다듬을 수 있고, [전체]로 되돌린다.
+      // 지금 선택의 역할 — 지금은 '버튼'만 (버튼 문구는 문장이 아니라 동작 이름이라 추천 규칙이 다르다).
+      // RECOMMEND에 실어 보내면 다리가 버튼 규칙을 프롬프트에 얹고, code.ts가 문장부호까지 떼어 준다.
+      let selectionRole = null;
+      let frameGroups = [];      // [{name, texts:[], own?, role?}] — 지금 선택의 하위 프레임 묶음 (없으면 빈 배열)
+      let frameGroupSel = -1;    // 고른 그룹 인덱스 (-1 = 전체)
+      let frameGroupsAllText = ''; // 전체 문구(입력창 기본값) — [전체]로 되돌릴 때 쓴다
+      function groupText(g) { return (g.texts || []).join('\n'); }
+      function hideFramePreview() {
+        frameGroups = [];
+        frameGroupSel = -1;
+        frameGroupsAllText = '';
+        const fp = document.getElementById('framePreview');
+        if (fp) { fp.innerHTML = ''; fp.style.display = 'none'; }
+      }
+      function renderFramePreview(groups, allText) {
+        const fp = document.getElementById('framePreview');
+        if (!fp) return;
+        frameGroups = groups || [];
+        frameGroupsAllText = allText || '';
+        frameGroupSel = -1;
+        if (!frameGroups.length || composeMode) { fp.innerHTML = ''; fp.style.display = 'none'; return; }
+        const total = frameGroups.reduce((n, g) => n + (g.texts || []).length, 0);
+        fp.innerHTML = '';
+        const title = document.createElement('div');
+        title.className = 'fp-title';
+        const tt = document.createElement('span');
+        tt.textContent = '하위 프레임 ' + frameGroups.length + '개 · 문구 ' + total + '개';
+        const all = document.createElement('button');
+        all.type = 'button'; all.className = 'fp-all sel'; all.textContent = '전체';
+        all.title = '영역마다 따로 추천을 받아요';
+        all.onclick = () => selectFrameGroup(-1);
+        // [초기화] — 결과를 비우고 전체로 되돌린다 (팝업 미리보기의 [초기화]와 같은 역할)
+        const reset = document.createElement('button');
+        reset.type = 'button'; reset.className = 'pp-reset';
+        reset.textContent = '초기화';
+        reset.onclick = () => {
+          clearGroupResults();
+          selectFrameGroup(-1);
+          window.scrollTo({ top: 0, behavior: 'auto' });
+        };
+        const acts = document.createElement('span');
+        acts.style.display = 'flex'; acts.style.alignItems = 'center'; acts.style.gap = '6px';
+        acts.appendChild(reset); acts.appendChild(all);
+        title.appendChild(tt); title.appendChild(acts);
+        fp.appendChild(title);
+        frameGroups.forEach((g, i) => {
+          const card = document.createElement('div');
+          card.className = 'fp-group';
+          card.dataset.group = String(i);
+          card.title = '이 프레임 문구만 다듬어요';
+          const head = document.createElement('div'); head.className = 'fp-group-head';
+          const name = document.createElement('span'); name.className = 'fp-name'; name.textContent = g.name || '프레임';
+          head.appendChild(name);
+          // 버튼 영역이면 알아봤다는 표시 — 이 영역은 동작 이름으로 다듬어진다
+          if (g.role === '버튼') {
+            const rc = document.createElement('span'); rc.className = 'role-chip';
+            rc.textContent = '버튼';
+            rc.title = '버튼 문구로 봤어요 — 짧은 동작 이름으로 추천해요.';
+            head.appendChild(rc);
+          }
+          // 안에 또 문구 든 프레임이 있는데 자기도 문구를 든 프레임 — 자식 그룹과 섞여 보이지 않게 표시
+          if (g.own) {
+            const own = document.createElement('span'); own.className = 'fp-own';
+            own.textContent = '이 프레임 문구';
+            own.title = '아래 하위 프레임 문구는 빼고, 이 프레임이 직접 든 문구예요.';
+            head.appendChild(own);
+          }
+          const cnt = document.createElement('span'); cnt.className = 'fp-count'; cnt.textContent = (g.texts || []).length + '개';
+          head.appendChild(cnt);
+          card.appendChild(head);
+          (g.texts || []).forEach((t) => {
+            const line = document.createElement('div'); line.className = 'fp-line'; line.textContent = t;
+            card.appendChild(line);
+          });
+          card.onclick = () => selectFrameGroup(i);
+          fp.appendChild(card);
+        });
+        fp.style.display = 'block';
+      }
+      // 프레임별 추천 결과만 비운다 (미리보기·입력창은 그대로)
+      function clearGroupResults() {
+        const list = document.getElementById('recommendList');
+        if (list && list.querySelector('.gr-block')) list.innerHTML = '';
+        const hd = document.getElementById('recommendHeader');
+        if (hd && !list.innerHTML) hd.classList.remove('pp-results');
+        if (typeof adjustTopPadding === 'function') adjustTopPadding();
+      }
+      // 그룹 고르기 — 입력창을 그 그룹 문구로 바꾼다 (-1이면 전체로 되돌림).
+      // lastSelectionText도 같이 갱신해야 다음 선택 조회가 '사용자가 직접 고친 문구'로 착각해 덮지 않는다.
+      function selectFrameGroup(i) {
+        // 특정 영역을 고르면 대상이 바뀐다 — 화면에 남은 '프레임별 추천'(전체 결과)은 비운다.
+        // (미리보기와 결과가 어긋난 화면을 만들지 않는다는 이 화면의 기존 규칙)
+        if (i >= 0) clearGroupResults();
+        frameGroupSel = i;
+        const inp = document.getElementById('recommendInput');
+        const text = i < 0 ? frameGroupsAllText : groupText(frameGroups[i] || { texts: [] });
+        if (inp) inp.value = text;
+        lastSelectionText = text;
+        const fp = document.getElementById('framePreview');
+        if (fp) {
+          const allBtn = fp.querySelector('.fp-all');
+          if (allBtn) allBtn.classList.toggle('sel', i < 0);
+          fp.querySelectorAll('.fp-group').forEach((c) => c.classList.toggle('sel', Number(c.dataset.group) === i));
+        }
+        updateFeatureButtonState();
+        if (typeof adjustTopPadding === 'function') adjustTopPadding();
+      }
+      // [전체] 추천이 도는 동안 버튼 표시 (실패로 끝나도 groups-recommend-end로 원복된다)
+      function setGroupsRunning(on) {
+        const btn = document.getElementById('recommendRun');
+        if (!btn) return;
+        btn.disabled = on;
+        btn.textContent = on ? '영역마다 다듬는 중…' : (document.getElementById('recommendHeader').classList.contains('compact') ? '다시 추천받기' : '추천받기');
+        if (!on) updateFeatureButtonState();
+      }
+      // 프레임별 추천 결과 — 영역(하위 프레임)마다 제안 카드를 묶어 보여준다.
+      // 카드 구조는 renderRecommend와 같은 것을 쓴다(좋아요·복사 배선을 공유하려고).
+      function renderGroupsRecommend(groups, sent, error) {
+        const list = document.getElementById('recommendList');
+        if (!list) return;
+        // 결과가 아래에 보이도록 헤더 늘림을 푼다 (팝업 세트 결과와 같은 처리)
+        const hd = document.getElementById('recommendHeader');
+        if (hd) hd.classList.add('pp-results');
+        list.innerHTML = '';
+        if (!groups || !groups.length) {
+          list.innerHTML = '<div class="result-empty">' + (error ? '추천 실패 — ' + escapeHtml(error) : '추천 결과가 없어요. 다시 시도해 주세요.') + '</div>';
+          if (typeof adjustTopPadding === 'function') adjustTopPadding();
+          return;
+        }
+        let html = '<div class="result-label">프레임별 추천</div>';
+        groups.forEach((g, i) => {
+          // 원본(그 영역의 원문)은 diff 표시·좋아요 키의 기준이 된다
+          const orig = (sent && sent[i] && Array.isArray(sent[i].texts)) ? sent[i].texts.join('\n') : '';
+          html += '<div class="gr-block">';
+          const isOwn = !!(sent && sent[i] && sent[i].own); // 미리보기와 같은 '이 프레임 문구' 표시
+          const isBtn = !!(sent && sent[i] && sent[i].role === '버튼');
+          html += '<div class="gr-head"><span class="fp-name">' + escapeHtml(g.name || ('영역 ' + (i + 1))) + '</span>' +
+            (isBtn ? '<span class="role-chip">버튼</span>' : '') +
+            (isOwn ? '<span class="fp-own">이 프레임 문구</span>' : '') +
+            (orig ? '<span class="gr-orig" title="원문">' + escapeHtml(orig.replace(/\n/g, ' / ')) + '</span>' : '') + '</div>';
+          if (!g.suggestions || !g.suggestions.length) {
+            html += '<div class="gr-none">고칠 게 없다고 봤어요.</div>';
+          } else {
+            g.suggestions.forEach((s) => {
+              const item = { text: s.text || '', reason: s.reason || '' };
+              const likeKey = encodeURIComponent(orig + '\\u0001' + item.text);
+              const liked = likedKeys.has(likeKey);
+              html += '<div class="sugg-card"><div class="sugg-main"><span class="sugg-text">' + diffMarkHtml(orig, item.text) + '</span>' +
+                (item.reason ? '<div class="sugg-reason">' + escapeHtml(item.reason) + '</div>' : '') +
+                '</div><div class="sugg-actions">' +
+                '<button class="like-btn' + (liked ? ' liked' : '') + '" title="' + (liked ? '좋아요한 추천이에요' : '이 추천 좋아요 — 예시 후보로 저장') + '" aria-label="좋아요"' +
+                ' data-like-key="' + likeKey + '" data-like-orig="' + encodeURIComponent(orig) + '" data-like-text="' + encodeURIComponent(item.text) + '" data-like-reason="' + encodeURIComponent(item.reason) + '">' + LIKE_ICON + '</button>' +
+                '<button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(item.text) + '">' + COPY_ICON + '</button>' +
+                '</div></div>';
+            });
+          }
+          html += '</div>';
+        });
+        list.innerHTML = html;
+        wireCopyButtons(list);
+        wireLikeButtons(list);
+        if (typeof adjustTopPadding === 'function') adjustTopPadding();
+      }
       // 팝업 선택 시 입력창 대신 뜨는 미리보기 — 감지된 문구를 역할별로 나열
       function renderPopupPreview(elements) {
         const pv = document.getElementById('popupPreview');
@@ -4318,13 +4721,44 @@
           row.appendChild(tag); row.appendChild(txt); pv.appendChild(row);
         });
       }
+      // 화면에 이미 그려진 팝업 세트들의 지문 — [케이스 더 받기]가 같은 세트를 또 붙이지 않게 비교용.
+      // 별도 상태를 두지 않고 DOM에서 읽는다 ([초기화]가 목록을 비우면 지문도 같이 사라져 어긋날 일이 없다).
+      function popupSetSigs(list) {
+        return new Set(Array.from(list.querySelectorAll('.pp-set')).map((card) =>
+          Array.from(card.querySelectorAll('.pp-set-row')).map((r) => {
+            const role = r.querySelector('.pp-role'), txt = r.querySelector('.pp-set-text');
+            return (role ? role.textContent : '') + '\\u0001' + (txt ? txt.textContent : '');
+          }).join('\\u0002')
+        ));
+      }
+      const popupSetSig = (set) => (set.elements || []).map((el) => el.role + '\\u0001' + el.text).join('\\u0002');
       // 팝업 추천 결과 렌더 — 완성된 팝업 세트(케이스)별 카드. 각 줄(역할)을 클릭하면 복사.
-      function renderPopupRecommend(sets, error) {
+      // append=true([케이스 더 받기] 결과)면 기존 카드를 지우지 않고 아래에 이어 붙인다.
+      function renderPopupRecommend(sets, error, append) {
         const list = document.getElementById('recommendList');
         if (!list) return;
         // 결과가 붙는 동안은 헤더 늘림(초기 중앙 레이아웃)을 풀어야 결과가 화면에 보인다 (위 .pp-results CSS 참고)
         const hd = document.getElementById('recommendHeader');
         if (hd) hd.classList.add('pp-results');
+        // 덧붙이기인데 붙일 카드가 없으면(초기화 등) 처음부터 그린다 — 헤더 없는 카드가 떠도는 것 방지
+        if (append && !list.querySelector('.pp-set')) append = false;
+        if (append) {
+          // 이미 있는 세트와 같은 것은 걸러낸다 (같은 케이스 반복 방지 — 다듬기 쪽 appendAi와 같은 처리)
+          const seen = popupSetSigs(list);
+          const fresh = (sets || []).filter((s) => !seen.has(popupSetSig(s)));
+          const oldBtn = document.getElementById('askPopupMore');
+          if (oldBtn) oldBtn.remove();
+          if (!fresh.length) {
+            attachPopupMoreButton(list);
+            showToast('이전과 같은 케이스만 와서 추가하지 않았어요. 한 번 더 눌러 보세요.');
+            if (typeof adjustTopPadding === 'function') adjustTopPadding();
+            return;
+          }
+          appendPopupSets(list, fresh, list.querySelectorAll('.pp-set').length);
+          attachPopupMoreButton(list);
+          if (typeof adjustTopPadding === 'function') adjustTopPadding();
+          return;
+        }
         list.innerHTML = '';
         // 결과 헤더 — 라벨만 ([초기화]는 위 '팝업 문구 N개 감지' 헤더로 이동)
         const head = document.createElement('div');
@@ -4338,14 +4772,21 @@
           const em = document.createElement('div'); em.className = 'pp-empty';
           em.textContent = error ? ('추천 실패 — ' + error) : '추천 결과가 없어요. 다시 시도해 주세요.';
           list.appendChild(em);
+          attachPopupMoreButton(list); // 실패해도 다시 받을 길은 남겨 둔다
           if (typeof adjustTopPadding === 'function') adjustTopPadding();
           return;
         }
+        appendPopupSets(list, sets, 0);
+        attachPopupMoreButton(list);
+        if (typeof adjustTopPadding === 'function') adjustTopPadding();
+      }
+      // 세트 카드들을 목록에 붙인다 — startIdx는 '케이스 N' 번호를 이어 붙이기 위한 시작값
+      function appendPopupSets(list, sets, startIdx) {
         const roleClass = (r) => r === '타이틀' ? 't-title' : r === '안내' ? 't-body' : (r.indexOf('주요') >= 0 ? 't-btnp' : 't-btns');
         sets.forEach((set, i) => {
           const card = document.createElement('div'); card.className = 'pp-set';
           const h = document.createElement('div'); h.className = 'pp-set-head';
-          const badge = document.createElement('span'); badge.className = 'pp-set-badge'; badge.textContent = '케이스 ' + (i + 1);
+          const badge = document.createElement('span'); badge.className = 'pp-set-badge'; badge.textContent = '케이스 ' + (startIdx + i + 1);
           h.appendChild(badge);
           if (set.reason) { const rs = document.createElement('span'); rs.className = 'pp-set-reason'; rs.textContent = set.reason; h.appendChild(rs); }
           card.appendChild(h);
@@ -4359,7 +4800,25 @@
           });
           list.appendChild(card);
         });
-        if (typeof adjustTopPadding === 'function') adjustTopPadding();
+      }
+      const POPUP_MORE_LABEL = '다른 케이스 더 받기 ✨';
+      // 팝업 결과 맨 아래 [케이스 더 받기] — 다듬기 쪽 [AI 추천 더 받기]와 같은 역할.
+      // 캔버스 선택 없이도 되게 code.ts가 기억한 팝업 요소로 다시 요청한다(RECOMMEND_POPUP_MORE).
+      function attachPopupMoreButton(list) {
+        const old = document.getElementById('askPopupMore');
+        if (old) old.remove();
+        list.insertAdjacentHTML('beforeend', '<button id="askPopupMore" class="button-secondary button-full-width" type="button">' + POPUP_MORE_LABEL + '</button>');
+        const btn = document.getElementById('askPopupMore');
+        btn.onclick = () => {
+          btn.disabled = true;
+          btn.textContent = '케이스 받는 중…';
+          parent.postMessage({ pluginMessage: { type: 'RECOMMEND_POPUP_MORE', model: getSelectedModel() } }, '*');
+        };
+      }
+      // [다른 케이스 더 받기]가 실패로 끝났을 때 버튼 원복 (성공 시엔 append 렌더링이 버튼을 새로 붙인다)
+      function restorePopupMoreButton() {
+        const btn = document.getElementById('askPopupMore');
+        if (btn && btn.disabled) { btn.disabled = false; btn.textContent = POPUP_MORE_LABEL; }
       }
       function renderRecommend(original, suggestions, opts) {
         opts = opts || {};

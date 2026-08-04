@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 19;
+const BRIDGE_V = 22;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -405,15 +405,23 @@ function runTurn(buildAsk, model, reparse) {
   return job;
 }
 
-// 문구 추천 턴
-function askClaude(text, model, reparse) {
+// 버튼 라벨 규칙 — 플러그인이 '버튼을 골랐다'고 알려줄 때만 얹는다.
+// 버튼 문구는 문장이 아니라 동작 이름이어서, 이 지시가 없으면 문장형 대안이 섞여 나온다.
+const BUTTON_RULE =
+  '이 문구는 **버튼 라벨**이다. 문장이 아니라 동작 이름이므로: 마침표·물음표·종결어미(~요/~다/~까요) 금지, ' +
+  '되도록 짧은 동작 명사(저장·삭제·연결 해제 등)로, 통보성 단일 버튼이면 "확인". ' +
+  '"취소"는 동작 버튼과 짝일 때만 쓰고, 화면 기능명(변경·해제 등)은 그대로 둔다.\n';
+
+// 문구 추천 턴 (role='버튼'이면 버튼 규칙을 얹는다)
+function askClaude(text, model, reparse, role) {
   return runTurn(() => {
     const attempt = (askedCount.get(text) || 0) + 1;
     askedCount.set(text, attempt);
     if (askedCount.size > 200) askedCount.clear(); // 무한히 쌓이지 않게
-    return attempt > 1
+    const rule = role === '버튼' ? BUTTON_RULE : '';
+    return rule + (attempt > 1
       ? '같은 문구를 다시 요청한다. 이 세션에서 이전에 제안했던 것들과 겹치지 않는, 구조나 어휘가 확실히 다른 새로운 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text)
-      : '다음 UI 문구의 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text);
+      : '다음 UI 문구의 대안 3개를 규칙대로 JSON 배열로만: ' + JSON.stringify(text));
   }, model, reparse);
 }
 
@@ -452,17 +460,89 @@ function askCompose(messages, model, reparse) {
   }, model, reparse);
 }
 
+// 프레임별(하위 프레임 묶음) 추천 턴 — 한 화면을 하위 프레임 단위로 나눠 보내고,
+// **프레임마다 따로** 대안을 받는다. 한 요청에 다 실어 보내는 것이 핵심:
+// 프레임 수만큼 요청을 쪼개면 그만큼 느려지고(각 5~10초) 구독 사용량도 그만큼 나간다.
+// groups: [{name, texts:[]}] (화면 위→아래 순).
+function askGroups(groups, model, reparse, more) {
+  return runTurn(() => {
+    // 버튼 영역은 (버튼)으로 찍어 보낸다 — 버튼 문구는 문장이 아니라 동작 이름이라 규칙이 다르다
+    const list = (groups || []).map((g, i) =>
+      '[' + (i + 1) + '] ' + String((g && g.name) || ('그룹' + (i + 1))) + (g && g.role === '버튼' ? ' (버튼)' : '') + '\n' +
+      (g && Array.isArray(g.texts) ? g.texts : []).map((t) => '  - ' + JSON.stringify(String(t || ''))).join('\n')
+    ).join('\n');
+    const hasBtn = (groups || []).some((g) => g && g.role === '버튼');
+    const key = 'groups' + (groups || []).map((g) => (g && g.texts ? g.texts.join('') : '')).join('');
+    const attempt = (askedCount.get(key) || 0) + 1;
+    askedCount.set(key, attempt);
+    if (askedCount.size > 200) askedCount.clear();
+    const again = more || attempt > 1
+      ? '이 화면은 이 세션에서 이미 다뤘다. 앞서 낸 대안과 어휘·구조가 확실히 다른 새 대안만 내라.\n'
+      : '';
+    return (
+      again +
+      '이번 요청은 "화면을 하위 프레임별로 나눠 다듬기"다. 아래는 한 화면의 문구를 하위 프레임(영역) 단위로 묶은 것이다.\n' +
+      '**영역마다 따로** 대안을 내라 — 영역을 서로 합치거나 순서를 바꾸지 마라.\n' +
+      '- 각 영역에 대안 2개. 그 영역이 여러 줄이면 대안도 **같은 줄 수**로(줄바꿈 \\n으로 구분, 줄 순서 유지).\n' +
+      '- 영역의 역할(타이틀·안내·버튼 등)과 원문의 정보·조건(숫자·대상·조건)은 유지하고, 없는 정보를 지어내지 마라.\n' +
+      '- 고칠 게 없는 영역이면 대안 1개만 내거나 빈 배열로 두어도 된다 — 억지로 바꾸지 마라.\n' +
+      '- 화면 기능명(변경·해제 등)은 그대로 둔다.\n' +
+      (hasBtn ? '- (버튼)으로 표시된 영역은 ' + BUTTON_RULE : '') +
+      '답은 반드시 JSON 객체 하나만 출력한다. 마크다운·설명·코드펜스 금지:\n' +
+      '{"groups": [{"name": "영역 이름(입력과 동일)", "suggestions": [{"text": "대안 문구 (줄바꿈은 \\n)", "reason": "이유 한 문장"}]}]}\n' +
+      '영역은 입력 순서·개수를 그대로 지킨다.\n\n' +
+      '[영역별 문구]\n' + list
+    );
+  }, model, reparse);
+}
+
+// 프레임별 추천 응답에서 [{name, suggestions:[{text, reason}]}] 추출
+function parseGroups(raw) {
+  let s = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const m = s.match(/\{[\s\S]*\}/);
+  if (m) s = m[0];
+  try {
+    const o = JSON.parse(s);
+    const arr = Array.isArray(o && o.groups) ? o.groups : [];
+    const groups = arr.map((g) => ({
+      name: String((g && g.name) || '').trim(),
+      suggestions: Array.isArray(g && g.suggestions)
+        ? g.suggestions
+            .map((x) => (typeof x === 'string'
+              ? { text: x.trim(), reason: '' }
+              : { text: String((x && x.text) || '').trim(), reason: String((x && x.reason) || '').trim() }))
+            .filter((x) => x.text)
+        : [],
+    }));
+    // 이름조차 없고 제안도 없는 껍데기만 왔으면 형식 이탈로 본다(같은 세션에 재요청)
+    return groups.some((g) => g.suggestions.length) ? groups : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
 // 팝업 세트 추천 턴 — 한 팝업의 구성요소(역할+문구)를 한 번에 보내고,
 // 요소별 낱개가 아니라 **완성된 팝업 세트(케이스) 2~3개**를 통으로 받는다.
 // 타이틀·안내·버튼이 한 몸으로 일관돼야 하므로(따로 뽑아 조합하면 어긋난다) 세트 단위로 제안하게 한다.
 // elements: [{role, text}] (화면 위→아래 순).
-function askPopup(elements, model, reparse) {
+// more=true([케이스 더 받기])면 이 세션에서 이미 낸 세트와 겹치지 않는 새 세트를 요구한다.
+function askPopup(elements, model, reparse, more) {
   return runTurn(() => {
     const roles = (elements || []).map((e) => String((e && e.role) || '')).join(', ');
     const list = (elements || []).map((e, i) =>
       (i + 1) + '. [' + String((e && e.role) || '') + '] ' + JSON.stringify(String((e && e.text) || ''))
     ).join('\n');
+    // 같은 팝업을 몇 번째 묻는지 기억 — 재요청이면 "이전과 다른 세트"를 요구한다
+    // (askClaude와 같은 이유: 안 그러면 클로드가 같은 세트를 또 내서 [케이스 더 받기]가 무의미해진다)
+    const key = 'popup' + (elements || []).map((e) => String((e && e.text) || '')).join('');
+    const attempt = (askedCount.get(key) || 0) + 1;
+    askedCount.set(key, attempt);
+    if (askedCount.size > 200) askedCount.clear(); // 무한히 쌓이지 않게
+    const again = more || attempt > 1
+      ? '이 팝업은 이 세션에서 이미 다뤘다. 앞서 제안한 세트들과 **접근·어휘가 확실히 다른 새 세트**만 내라(같은 세트 반복 금지).\n'
+      : '';
     return (
+      again +
       '이번 요청은 "팝업(다이얼로그) 세트 다듬기"다. 아래는 한 팝업을 위→아래로 나열한 구성요소들이다(서로 무관한 별개 문구가 아니다). ' +
       '요소를 낱개로 고치지 말고, **타이틀·안내·버튼이 서로 일관된 "완성된 팝업 세트" 2~3개**를 제안하라. 각 세트는 서로 다른 접근이어야 한다.\n' +
       '각 세트는 입력과 **같은 역할·같은 개수·같은 순서**의 요소를 모두 포함한다. 세트 안에서 타이틀·안내·버튼은 한 몸으로 맞아떨어져야 한다(예: 본문이 "~할까요?"면 버튼은 [아니오]/[네]).\n' +
@@ -757,12 +837,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'POST' && req.url === '/recommend') {
-    const { text, model } = await readBody(req);
+    const { text, model, role } = await readBody(req);
     if (!text || !String(text).trim()) return json(res, 400, { error: '추천받을 문구가 비어 있습니다.' });
     const started = Date.now();
-    console.log('[bridge] 추천 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…', model ? '(모델: ' + model + ')' : '');
+    console.log('[bridge] 추천 요청:', String(text).slice(0, 50).replace(/\n/g, ' ') + '…', role ? '[' + role + ']' : '', model ? '(모델: ' + model + ')' : '');
     try {
-      const r = await askClaude(String(text).trim(), model, { parse: parseSuggestions, formatDesc: '[{"text": "문구", "reason": "이유"}, ...]' });
+      const r = await askClaude(String(text).trim(), model, { parse: parseSuggestions, formatDesc: '[{"text": "문구", "reason": "이유"}, ...]' }, role);
       const suggestions = r.parsed || [];
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!suggestions.length) {
@@ -779,16 +859,48 @@ const server = http.createServer(async (req, res) => {
       return json(res, 502, friendlyError(e, '클로드 호출 실패: '));
     }
   }
+  // 프레임별 추천 — 한 화면을 하위 프레임(영역) 단위로 나눠 받고, 영역마다 따로 대안을 낸다.
+  // 영역 수만큼 요청을 쪼개지 않는 것이 핵심 (느려지고 사용량도 그만큼 나간다).
+  if (req.method === 'POST' && req.url === '/recommend-groups') {
+    const { groups, model, more } = await readBody(req);
+    const list = Array.isArray(groups)
+      ? groups
+          .map((g) => ({
+            name: String((g && g.name) || '').trim(),
+            texts: (g && Array.isArray(g.texts) ? g.texts : []).map((t) => String(t || '').trim()).filter(Boolean),
+            role: (g && g.role) ? String(g.role) : undefined,
+          }))
+          .filter((g) => g.texts.length)
+      : [];
+    if (list.length < 2) return json(res, 400, { error: '영역이 부족합니다.' });
+    const started = Date.now();
+    console.log('[bridge] 프레임별 추천 요청: 영역 ' + list.length + '개' + (more ? ' (더 받기)' : ''), model ? '(모델: ' + model + ')' : '');
+    try {
+      const r = await askGroups(list, model, { parse: parseGroups, formatDesc: '{"groups": [{"name": "영역 이름", "suggestions": [{"text": "대안", "reason": "이유"}]}]}' }, !!more);
+      const out = r.parsed;
+      const sec = ((Date.now() - started) / 1000).toFixed(1);
+      if (!out) return json(res, 502, { error: '클로드 응답을 해석하지 못했어요.' });
+      console.log('[bridge] 프레임별 제안 ' + out.reduce((n, g) => n + g.suggestions.length, 0) + '개 / 영역 ' + out.length + '개 (' + sec + 's)');
+      stats.served++;
+      stats.lastAt = new Date().toLocaleTimeString('ko-KR');
+      stats.lastText = '[프레임별] ' + String((list[0] && list[0].texts[0]) || '').slice(0, 24);
+      stats.lastSec = sec;
+      return json(res, 200, { groups: out, engine: 'claude' });
+    } catch (e) {
+      console.log('[bridge] 프레임별 추천 실패:', e.message);
+      return json(res, 502, friendlyError(e, '클로드 호출 실패: '));
+    }
+  }
   // 팝업 요소별 추천 — 한 팝업의 구성요소(역할+문구)를 한 번에 받아 역할별로 다듬는다.
   // 요소를 함께 보내야 타이틀이 본문 맥락을 참조할 수 있다(요소별 개별 요청과의 차이).
   if (req.method === 'POST' && req.url === '/recommend-popup') {
-    const { elements, model } = await readBody(req);
+    const { elements, model, more } = await readBody(req);
     const list = Array.isArray(elements) ? elements.filter((e) => e && String(e.text || '').trim()) : [];
     if (list.length < 2) return json(res, 400, { error: '팝업 요소가 부족합니다.' });
     const started = Date.now();
-    console.log('[bridge] 팝업 추천 요청: 요소 ' + list.length + '개', model ? '(모델: ' + model + ')' : '');
+    console.log('[bridge] 팝업 추천 요청: 요소 ' + list.length + '개' + (more ? ' (더 받기)' : ''), model ? '(모델: ' + model + ')' : '');
     try {
-      const r = await askPopup(list, model, { parse: parsePopup, formatDesc: '{"sets": [{"reason": "방향 한 문장", "elements": [{"role": "역할", "text": "문구"}, ...]}, ...]}' });
+      const r = await askPopup(list, model, { parse: parsePopup, formatDesc: '{"sets": [{"reason": "방향 한 문장", "elements": [{"role": "역할", "text": "문구"}, ...]}, ...]}' }, !!more);
       const sets = r.parsed;
       const sec = ((Date.now() - started) / 1000).toFixed(1);
       if (!sets) {
