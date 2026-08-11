@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 22;
+const BRIDGE_V = 25;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -145,6 +145,7 @@ let currentModel = CLAUDE_MODEL; // 지금 세션이 물고 있는 모델 (요�
 // 시작 시 Claude Code(claude CLI)가 쓸 수 있는지 점검 — 없으면 /health로 알려 플러그인이 안내한다.
 // null=확인 중, 'ok'=사용 가능, 'claude-missing'=claude 명령 없음,
 // 'claude-logout'=claude는 있지만 로그인 세션 만료 (턴 실패 시 감지, 성공 턴이 오면 자동 해제)
+// 'claude-limit'=로그인은 됐지만 사용 한도 초과 (조치가 재로그인이 아니라 한도 인상·계정 전환)
 let claudeStatus = null;
 // 로그인 만료 감지 — CLI가 내는 영어 인증 오류를 사람이 알아들을 안내로 바꾼다.
 // (claude --version은 로그인 없이도 성공해서 시동 점검으로는 못 잡고, 실제 턴에서만 드러난다)
@@ -154,6 +155,16 @@ const LOGIN_GUIDE = '클로드 로그인이 필요해요(안 됐거나 만료) �
 // "Not logged in · Please run /login"(미로그인) — 둘 다 잡히게 넓힌다
 function isAuthError(s) {
   return /authenticat|oauth|api key|log ?in|logged|session expired/i.test(String(s));
+}
+// 사용 한도 초과 감지 — 로그인은 멀쩡한데 "더 못 쓴다"는 경우. 로그인 만료와 조치가 달라서 따로 잡는다.
+// 실측(2026-08, 회사 엔터프라이즈 좌석): "You've hit your individual spend limit · run /usage-credits
+// to ask your admin for a higher limit" — 관리자가 사람별로 걸어 둔 상한이라 플랜 사용량이 남아도 걸린다.
+// 이 케이스가 없던 탓에 영어 원문이 그대로 토스트돼 "왜 안 되는지" 알 수 없었다(실제 신고).
+const LIMIT_GUIDE = '클로드 사용 한도를 다 썼어요 — 회사 계정이면 관리자에게 한도를 올려 달라고 요청하고, 아니면 [🟠 클로드 한도 초과] 버튼을 눌러 다른 계정으로 로그인해 주세요.';
+// '한도'로 뭉뚱그리면 안 된다 — 잠깐 몰릴 때 나는 rate limit이나 문맥 길이 초과까지 잡아
+// 엉뚱하게 "다른 계정으로 로그인하라"고 안내하게 된다. 지출·사용량 상한 문구만 좁혀서 본다
+function isLimitError(s) {
+  return /spend limit|usage-credits|usage limit (reached|exceeded)/i.test(String(s));
 }
 // 로그인된 계정 확인 — CLI가 ~/.claude.json에 기록하는 oauthAccount.emailAddress를 읽어
 // /health로 노출한다 (플러그인이 "누구 계정으로 쓰는 중인지" 표시 — 공용 PC에서 남의 계정 오사용 방지).
@@ -195,36 +206,16 @@ setInterval(() => {
   }
 }, 5000);
 
-// 로그인 URL을 기본 브라우저(보통 창)로 여는 BROWSER 핸들러 스크립트를 만든다.
-// claude CLI는 BROWSER 환경변수를 존중해 브라우저를 직접 열지 않고 이 스크립트에 authorize URL을 넘긴다(실측 2026-07).
-// mode='switch'(계정 전환) → 승인 화면을 거치지 않고 **계정 선택 화면으로 바로** 보낸다.
-//   로그인된 상태면 authorize가 승인 화면으로 가고 selectAccount=true·prompt=select_account로도 못 뚫으므로(실측),
-//   한 탭 안에서 claude.ai/logout?returnTo=<url-encoded /oauth/authorize?QUERY(상대경로)>로 잇는다:
-//   로그아웃(세션 지움) → login?selectAccount=true(계정 선택)로 자동 체이닝(실측: 단일 탭). 승인 화면 하단
-//   [계정 전환] 버튼이 하는 일과 같은 결과 — 다만 우리가 곧장 그 화면으로 보낸다.
-//   (부작용: 브라우저의 claude.ai 웹 로그인도 풀림 — 계정 전환 의도와 방향이 같아 수용.)
-// mode='normal'(만료 재로그인) → 로그아웃 없이 그냥 연다(대개 같은 계정이라 세션 유지가 빠름).
-function writeBrowserHandler(mode) {
-  const logout = mode === 'switch';
-  if (process.platform === 'win32') {
-    const cmd = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.cmd');
-    const ps = logout
-      ? "$u=$env:CB_URL; $i=$u.IndexOf('oauth/authorize'); if($i -ge 0){ $rel='/'+$u.Substring($i); $enc=[System.Uri]::EscapeDataString($rel); Start-Process ('https://claude.ai/logout?returnTo='+$enc) } else { Start-Process $u }"
-      : 'Start-Process $env:CB_URL';
-    fs.writeFileSync(cmd, '@echo off\r\nset "CB_URL=%~1"\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"\r\n');
-    return cmd;
-  }
-  const sh = path.join(os.tmpdir(), 'claude-bridge-browser-' + mode + '.sh');
-  const nodeBin = process.execPath; // 전 OS에 node 있음(다리가 node로 돎). 변환 실패 시 원본 URL 그대로 연다(fail-soft).
-  const body = logout
-    ? '#!/bin/sh\n' +
-      'U=$("' + nodeBin + '" -e \'const u=process.argv[1];const i=u.indexOf("oauth/authorize");process.stdout.write(i<0?u:"https://claude.ai/logout?returnTo="+encodeURIComponent("/"+u.slice(i)))\' "$1" 2>/dev/null)\n' +
-      'open "${U:-$1}"\n'
-    : '#!/bin/sh\nopen "$1"\n';
-  fs.writeFileSync(sh, body);
-  fs.chmodSync(sh, 0o755);
-  return sh;
-}
+// ── BROWSER 가로채기는 제거됐다 (2026-08, BRIDGE_V=25) ──────────────
+// 예전엔 BROWSER 환경변수에 임시 스크립트를 꽂아 CLI가 준 authorize URL을 우리가 받아서 열었다.
+// 목적은 하나뿐이었다 — 계정 전환용으로 URL을 claude.ai/logout?returnTo=…로 재작성해
+// 승인 화면을 건너뛰고 계정 선택 화면에 직행시키기. 그 재작성을 폐기하자(사용자 결정) 핸들러는
+// 목적이 없어졌고, **남겨 두면 오히려 로그인을 망가뜨린다**:
+//   CLI가 URL을 따옴표 없이 넘기면 cmd가 `&`에서 URL을 잘라 버려(윈도우) client_id 같은 뒤쪽
+//   매개변수가 사라지고, 브라우저엔 "잘못된 OAuth 요청 · client_id 매개변수가 누락되었습니다"가 뜬다.
+//   심하면 브라우저가 아예 안 열린다(실측 2026-08: CLI 프로세스는 대기 중인데 창이 안 뜸).
+// 이제 BROWSER를 건드리지 않는다 → claude CLI가 기본 브라우저를 직접 연다(CLI 기본 동작).
+// **이 경로에 URL 가공·중간 스크립트를 다시 넣지 말 것.** 계정 전환은 승인 화면 하단 [계정 전환] 버튼으로.
 
 // 브라우저 로그인 프로세스 (claude auth login --claudeai) — /open-login이 생성·관리.
 // 브라우저가 localhost로 결과를 보내줄 때까지 숨어서 대기하다가, 완료되면 스스로 끝난다.
@@ -296,7 +287,12 @@ function startProc() {
         clearTimeout(w.timer);
         if (ev.is_error) {
           const raw = String(ev.result || ev.subtype || '').slice(0, 200);
-          if (isAuthError(raw)) {
+          // 한도 초과를 먼저 본다 — 로그인 오류 정규식이 넓어서(log ?in 등) 문구가 바뀌면 삼킬 수 있다
+          if (isLimitError(raw)) {
+            claudeStatus = 'claude-limit'; // /health로 알림 → 버튼이 [한도 초과]로 바뀌고 계정 전환을 안내
+            console.log('[bridge] 클로드 사용 한도 초과 감지:', raw);
+            w.reject(new Error(LIMIT_GUIDE));
+          } else if (isAuthError(raw)) {
             claudeStatus = 'claude-logout'; // /health로 플러그인에 알림 → 버튼이 [로그인 필요]로 바뀜
             console.log('[bridge] 클로드 로그인 만료 감지:', raw);
             w.reject(new Error(LOGIN_GUIDE));
@@ -630,12 +626,14 @@ function parseSuggestions(raw) {
   return [];
 }
 
-// 로그인 필요 상태일 때 /health 조회가 오면 뒤에서 워밍업을 다시 시도해본다 (30초에 1번만).
+// 로그인 필요·한도 초과 상태일 때 /health 조회가 오면 뒤에서 워밍업을 다시 시도해본다 (30초에 1번만).
 // 성공하면 결과 핸들러가 claudeStatus='ok'로 되돌리므로, 재로그인 후 버튼이 저절로 🟢으로 복귀한다.
 // (플러그인이 로그인 창을 연 뒤 주기적으로 /health를 조회하는 것과 짝을 이룬다)
+// 한도 초과도 같은 경로로 복귀시킨다 — 관리자가 한도를 올려주거나 한도가 초기화되면
+// 사용자가 아무것도 안 눌러도 버튼이 🟢으로 돌아온다. 한도에 걸린 호출은 거절되므로 사용량은 안 나간다
 let lastAuthRetryAt = 0;
 function retryAuthIfNeeded() {
-  if (claudeStatus !== 'claude-logout') return;
+  if (claudeStatus !== 'claude-logout' && claudeStatus !== 'claude-limit') return;
   if (waiter || Date.now() - lastAuthRetryAt < 30000) return; // 진행 중 턴 방해 금지 + 30초 간격
   lastAuthRetryAt = Date.now();
   console.log('[bridge] 로그인 재확인 시도…');
@@ -648,6 +646,7 @@ function retryAuthIfNeeded() {
 // 실패 응답을 사람용 안내로 변환 — 원인(로그인/설치)이 파악된 경우엔 그 안내를, 아니면 접두어+원문을 보낸다
 function friendlyError(e, prefix) {
   if (e && e.message === LOGIN_GUIDE) return { error: LOGIN_GUIDE, problem: 'claude-logout' };
+  if (e && e.message === LIMIT_GUIDE) return { error: LIMIT_GUIDE, problem: 'claude-limit' };
   if (claudeStatus === 'claude-missing') {
     return { error: '이 PC에 Claude Code(claude)가 설치돼 있지 않아요 — 설치하고 로그인한 뒤 다시 시도해 주세요.', problem: 'claude-missing' };
   }
@@ -727,9 +726,8 @@ const server = http.createServer(async (req, res) => {
       }
       killLoginProc(); // 앞선 브라우저 로그인이 대기 중이면 접고 새로 연다 (창을 닫았거나 다시 누른 경우)
       loginStartedAt = Date.now();
-      // BROWSER를 우리 핸들러로 지정 — CLI가 브라우저를 직접 열지 않고 URL만 넘겨준다.
-      // 핸들러가 실패하거나 CLI가 BROWSER를 무시해도 CLI가 알아서 기본 브라우저를 열므로 로그인은 된다(fail-soft).
-      const loginEnv = Object.assign({}, CLAUDE_ENV, { BROWSER: writeBrowserHandler(switchMode ? 'switch' : 'normal') });
+      // BROWSER는 건드리지 않는다 — CLI가 기본 브라우저를 직접 연다 (위 'BROWSER 가로채기는 제거됐다' 주석 참고)
+      const loginEnv = CLAUDE_ENV;
       const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
         shell: true, env: loginEnv, stdio: 'ignore', windowsHide: true,
         detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
@@ -755,7 +753,8 @@ const server = http.createServer(async (req, res) => {
       // 재로그인 뒤에도 MAX_TURNS까지 옛 계정으로 처리되는 버그가 된다 (2026-07 리뷰에서 확인)
       killProc('로그인을 진행하는 중이라 요청을 중단했어요 — 로그인 후 다시 시도해 주세요.');
       accountCache.at = 0;
-      console.log('[bridge] 브라우저 로그인 시작' + (switchMode ? ' (계정 전환 — 시크릿 창)' : '') + ' — 로그인하면 자동 연결됩니다.');
+      // switchMode는 이제 로그 문구·응답 mode 표시용 — URL은 두 경우 모두 CLI가 그대로 연다(위 BROWSER 주석)
+      console.log('[bridge] 브라우저 로그인 시작' + (switchMode ? ' (계정 전환 — 승인 화면에서 [계정 전환]을 누르면 다른 계정을 고를 수 있어요)' : '') + ' — 로그인하면 자동 연결됩니다.');
       return json(res, 200, { ok: true, mode: switchMode ? 'browser-switch' : 'browser' });
     } catch (e) {
       return json(res, 500, { error: '로그인 창을 못 열었어요: ' + e.message });
