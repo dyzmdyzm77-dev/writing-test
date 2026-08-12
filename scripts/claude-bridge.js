@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 30;
+const BRIDGE_V = 35;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -209,6 +209,15 @@ setInterval(() => {
   }
 }, 5000);
 
+// ⚠️ 로그인 경로에서 **BROWSER를 건드리면 안 된다** (2026-08 실측 2회로 확정):
+//   BROWSER를 설정하면(내용이 무엇이든, 아무것도 안 하는 no-op이어도) claude CLI가 브라우저 핸드오프를
+//   포기하고 **"인증 코드를 Claude Code에 붙여넣으세요" 방식으로 바뀐다**. 다리는 로그인 프로세스를
+//   숨겨서 stdin 없이 띄우므로 붙여넣을 곳이 없어 로그인이 아예 불가능해진다.
+//   (localhost LISTEN이 떠 있는 것만 보고 자동 수령이 유지된다고 판단했던 게 오진이었다.)
+//   → 그래서 "탭 1개 + 계정 선택 화면"은 이 CLI로 불가능하다: 한 탭으로 잇자면 CLI의 열기를 막아야
+//   하고, 막으면 코드 붙여넣기가 된다. 로그아웃을 따로 열면 탭이 2개가 된다.
+//   결론(사용자 결정): **탭 1개 + 승인 화면**을 쓰고, 계정 전환은 그 화면의 [계정 전환] 버튼으로 한다.
+//   삭제된 시도들: writeNoopBrowser / openUrlInDefaultBrowser / buildLogoutChainUrl (복구는 git 히스토리).
 // ── 로그인은 CLI가 기본 브라우저를 직접 열게 한다 (2026-08, BRIDGE_V=30) ──
 // 우리가 BROWSER를 가로채거나 창을 골라 여는 시도는 **전부 실패해서 되돌렸다**. 남긴 교훈:
 //   ① BROWSER 핸들러로 URL을 받으면 cmd가 `&`에서 잘라먹는다 → client_id 소실("잘못된 OAuth 요청").
@@ -766,34 +775,50 @@ const server = http.createServer(async (req, res) => {
         console.log('[bridge] 로그인 폴백 — 터미널 방식으로 전환.');
         return json(res, 200, { ok: true, mode: 'terminal' });
       }
+      // 방금 시작한 로그인이 살아 있으면 손대지 않는다 — 죽이면 사용자가 보고 있는 탭의 콜백 포트가
+      // 닫혀 "localhost에서 연결을 거부했습니다"가 뜬다(2026-08 실측 신고).
+      if (loginProc && Date.now() - loginStartedAt < 15000) {
+        console.log('[bridge] 로그인 창이 이미 열려 있어요 — 새로 열지 않고 그 창을 쓰세요.');
+        return json(res, 200, { ok: true, mode: 'already-open' });
+      }
       killLoginProc(); // 앞선 브라우저 로그인이 대기 중이면 접고 새로 연다 (창을 닫았거나 다시 누른 경우)
       loginStartedAt = Date.now();
       loginWindowOpened = false; // 이번 시도의 창 열기 성공 여부 — 아래에서 세운다
       // BROWSER는 건드리지 않는다 — CLI가 기본 브라우저를 열고 localhost로 결과를 자동 수령한다
       // (위 '로그인은 CLI가 기본 브라우저를 직접 열게 한다' 주석 — 가로채면 코드 붙여넣기 화면이 뜬다).
-      // 계정 전환도 같은 경로다: 브라우저에 세션이 남아 있으면 승인 화면이 뜨고, 그 화면 하단
-      // [계정 전환]으로 다른 계정을 고른다. switchMode는 로그·응답 표시용으로만 남는다.
-      const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
-        shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
-        detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
-      });
-      loginProc = thisLogin;
-      loginWindowOpened = true; // CLI가 여는 건 관찰할 수 없으니 열린 것으로 본다 (재클릭에 터미널 방지)
-      thisLogin.on('error', () => { if (loginProc === thisLogin) loginProc = null; });
-      thisLogin.on('close', (code) => {
-        if (loginProc !== thisLogin) return;
-        loginProc = null;
-        if (loginProcTimer) { clearTimeout(loginProcTimer); loginProcTimer = null; }
-        accountCache.at = 0; // 새 계정일 수 있으니 다음 /health 때 다시 읽기
-        console.log('[bridge] 브라우저 로그인 절차 종료 (code ' + code + ')');
-        // 사람이 로그인할 시간도 없이 곧바로 실패로 끝났다 = claude가 없거나 실행이 안 된 것.
-        // 응답은 이미 보냈으니 상태를 다시 재서 /health로 알린다 (플러그인이 대기 화면을 실패로 바꾼다).
-        if (code !== 0 && Date.now() - loginStartedAt < 5000) {
-          console.log('[bridge] 로그인이 즉시 실패로 끝남 — Claude Code 설치 상태를 다시 점검합니다.');
-          checkClaudeAvailable();
-        }
-      });
-      loginProcTimer = setTimeout(() => { console.log('[bridge] 로그인 10분 경과 — 대기 프로세스 정리.'); killLoginProc(); }, 600000);
+      // **계정 전환은 웹 로그아웃을 먼저 연다**(2026-08, BRIDGE_V=31): 브라우저에 세션이 남아 있으면
+      // authorize가 계정을 묻지 않고 승인 화면만 띄운다("승인 화면 말고 로그인 화면으로 가고 싶다" 요구).
+      // 세션을 지운 뒤 열면 로그인 화면부터 나온다 — URL을 가공하지도(체이닝 실패), BROWSER를 가로채지도
+      // (코드 붙여넣기 유발), 브라우저를 고르지도(기본 브라우저 아님) 않는 유일한 방법.
+      // 부작용: 브라우저의 claude 웹 로그인도 풀린다 — 계정을 바꾸려는 의도와 방향이 같아 수용.
+      const startLogin = () => {
+        const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
+          shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
+          detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
+        });
+        loginProc = thisLogin;
+        loginWindowOpened = true; // CLI가 여는 건 관찰할 수 없으니 열린 것으로 본다 (재클릭에 터미널 방지)
+        thisLogin.on('error', () => { if (loginProc === thisLogin) loginProc = null; });
+        thisLogin.on('close', (code) => {
+          if (loginProc !== thisLogin) return;
+          loginProc = null;
+          if (loginProcTimer) { clearTimeout(loginProcTimer); loginProcTimer = null; }
+          accountCache.at = 0; // 새 계정일 수 있으니 다음 /health 때 다시 읽기
+          console.log('[bridge] 브라우저 로그인 절차 종료 (code ' + code + ')');
+          // 사람이 로그인할 시간도 없이 곧바로 실패로 끝났다 = claude가 없거나 실행이 안 된 것.
+          // 응답은 이미 보냈으니 상태를 다시 재서 /health로 알린다 (플러그인이 대기 화면을 실패로 바꾼다).
+          if (code !== 0 && Date.now() - loginStartedAt < 5000) {
+            console.log('[bridge] 로그인이 즉시 실패로 끝남 — Claude Code 설치 상태를 다시 점검합니다.');
+            checkClaudeAvailable();
+          }
+        });
+        // 30분 — 이 프로세스가 죽으면 브라우저 콜백이 갈 localhost 포트도 닫혀 '연결을 거부했습니다'가 뜬다.
+        // 예전 10분은 짧아서, 로그인하다 잠깐 다른 일을 하면 탭이 무효가 됐다(2026-08 실측 신고).
+        loginProcTimer = setTimeout(() => { console.log('[bridge] 로그인 30분 경과 — 대기 프로세스 정리.'); killLoginProc(); }, 1800000);
+      };
+      // 계정 전환도 같은 경로다 — CLI가 기본 브라우저를 직접 연다(탭 1개, 자동 완료).
+      // 승인 화면이 뜨면 그 화면 하단 [계정 전환]으로 다른 계정을 고른다. 이유는 위 주석 참고.
+      startLogin();
       // 낡은 입장권을 물고 있는 대기 세션은 버린다 — 재로그인 후 다음 요청이 새 세션(새 입장권)으로 시작하게.
       // 의도적 종료(reason 지정) — SESSION_DIED로 끝내면 자동 재시도가 옛 계정 세션을 되살려
       // 재로그인 뒤에도 MAX_TURNS까지 옛 계정으로 처리되는 버그가 된다 (2026-07 리뷰에서 확인)
