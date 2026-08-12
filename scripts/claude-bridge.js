@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 39;
+const BRIDGE_V = 40;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -230,20 +230,9 @@ setInterval(() => {
   }
 }, 5000);
 
-// 계정 전환 때 여는 웹 로그아웃 주소 — 로그아웃 후 **로그인 화면으로 착지**한다(실측: claude.ai/login).
-// 승인 화면의 원인은 브라우저에 남은 옛 계정 세션이므로, 전환은 이걸 지우는 것에서 시작한다.
-const WEB_LOGOUT_URL = 'https://claude.ai/logout';
-// 로그아웃이 브라우저에서 처리될 시간 — 너무 짧으면 세션이 남은 채 로그인 화면이 열려 승인 화면이 뜬다
-const LOGOUT_SETTLE_MS = 3500;
-// URL을 기본 브라우저로 연다. win32은 rundll32 — cmd를 안 거치므로 URL의 `&`가 잘리지 않는다.
-// (BROWSER 환경변수는 절대 쓰지 않는다 — 아래 주석의 코드 붙여넣기 문제)
-function openUrlInDefaultBrowser(url) {
-  try {
-    if (process.platform === 'win32') spawn('rundll32', ['url.dll,FileProtocolHandler', url], { stdio: 'ignore', windowsHide: true }).unref();
-    else spawn('open', [url], { stdio: 'ignore' }).unref();
-    return true;
-  } catch (_e) { return false; }
-}
+// 웹 로그아웃을 브라우저로 여는 코드는 제거했다 (2026-08, BRIDGE_V=40) — 로그인 화면이 두 개 떠서
+// 어느 쪽에 로그인해야 하는지 알 수 없었다(실측 신고). 승인 화면을 건너뛰려면 사용자가 브라우저에서
+// 직접 claude 로그아웃을 하거나, 승인 화면 하단 [계정 전환]을 쓰면 된다. **탭은 항상 1개로 유지할 것.**
 
 // ⚠️ 로그인 경로에서 **BROWSER를 건드리면 안 된다** (2026-08 실측 2회로 확정):
 //   BROWSER를 설정하면(내용이 무엇이든, 아무것도 안 하는 no-op이어도) claude CLI가 브라우저 핸드오프를
@@ -863,21 +852,21 @@ const server = http.createServer(async (req, res) => {
         killLoginProc(); // 대기 중인 옛 로그인 절차가 있으면 접는다
         const lo = spawn('claude', ['auth', 'logout'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
         lo.on('error', () => { /* claude 없음 등 — 아래 웹 로그아웃은 그대로 진행 */ });
+        // **탭은 반드시 1개** (2026-08, BRIDGE_V=40, 사용자 요구): 웹 로그아웃 주소를 따로 열면
+        // 로그인 화면이 두 개(로그아웃 착지 화면 + OAuth 화면) 떠서 어느 쪽에 로그인해야 하는지 알 수 없고,
+        // 엉뚱한 쪽에 로그인하면 플러그인은 연결되지 않는다(실측 신고 2회: "왜 두 개나 떠", "로그인했는데 왜").
+        // 그래서 웹 로그아웃은 열지 않는다 — CLI 로그아웃만 하고 로그인 창 하나만 띄운다.
+        //   · 브라우저가 로그아웃돼 있으면 → 로그인 화면이 바로 나온다
+        //   · 브라우저에 세션이 남아 있으면 → 승인 화면이 나온다. 그 화면 하단 [계정 전환]으로 계정을 고른다
+        //     (승인 화면을 건너뛰려면 브라우저에서 claude 로그아웃을 먼저 해야 하는데, 그건 탭이 하나 더 필요하다)
+        // 로그인은 **로그아웃이 끝난 뒤** 시작한다 — 먼저 띄우면 로그아웃이 새 자격증명을 지울 수 있다.
         lo.on('close', (code) => {
           killProc('계정을 바꾸려고 로그아웃해서 요청을 중단했어요.'); // 의도적 종료 (자동 재시도 방지)
           accountCache.at = 0; // 다음 조회에서 '계정 없음'으로 읽히게
           claudeStatus = null; // 상태 재판정
-          console.log('[bridge] 계정 전환 — CLI 로그아웃 (code ' + code + ')');
+          console.log('[bridge] 계정 전환 — CLI 로그아웃 (code ' + code + ') → 로그인 창을 엽니다.');
+          if (!loginProc) startLogin();
         });
-        const opened = openUrlInDefaultBrowser(WEB_LOGOUT_URL);
-        console.log('[bridge] 계정 전환 — 웹 로그아웃을 열었어요'
-          + (opened ? '' : ' (브라우저 열기 실패 — ' + WEB_LOGOUT_URL + ' 로 직접 접속해 주세요)') + '.');
-        // **로그아웃만 하고 끝내면 안 된다** (2026-08, BRIDGE_V=38): 로그아웃 화면에서 웹 로그인을 해도
-        // CLI OAuth가 시작되지 않아 플러그인은 연결되지 않는다. 사용자는 "로그인했는데 왜 안 되냐"가 되고,
-        // 옛 탭이 남아 있으면 죽은 포트로 콜백이 가서 "localhost에서 연결을 거부했습니다"까지 뜬다(실측).
-        // 그래서 로그아웃이 처리될 시간을 준 뒤 **CLI 로그인까지 이어서 시작한다** — 세션이 비워진 뒤라
-        // 승인 화면이 아니라 로그인 화면이 나온다. 탭은 2개(로그아웃 안내 + 로그인)지만 클릭 한 번으로 끝난다.
-        setTimeout(() => { if (!loginProc) startLogin(); }, LOGOUT_SETTLE_MS);
         loginStartedAt = Date.now();
         return json(res, 200, { ok: true, mode: 'browser-switch' });
       }

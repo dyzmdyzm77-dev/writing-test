@@ -1720,7 +1720,7 @@
       <span class="hab-dot"></span>
       <span class="hab-text" id="homeAccountText">클로드 계정 확인 중…</span>
       <button id="homeLogoutBtn" class="hab-btn hab-btn-ghost" type="button">로그아웃</button>
-      <button id="homeAccountBtn" class="hab-btn" type="button">계정 전환</button>
+      <button id="homeAccountBtn" class="hab-btn" type="button">로그인</button>
     </div>
     <div id="homeView">
       <div class="title">S-1 S/W UX Writing Agent</div>
@@ -1881,7 +1881,7 @@
           <span class="acb-text"></span>
           <span class="acb-actions">
             <button type="button" class="acb-use">이 계정 사용</button>
-            <button type="button" class="acb-switch">다른 계정으로 로그인</button>
+            <button type="button" class="acb-switch">로그아웃</button>
           </span>
         </div>
       </div>
@@ -4021,8 +4021,9 @@
               // 로그인 필요(만료·미로그인) — 같은 계정 재로그인이 대부분이라 보통 창으로 연다
               openClaudeLogin(false);
             } else if (bridgeProblem === 'claude-limit') {
-              // 한도 초과 — 같은 계정으로 다시 로그인해도 그대로 막히므로 계정 선택 화면으로 보낸다
-              openClaudeLogin(true);
+              // 한도 초과 — 같은 계정으로 재로그인해도 그대로 막힌다. 계정을 바꾸려면 로그아웃부터.
+              showToast('이 계정의 사용 한도를 다 썼어요. 관리자에게 한도를 올려 달라고 요청하거나, 로그아웃 후 다른 계정으로 로그인해 주세요.');
+              const lb = document.getElementById('homeLogoutBtn'); if (lb) lb.click();
             } else {
               // 그 외(claude 없음 등) — 안내를 다시 보여주고 상태 재확인
               showToast(bridgeWakeBtn.title);
@@ -4103,6 +4104,9 @@
         const logoutBtn = document.getElementById('homeLogoutBtn');
         // 로그아웃 버튼은 로그인된 계정이 있을 때만 보인다
         if (logoutBtn) logoutBtn.style.display = knownAccount ? '' : 'none';
+        // [계정 전환]은 없앴다(2026-08 사용자 결정) — 계정을 바꾸려면 [로그아웃] 후 로그인한다.
+        // 로그인돼 있으면 이 버튼을 숨기고, 로그아웃 상태에서만 [로그인]으로 쓴다.
+        if (barBtn) barBtn.style.display = knownAccount ? 'none' : '';
         // 초기화 버튼은 되돌릴 게 있을 때만 — 로그인된 계정이 있거나 감시자/다리가 응답한(=설치된) PC
         const resetBtn = document.getElementById('homeResetBtn');
         if (resetBtn) resetBtn.style.display = (knownAccount || accountSource === 'watcher' || accountSource === 'bridge') ? '' : 'none';
@@ -4118,12 +4122,12 @@
         if (knownAccount) {
           if (stateEl) stateEl.textContent = '이 PC에 로그인된 클로드 계정';
           if (emailEl) emailEl.textContent = knownAccount;
-          if (noteEl) noteEl.textContent = 'AI 추천 사용량이 이 계정 구독에서 차감돼요. 내 계정이 아니면 [다른 계정으로 로그인]을 눌러주세요.';
+          if (noteEl) noteEl.textContent = 'AI 추천 사용량이 이 계정 구독에서 차감돼요. 내 계정이 아니면 [로그아웃] 후 내 계정으로 로그인해 주세요.';
           if (card) card.classList.remove('ac-warn');
           if (useBtn) { useBtn.disabled = false; useBtn.textContent = '이 계정으로 시작'; }
           if (bar) { bar.classList.add('hab-on'); bar.classList.remove('hab-warn'); }
           if (barText) barText.textContent = '클로드 계정: ' + knownAccount;
-          if (barBtn) barBtn.textContent = '계정 전환';
+          // (버튼은 위에서 숨겼다 — 계정을 바꾸려면 [로그아웃])
         } else if (!accountInfoSeen) {
           if (stateEl) stateEl.textContent = '계정을 확인하는 중…';
           if (emailEl) emailEl.textContent = '';
@@ -4193,7 +4197,7 @@
         // 일반 로그인(switch=false)이면 브라우저에 이미 로그인된 계정이 있을 때 승인 화면으로 직행해
         // 계정을 못 고른다(실측). 계정을 골라 로그인하려는 화면이므로 switch=true로 고정.
         // 다리 깨우기는 code.ts의 OPEN_CLAUDE_LOGIN이 알아서 한다(꺼져 있으면 감시자로 깨우고 재시도).
-        openClaudeLogin(true);
+        openClaudeLogin(false); // [계정 전환]을 없앴다 — 이 버튼은 로그아웃 상태의 [로그인] 전용
         startAccountWatch();
       };
       // ["클로드 커넥터" 설치 파일 받기] — 처음 쓰는 PC용. 받은 파일 한 번 실행이 이 PC의 유일한 수동 단계다.
@@ -4221,10 +4225,8 @@
       // 홈의 [계정 전환]/[로그인] — 계정 확인 화면을 거치지 않고 브라우저 로그인을 바로 연다
       // (계정 화면 안의 버튼·🔑 버튼과 동일하게 통일). knownAccount 있으면 전환, 없으면 로그인.
       document.getElementById('homeAccountBtn').onclick = () => {
-        // 전환/로그인/확인 — 어느 경우든 '계정을 골라 로그인'하려는 것이므로 항상 계정 선택(switch=true)으로 연다.
-        // 일반 로그인(switch=false)은 브라우저에 이미 로그인된 계정이 있으면 승인 화면으로 직행해 계정을 못 고른다(실측).
-        // 계정 화면의 [클로드 로그인](accountSwitch)이 같은 이유로 이미 true 고정 — 이 버튼도 맞춘다.
-        openClaudeLogin(true);
+        // [계정 전환]을 없앴으므로 이 버튼은 로그아웃 상태의 [로그인] 전용이다.
+        openClaudeLogin(false);
         startAccountWatch();
       };
       // 로그아웃 — 이 PC의 클로드 CLI 로그인을 해제한다(claude auth logout). 다리가 대신 실행.
@@ -4292,8 +4294,8 @@
       };
       document.getElementById('confirmAccountNo').onclick = () => {
         closeConfirmAccountModal();
-        openClaudeLogin(true); // 다른 계정으로 — 계정 선택 화면
-        startAccountWatch();
+        // 계정을 바꾸는 길은 로그아웃뿐이다([계정 전환] 제거) — 로그아웃 팝업으로 보낸다
+        const lb0 = document.getElementById('homeLogoutBtn'); if (lb0) lb0.click();
       };
       // 로그인된 계정이 아직 확인 안 된 상태면 팝업으로 확인받는다 (계정당 1회)
       function maybeAskConfirmAccount() {
@@ -4378,7 +4380,8 @@
           parent.postMessage({ pluginMessage: { type: 'CONFIRM_ACCOUNT', account: pendingConfirmAccount } }, '*');
           hideAccountConfirm();
         };
-        if (sw) sw.onclick = () => { openClaudeLogin(true); }; // 배너의 [다른 계정으로 로그인] = 전환
+        // 배너의 보조 버튼도 로그아웃으로 통일 — 계정을 바꾸는 유일한 길이 로그아웃이다.
+        if (sw) { sw.textContent = '로그아웃'; sw.onclick = () => { const lb = document.getElementById('homeLogoutBtn'); if (lb) lb.click(); }; }
       });
 
       // 로그인 창 열기 + 상태 재확인 폴링 — 🟠 버튼과 [🔑] 버튼이 공용으로 쓴다.
@@ -4470,17 +4473,9 @@
       };
       // [🔑] 계정 바꾸기 — 켜짐 상태에서도 다른 계정으로 로그인할 수 있게 로그인 창을 연다.
       // (다리가 낡은 세션을 버리므로, 재로그인 후 첫 추천부터 새 계정으로 답한다)
+      // [🔑] 계정 바꾸기 단추는 없앴다(2026-08 사용자 결정) — 계정 변경은 홈의 [로그아웃]으로만 한다.
       const bridgeLoginBtn = document.getElementById('bridgeLoginBtn');
-      if (bridgeLoginBtn) {
-        bridgeLoginBtn.onclick = () => {
-          if (!bridgeKnownAlive) {
-            showToast('클로드가 연동돼 있지 않아요 — [클로드 연동 안 됨] 버튼으로 먼저 연결한 뒤 다시 눌러 주세요.');
-            requestBridgeStatus();
-            return;
-          }
-          openClaudeLogin(true); // [계정 전환] 버튼 = 다른 계정으로 바꾸려는 것 → 시크릿 창
-        };
-      }
+      if (bridgeLoginBtn) bridgeLoginBtn.style.display = 'none';
 
       // 최초 로드 시 클로드 다리 상태 요청
       requestBridgeStatus();
