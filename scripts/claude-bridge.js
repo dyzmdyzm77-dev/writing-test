@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 25;
+const BRIDGE_V = 26;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -170,6 +170,9 @@ function isLimitError(s) {
 // /health로 노출한다 (플러그인이 "누구 계정으로 쓰는 중인지" 표시 — 공용 PC에서 남의 계정 오사용 방지).
 // 파일이 클 수 있어(프로젝트 이력 포함) 30초 캐시. 재로그인하면 CLI가 파일을 갱신하므로 자동 반영된다.
 let accountCache = { at: 0, email: null };
+// 지금 떠 있는 claude 세션이 어느 계정으로 시동됐는지 (startProc에서 기록).
+// 세션은 시동할 때 받은 입장권을 계속 쓰므로, 밖에서 계정을 바꾸면 이 값과 파일의 계정이 어긋난다
+let sessionAccount = null;
 function claudeAccount() {
   if (Date.now() - accountCache.at < 30000) return accountCache.email;
   let email = null;
@@ -266,6 +269,8 @@ function startProc() {
   killProc();
   lineBuf = '';
   turns = 0;
+  // 이 세션이 어느 계정의 입장권으로 도는지 기록 — 밖에서 계정이 바뀌었는지 비교하는 기준
+  sessionAccount = claudeAccount();
   console.log('[bridge] 클로드 세션 시동 중… (모델: ' + currentModel + ')');
   const thisProc = spawn('claude', ['-p', '--model', currentModel, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], {
     shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV,
@@ -631,6 +636,26 @@ function parseSuggestions(raw) {
 // (플러그인이 로그인 창을 연 뒤 주기적으로 /health를 조회하는 것과 짝을 이룬다)
 // 한도 초과도 같은 경로로 복귀시킨다 — 관리자가 한도를 올려주거나 한도가 초기화되면
 // 사용자가 아무것도 안 눌러도 버튼이 🟢으로 돌아온다. 한도에 걸린 호출은 거절되므로 사용량은 안 나간다
+// 계정이 **밖에서** 바뀐 것을 알아챈다 (2026-08, BRIDGE_V=26).
+// 터미널이나 브라우저에서 다른 계정으로 로그인하면 자격증명 파일은 바뀌지만, 이미 떠 있는 claude
+// 세션은 시동할 때 받은 옛 계정 입장권을 그대로 쓴다 → 새 계정에 사용량이 남아 있어도 "한도 초과"가
+// 계속 나온다(2026-08 실측 신고: "새 계정으로 로그인했는데 왜 그 계정 사용량을 못 쓰냐").
+// 플러그인을 거친 로그인·로그아웃(/open-login·/claude-logout)은 killProc으로 세션을 버려서 이 문제가
+// 없었는데, 밖에서 바꾸면 다리가 알 방법이 없었다. 그래서 /health 조회마다 파일의 계정과 비교한다.
+// 비용 0(파일만 읽고, claudeAccount의 30초 캐시를 그대로 쓴다 — .claude.json이 커서 매번 읽지 않는다).
+// 계정 있음 → 없음(로그아웃) 방향은 건드리지 않는다: 파일을 덮어쓰는 순간 잠깐 못 읽는 것과
+// 구분되지 않아 헛 재시작을 부르고, 그 방향은 인증 오류 경로(isAuthError)가 이미 처리한다.
+function restartIfAccountChanged() {
+  if (!proc || waiter) return;         // 세션 없음(다음 턴이 새로 시동) / 턴 진행 중이면 다음 조회에서
+  const now = claudeAccount();
+  if (!now || now === sessionAccount) return;
+  console.log('[bridge] 계정이 바뀌었어요 (' + (sessionAccount || '없음') + ' → ' + now + ') — 옛 계정 세션을 버리고 새 계정으로 다시 시작합니다.');
+  // 의도적 종료(reason 지정) — SESSION_DIED로 끝내면 자동 재시도가 옛 계정 세션을 되살린다
+  killProc('계정이 바뀌어서 세션을 새로 시작했어요 — 다시 시도해 주세요.');
+  claudeStatus = null; // 한도·로그인 상태는 계정마다 다르다 — 새 계정으로 다시 판정하게
+  sessionAccount = now;
+}
+
 let lastAuthRetryAt = 0;
 function retryAuthIfNeeded() {
   if (claudeStatus !== 'claude-logout' && claudeStatus !== 'claude-limit') return;
@@ -676,6 +701,7 @@ function json(res, status, obj) {
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') {
+    restartIfAccountChanged(); // 밖에서 계정을 바꿨으면 옛 계정 세션을 먼저 버린다 (아래 워밍업이 옛 계정으로 돌지 않게)
     retryAuthIfNeeded(); // 로그인 필요 상태면 재확인 시도 — 재로그인이 끝났으면 다음 조회부터 problem이 풀린다
     return json(res, 200, {
       ok: true, engine: 'claude', v: BRIDGE_V, dir: __dirname, // v·dir: 구버전/엉뚱한 사본이 떠 있는지 진단용
