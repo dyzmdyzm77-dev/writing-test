@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 28;
+const BRIDGE_V = 30;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -209,93 +209,17 @@ setInterval(() => {
   }
 }, 5000);
 
-// ── 계정 전환은 시크릿 창으로 (2026-08, BRIDGE_V=27) ────────────────
-// [계정 전환]을 눌렀는데 "Claude Code님이 …연결을 요청했습니다"(승인 화면)가 뜨는 게 불만이었다.
-// 브라우저에 옛 계정 claude.ai 세션이 남아 있으면 authorize URL은 계정을 묻지 않고 그 계정으로
-// 승인만 묻는다. URL에 selectAccount·prompt를 씌우거나 logout?returnTo로 잇는 건 전부 실패했다
-// (아래 'BROWSER 가로채기' 주석의 히스토리). **세션이 없는 창에서 열면 로그인 화면이 그냥 나온다** —
-// 외부 사이트의 리다이렉트 규칙에 기대지 않는 유일한 방법이라 이걸 쓴다.
-// 성립 근거(2026-08 실측): ① CLI는 authorize URL 전문을 **stdout에 찍는다**("If the browser didn't
-// open, visit: …") ② BROWSER를 아무것도 안 하는 스크립트로 지정하면 CLI가 자기 브라우저를 열지 않으면서도
-// **localhost 자동 수령은 유지**한다(127.0.0.1 LISTEN 확인) → 코드 붙여넣기 없이 끝난다.
-// **URL은 stdout에서 가져올 것** — BROWSER 핸들러의 인자로 받으면 cmd가 `&`에서 잘라먹는다(실측:
-// ARGS_ALL이 ?code=true에서 끝나고 client_id 이후가 사라짐 = "잘못된 OAuth 요청"의 진짜 원인).
-// 브라우저는 인자로 직접 넘긴다(shell 경유 금지 — 같은 잘림을 당한다).
-function writeNoopBrowser() {
-  if (process.platform === 'win32') {
-    const p = path.join(os.tmpdir(), 'claude-bridge-noop.cmd');
-    fs.writeFileSync(p, '@echo off\r\nexit /b 0\r\n');
-    return p;
-  }
-  const p = path.join(os.tmpdir(), 'claude-bridge-noop.sh');
-  fs.writeFileSync(p, '#!/bin/sh\nexit 0\n');
-  fs.chmodSync(p, 0o755);
-  return p;
-}
-// 시크릿/InPrivate 창으로 URL을 연다. 못 열면 false — 호출한 쪽이 기본 브라우저로 폴백한다
-// (폴백이 없으면 아무 창도 안 떠서 사용자가 막힌다 — BROWSER를 no-op으로 막아 뒀기 때문).
-// 기본 브라우저 실행 파일을 찾는다(win32) — https 연결 프로그램의 ProgId → shell\open\command.
-// **기본 브라우저를 먼저 쓰는 게 중요하다**: 안 그러면 평소 안 쓰는 브라우저가 열려 당황스럽다
-// (실측 신고: 기본이 삼성 인터넷인데 크롬이 열렸다). reg.exe로 읽어 PowerShell 의존을 피한다.
-function winDefaultBrowserExe() {
-  try {
-    const q = spawnSync('reg', ['query', 'HKCU\\SOFTWARE\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice', '/v', 'ProgId'], { encoding: 'utf8' });
-    const prog = (q.stdout || '').match(/ProgId\s+REG_SZ\s+(\S+)/);
-    if (!prog) return null;
-    for (const root of ['HKCU\\SOFTWARE\\Classes', 'HKLM\\SOFTWARE\\Classes']) {
-      const c = spawnSync('reg', ['query', root + '\\' + prog[1] + '\\shell\\open\\command', '/ve'], { encoding: 'utf8' });
-      const line = (c.stdout || '').match(/REG_SZ\s+(.+)/);
-      if (!line) continue;
-      const hit = line[1].trim().match(/^"([^"]+)"/) || line[1].trim().match(/^(\S+\.exe)/i);
-      if (hit && fs.existsSync(hit[1])) return hit[1];
-    }
-  } catch (_e) { /* 못 찾으면 아래 후보 목록으로 */ }
-  return null;
-}
-// 브라우저별 시크릿 창 인자 — 엣지·파이어폭스만 다르고, 나머지 크로미움 계열
-// (크롬·웨일·삼성 인터넷·브레이브·비발디…)은 --incognito를 쓴다
-function privateFlagFor(exe) {
-  const n = path.basename(exe).toLowerCase();
-  if (n.indexOf('msedge') !== -1) return '--inprivate';
-  if (n.indexOf('firefox') !== -1) return '-private-window';
-  return '--incognito';
-}
-const WIN_PRIVATE_BROWSERS = [
-  { exe: (process.env.ProgramFiles || 'C:\\Program Files') + '\\Google\\Chrome\\Application\\chrome.exe', flag: '--incognito' },
-  { exe: (process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)') + '\\Google\\Chrome\\Application\\chrome.exe', flag: '--incognito' },
-  { exe: (process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)') + '\\Microsoft\\Edge\\Application\\msedge.exe', flag: '--inprivate' },
-  { exe: (process.env.ProgramFiles || 'C:\\Program Files') + '\\Microsoft\\Edge\\Application\\msedge.exe', flag: '--inprivate' },
-];
-function openPrivateWindow(url) {
-  try {
-    if (process.platform === 'win32') {
-      // 기본 브라우저를 먼저 — 못 찾을 때만 크롬·엣지로 폴백
-      const def = winDefaultBrowserExe();
-      const cands = def ? [{ exe: def, flag: privateFlagFor(def) }].concat(WIN_PRIVATE_BROWSERS) : WIN_PRIVATE_BROWSERS;
-      for (const b of cands) {
-        if (!fs.existsSync(b.exe)) continue;
-        spawn(b.exe, [b.flag, url], { stdio: 'ignore', windowsHide: false }).unref();
-        console.log('[bridge] 시크릿 창으로 로그인 화면을 열었어요: ' + path.basename(b.exe) + ' ' + b.flag
-          + (def && b.exe === def ? ' (기본 브라우저)' : ' (기본 브라우저를 못 찾아 폴백)'));
-        return true;
-      }
-      return false;
-    }
-    // macOS — 크롬이 있으면 시크릿 창, 없으면 폴백(사파리는 CLI로 개인정보 보호 창을 못 연다)
-    const r = spawnSync('open', ['-na', 'Google Chrome', '--args', '--incognito', url], { stdio: 'ignore' });
-    if (r.status === 0) { console.log('[bridge] 시크릿 창으로 로그인 화면을 열었어요 (Chrome)'); return true; }
-    return false;
-  } catch (_e) { return false; }
-}
-// 기본 브라우저로 열기(폴백). win32는 rundll32로 — cmd를 안 거쳐서 URL의 &가 안 잘린다
-function openDefaultBrowser(url) {
-  try {
-    if (process.platform === 'win32') spawn('rundll32', ['url.dll,FileProtocolHandler', url], { stdio: 'ignore', windowsHide: true }).unref();
-    else spawn('open', [url], { stdio: 'ignore' }).unref();
-    console.log('[bridge] 기본 브라우저로 로그인 화면을 열었어요(시크릿 창 실패 폴백).');
-    return true;
-  } catch (_e) { return false; }
-}
+// ── 로그인은 CLI가 기본 브라우저를 직접 열게 한다 (2026-08, BRIDGE_V=30) ──
+// 우리가 BROWSER를 가로채거나 창을 골라 여는 시도는 **전부 실패해서 되돌렸다**. 남긴 교훈:
+//   ① BROWSER 핸들러로 URL을 받으면 cmd가 `&`에서 잘라먹는다 → client_id 소실("잘못된 OAuth 요청").
+//   ② BROWSER를 no-op으로 막고 stdout의 URL을 우리가 열면 **승인 뒤 인증코드를 붙여넣으라는 화면**이
+//      뜬다(실측 신고: "이런 거 없었는데 갑자기 왜 생겨") — 자동 수령이 깨진다.
+//   ③ 시크릿 창으로 열려면 브라우저를 우리가 골라야 해서 **기본 브라우저가 아닌 크롬·엣지가 열린다**
+//      (실측 신고: "왜 크롬으로 열려", "기본 브라우저로 하라니까"). 게다가 기본 브라우저가 시크릿
+//      인자를 무시하면(삼성 인터넷 실측) 일반 창이 떠 승인 화면이 그대로다.
+// 그래서 **BROWSER를 건드리지 않는다** — claude CLI가 기본 브라우저를 열고 localhost로 결과를 자동
+// 수령한다(코드 붙여넣기 없음). 계정 전환은 승인 화면 하단 [계정 전환] 버튼으로 한다.
+// **이 경로에 URL 가공·중간 스크립트·브라우저 지정을 다시 넣지 말 것.**
 
 // ── BROWSER 가로채기는 제거됐다 (2026-08, BRIDGE_V=25) ──────────────
 // 예전엔 BROWSER 환경변수에 임시 스크립트를 꽂아 CLI가 준 authorize URL을 우리가 받아서 열었다.
@@ -313,6 +237,9 @@ function openDefaultBrowser(url) {
 let loginProc = null;
 let loginProcTimer = null;
 let loginStartedAt = 0; // 브라우저 로그인 시작 시각 — 재클릭이 '재시도'인지 '자동완료 실패'인지 구분한다
+// 이번 로그인에서 브라우저 창을 실제로 띄웠는가 — 터미널 폴백은 이게 false일 때만 쓴다
+// (시간만으로 판단하면 정상 재클릭에도 cmd 창이 튀어나온다)
+let loginWindowOpened = false;
 function killLoginProc() {
   if (loginProcTimer) { clearTimeout(loginProcTimer); loginProcTimer = null; }
   if (!loginProc) return;
@@ -823,10 +750,11 @@ const server = http.createServer(async (req, res) => {
           problem: 'claude-missing',
         });
       }
-      // 진행 중인데 또 눌렀다 — 금방(60초 내) 다시 누른 건 "창을 닫았다/못 봤다"에 가까우므로 브라우저로 재시도한다.
-      // 한참 뒤에도 또 누르는 건 브라우저가 localhost 콜백에 못 닿아 자동 완료가 안 되는 환경일 수 있으니
-      // 그때만 코드를 붙여넣을 수 있는 터미널 방식으로 폴백한다 (두 번째 클릭에 터미널이 튀어나오면 당황스럽다).
-      const stale = loginProc && (Date.now() - loginStartedAt > 60000);
+      // 진행 중인데 또 눌렀다 — 원칙은 "브라우저로 다시 열기"다. 터미널은 **창을 아무것도 못 띄웠을 때만**.
+      // 예전엔 '60초 넘게 대기 중이면 터미널'이었는데, 로그인 화면을 읽거나 잠깐 딴 일 하다 다시 누른
+      // 정상적인 경우에도 cmd 창이 튀어나왔다(2026-08 실측 신고: "터미널 화면은 왜 떠 갑자기").
+      // 이제 우리가 창을 직접 열고 성공 여부(loginWindowOpened)를 아니까, 시간이 아니라 그 사실로 판단한다.
+      const stale = loginProc && !loginWindowOpened && (Date.now() - loginStartedAt > 20000);
       if (loginProc && stale) {
         killLoginProc();
         if (!openLoginTerminal()) {
@@ -840,50 +768,17 @@ const server = http.createServer(async (req, res) => {
       }
       killLoginProc(); // 앞선 브라우저 로그인이 대기 중이면 접고 새로 연다 (창을 닫았거나 다시 누른 경우)
       loginStartedAt = Date.now();
-      // 계정 전환이면 우리가 시크릿 창으로 연다(위 '계정 전환은 시크릿 창으로' 주석):
-      //   BROWSER=no-op으로 CLI의 브라우저 열기를 막고, stdout에 찍히는 URL 전문을 잡아서 우리가 연다.
-      // 만료 재로그인(normal)은 같은 계정이라 세션이 남아 있는 게 빠르다 → 건드리지 않고 CLI가 직접 연다.
-      const privateLogin = !!switchMode;
+      loginWindowOpened = false; // 이번 시도의 창 열기 성공 여부 — 아래에서 세운다
+      // BROWSER는 건드리지 않는다 — CLI가 기본 브라우저를 열고 localhost로 결과를 자동 수령한다
+      // (위 '로그인은 CLI가 기본 브라우저를 직접 열게 한다' 주석 — 가로채면 코드 붙여넣기 화면이 뜬다).
+      // 계정 전환도 같은 경로다: 브라우저에 세션이 남아 있으면 승인 화면이 뜨고, 그 화면 하단
+      // [계정 전환]으로 다른 계정을 고른다. switchMode는 로그·응답 표시용으로만 남는다.
       const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
-        shell: true,
-        env: privateLogin ? Object.assign({}, CLAUDE_ENV, { BROWSER: writeNoopBrowser() }) : CLAUDE_ENV,
-        stdio: privateLogin ? ['ignore', 'pipe', 'pipe'] : 'ignore',
-        windowsHide: true,
+        shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
         detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
       });
       loginProc = thisLogin;
-      if (privateLogin) {
-        let out = '';
-        let opened = false;
-        const scan = (chunk) => {
-          if (opened) return;
-          out += chunk.toString();
-          const m = out.match(/https:\/\/\S*\/oauth\/authorize\?\S+/);
-          if (!m) return;
-          opened = true;
-          // 끝에 붙은 따옴표·괄호류만 떼어낸다 (URL 자체엔 안 쓰이는 문자들)
-          const url = m[0].replace(/["'<>)\]]+$/, '');
-          if (!openPrivateWindow(url) && !openDefaultBrowser(url)) {
-            console.log('[bridge] 로그인 화면을 못 열었어요 — 이 주소로 직접 로그인해 주세요: ' + url);
-          }
-        };
-        thisLogin.stdout.on('data', scan);
-        thisLogin.stderr.on('data', scan);
-        // URL이 안 잡히면(출력 형식이 바뀐 등) 아무 창도 안 뜬 채 막힌다 — BROWSER를 no-op으로 막아 뒀기 때문.
-        // 그 경우 한 번만 옛 방식(CLI가 직접 열기)으로 다시 시도한다.
-        setTimeout(() => {
-          if (opened || loginProc !== thisLogin) return;
-          console.log('[bridge] 로그인 URL을 못 찾았어요 — CLI가 직접 브라우저를 여는 방식으로 다시 시도합니다.');
-          killLoginProc();
-          const retry = spawn('claude', ['auth', 'login', '--claudeai'], {
-            shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
-            detached: process.platform !== 'win32',
-          });
-          loginProc = retry;
-          retry.on('error', () => { if (loginProc === retry) loginProc = null; });
-          retry.on('close', () => { if (loginProc === retry) { loginProc = null; accountCache.at = 0; } });
-        }, 15000);
-      }
+      loginWindowOpened = true; // CLI가 여는 건 관찰할 수 없으니 열린 것으로 본다 (재클릭에 터미널 방지)
       thisLogin.on('error', () => { if (loginProc === thisLogin) loginProc = null; });
       thisLogin.on('close', (code) => {
         if (loginProc !== thisLogin) return;
@@ -904,7 +799,7 @@ const server = http.createServer(async (req, res) => {
       // 재로그인 뒤에도 MAX_TURNS까지 옛 계정으로 처리되는 버그가 된다 (2026-07 리뷰에서 확인)
       killProc('로그인을 진행하는 중이라 요청을 중단했어요 — 로그인 후 다시 시도해 주세요.');
       accountCache.at = 0;
-      console.log('[bridge] 브라우저 로그인 시작' + (switchMode ? ' (계정 전환 — 시크릿 창으로 열어 로그인 화면부터 보여줍니다)' : '') + ' — 로그인하면 자동 연결됩니다.');
+      console.log('[bridge] 브라우저 로그인 시작' + (switchMode ? ' (계정 전환 — 승인 화면이 뜨면 그 화면 하단 [계정 전환]으로 다른 계정을 고를 수 있어요)' : '') + ' — 로그인하면 자동 연결됩니다.');
       return json(res, 200, { ok: true, mode: switchMode ? 'browser-switch' : 'browser' });
     } catch (e) {
       return json(res, 500, { error: '로그인 창을 못 열었어요: ' + e.message });
