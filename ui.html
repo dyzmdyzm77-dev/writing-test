@@ -1018,7 +1018,8 @@
         /* 아래 여백 8 — 이걸 키우면 상자가 min-height 320을 넘겨 버튼이 검토 화면보다 아래로 밀린다 */
         margin: 0 auto 8px;
       }
-      .bridge-loading.stopped .bridge-loading-art { display: block; }
+      .bridge-loading.stopped .bridge-loading-art,
+      .bridge-loading.login .bridge-loading-art { display: block; }
       .bridge-loading-title {
         font-size: 16px;
         font-weight: 500; /* Medium */
@@ -1038,15 +1039,18 @@
       }
       .bridge-loading-actions button { margin: 0; }
       .bridge-loading.failed .bridge-loading-actions,
-      .bridge-loading.stopped .bridge-loading-actions { display: flex; }
+      .bridge-loading.stopped .bridge-loading-actions,
+      .bridge-loading.login .bridge-loading-actions { display: flex; }
       .bridge-loading.failed .loading-spinner,
-      .bridge-loading.stopped .loading-spinner { display: none; }
+      .bridge-loading.stopped .loading-spinner,
+      .bridge-loading.login .loading-spinner { display: none; }
       /* 설치 파일은 "못 켰을 때"만 제안 — 직접 꺼둔 경우엔 이미 깔려 있으니 안 보여준다 */
       .bridge-loading .bl-install { display: none; }
       .bridge-loading.failed .bl-install { display: block; }
       /* 직접 꺼둔 경우엔 켤 때까지 이 화면 — 추천은 클로드가 하는 일이라 닫아도 쓸 게 없다.
          (못 켠 경우(failed)는 켤 방법 자체가 막힌 상황이라 닫고 나갈 길을 남겨 둔다) */
-      .bridge-loading.stopped .bl-close { display: none; }
+      .bridge-loading.stopped .bl-close,
+      .bridge-loading.login .bl-close { display: none; }
       .bl-close {
         background: none;
         border: none;
@@ -2450,6 +2454,15 @@
         // 로그인 창 열기 결과 — 대기 화면이 이걸 보고 계속 기다릴지/실패를 알릴지 정한다
         if (event.data.pluginMessage.type === 'login-open-result') {
           const lr = event.data.pluginMessage;
+          // 계정 전환 = 로그아웃까지만 한 것 — 로그인을 기다릴 게 없으니 대기 화면을 걷고 다음 할 일을 알린다
+          if (lr.ok && lr.mode === 'logged-out') {
+            hideLoginWaiting();
+            stopAccountWatch();
+            justLoggedOut = true; // 방금 로그아웃 — 캐시된 옛 계정 조회를 로그인으로 오해하지 않게
+            showToast('로그아웃했어요. 브라우저에서 새 계정으로 로그인한 뒤 [로그인]을 눌러 연결해 주세요.');
+            requestAccountInfo();
+            return;
+          }
           if (isLoginWaiting()) {
             if (!lr.ok) {
               setLoginWaitFailed(lr.error);
@@ -2710,6 +2723,16 @@
             if (bs.alive) { installOffer = false; bridgeWakeFailed = false; bridgeDismissed = false; } // 켜졌으면(설치 파일 실행 완료 등) 실패 기억·설치 제안·닫음 해제
             // 못 켬/꺼둠 안내를 띄운 뒤 켜졌으면(설치 파일 실행, 다른 경로로 켬 등) 덮개를 스스로 걷는다
             if (bs.alive && (bridgeLoadState === 'failed' || bridgeLoadState === 'stopped')) setBridgeLoadState('off');
+            // 연결은 됐는데 클로드에 로그인이 안 됐으면, 추천 화면을 덮어 **미리** 로그인을 요구한다.
+            // 예전엔 그냥 들여보내서 [추천받기]를 누른 뒤에야 '로그인이 필요해요'로 실패했다(실측 신고:
+            // "로그인이 안 되면 처음부터 로그인 화면이 떠야 하지 않나"). 로그인되면 아래에서 덮개를 걷는다.
+            if (bs.alive && bs.problem === 'claude-logout' && currentView === 'recommend'
+                && !bridgeWakePoll && !bridgeRestarting && bridgeLoadState !== 'login') {
+              setBridgeLoadState('login');
+            }
+            if (bridgeLoadState === 'login' && (!bs.alive || bs.problem !== 'claude-logout')) {
+              setBridgeLoadState('off'); // 로그인됨(또는 다리가 꺼짐) — 로그인 덮개는 걷는다
+            }
             // 추천 화면인데 다리가 꺼져 있으면 진입 때(ensureBridgeFromGesture)와 똑같이 덮개를 세운다.
             //   직접 껌 → stopped / 전에 20초 실패 → failed / 그 외 → 깨우면서 waking.
             // 예전엔 userTurnedOff(직접 껌)만 처리해서, '그냥 꺼진'(정상 off·죽었다 다시 켜지기 전 등) 경우엔
@@ -3870,7 +3893,9 @@
                      ? '이 PC에서 클로드를 처음 쓴다면 설치 파일을 받아 압축을 풀고, 나온 파일을 우클릭 → [열기] 해주세요.'
                      : '이 PC에서 클로드를 처음 쓴다면 설치 파일을 한 번 실행해야 해요.')
                      + '<br>클로드 없이도 예시·규칙으로 추천은 받을 수 있어요.' },
-        stopped: { title: '클로드를 연결해 주세요.', sub: '문구 추천은 클로드가 만들어요.<br>연결하면 바로 이어서 쓸 수 있어요.' }
+        stopped: { title: '클로드를 연결해 주세요.', sub: '문구 추천은 클로드가 만들어요.<br>연결하면 바로 이어서 쓸 수 있어요.' },
+        // 연결은 됐지만 클로드에 로그인이 안 된 상태 — 추천을 눌러 실패하기 전에 미리 막고 안내한다
+        login:   { title: '클로드에 로그인해 주세요.', sub: '문구 추천은 클로드가 만들어요.<br>로그인하면 바로 이어서 쓸 수 있어요.' }
       };
       function setBridgeLoadState(state) {
         bridgeLoadState = state;
@@ -3885,6 +3910,9 @@
         el.classList.toggle('active', show);
         el.classList.toggle('failed', bridgeLoadState === 'failed');
         el.classList.toggle('stopped', bridgeLoadState === 'stopped');
+        el.classList.toggle('login', bridgeLoadState === 'login');
+        const retryBtn = document.getElementById('bridgeLoadingRetry');
+        if (retryBtn) retryBtn.textContent = bridgeLoadState === 'login' ? '클로드 로그인하기' : '클로드 연결하기';
         const copy = BRIDGE_LOAD_COPY[bridgeLoadState];
         if (!copy) return;
         document.getElementById('bridgeLoadingTitle').textContent = copy.title;
