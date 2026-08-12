@@ -89,33 +89,36 @@
       #topFixed, #recommendHeader {
         flex-direction: column;
       }
-      /* 추천 헤더 높이 고정 → 버튼이 항상 같은 위치 */
+      /* 추천 헤더는 제목+모드 칩까지만 고정 — 그 아래(입력창·버튼·결과)는 스크롤된다 */
       #recommendHeader {
-        min-height: 320px;
+        min-height: 0;
         border-bottom: none; /* 검토 빈 화면과 동일하게 버튼 아래 구분선 제거 */
       }
-      /* 입력창이 헤더의 남는 세로 공간을 채움 (버튼은 항상 바닥) */
-      #recommendHeader .feature-input {
-        flex: 1 1 auto;
+      /* 스크롤 영역 — 고정 헤더와 좌우 여백을 맞춘다 (헤더는 padding 20px) */
+      #recommendBody {
+        display: none;
+        padding: 0 20px;
+        box-sizing: border-box;
       }
       /* 문구 다듬기 초기 화면: 입력창+추천받기 버튼을 검토 빈 화면처럼 콘텐츠 영역 세로 중앙에.
          (컴팩트·대화 모드가 아닐 때만) */
       /* .pp-results: 팝업 세트 결과가 떠 있는 동안 — compact처럼 늘림을 풀어야 아래 결과가 보인다.
          (팝업 결과는 미리보기를 남기려고 compact로 안 가는데, 늘림을 안 풀면 결과가 헤더 아래
          화면 밖에 그려져 "추천을 눌렀는데 아무것도 안 나옴"이 된다 — 실제 발생) */
-      #recommendHeader:not(.compact):not(.chat-mode):not(.pp-results) { bottom: 60px; } /* 고정 헤더를 하단 탭바 위까지 = 콘텐츠 영역 전체 */
-      #recommendHeader:not(.compact):not(.chat-mode):not(.pp-results) .feature-input { flex: 0 0 auto; }
-      #recommendHeader:not(.compact):not(.chat-mode):not(.pp-results) #recommendRun { margin-bottom: auto; } /* 입력창+버튼을 상단부에, 남는 공간은 버튼 아래로 (센터 아님). 폭은 입력창과 동일 */
+      /* (헤더를 콘텐츠 영역 전체로 늘리던 규칙 제거 — 칩 아래는 이제 스크롤 영역이다) */ /* 고정 헤더를 하단 탭바 위까지 = 콘텐츠 영역 전체 */
+
+ /* 입력창+버튼을 상단부에, 남는 공간은 버튼 아래로 (센터 아님). 폭은 입력창과 동일 */
       /* 추천 후 컴팩트 헤더: 큰 입력창·안내문은 숨기고
          입력 내용(읽기 전용) + [다시 추천받기]만 상단에 고정 — 아래 추천 리스트만 스크롤 */
       #recommendHeader.compact { min-height: 0; }
-      #recommendHeader.compact .hint,
-      #recommendHeader.compact #recommendInput { display: none; }
+      /* 상태는 고정 헤더가 들고 있으므로 형제 선택자로 읽는다 — JS 미러링 없이 즉시 반영된다 */
+      #recommendHeader.compact ~ #recommendBody .hint,
+      #recommendHeader.compact ~ #recommendBody #recommendInput { display: none; }
       /* #framePreview는 인라인 display로 켜고 끄므로 CSS로 숨길 수 없다 —
          팝업 미리보기와 같이 JS(setRecommendCompact/setRecommendMode)에서 다룬다 */
       /* 결과를 보는 중 캔버스에서 다른 대상을 고르면 그 사실만 알려 준다 — 결과는 그대로 두므로
          이 안내가 없으면 [추천받기]를 눌러도 화면이 안 바뀌는 것처럼 보인다 */
-      #recommendHeader.compact .hint.pending-note { display: block; }
+      #recommendHeader.compact ~ #recommendBody .hint.pending-note { display: block; }
       /* 추천 모드 전환 (다듬기/대화로 만들기) — 전역 button 규칙(width:100%, height:48px!important) 되돌림 필수 */
       /* 모드 토글 — 둥근 칩(pill) 형태, 칩 사이 간격 */
       .mode-toggle {
@@ -172,8 +175,8 @@
       #recommendHint:empty { display: none; margin: 0; }
       /* 대화 모드일 땐 헤더의 큰 입력창·버튼을 숨기고 헤더를 낮춘다 (입력은 하단 고정 바에서) */
       #recommendHeader.chat-mode { min-height: 0; padding-bottom: 8px; }
-      #recommendHeader.chat-mode #recommendInput,
-      #recommendHeader.chat-mode #recommendRun { display: none; }
+      #recommendHeader.chat-mode ~ #recommendBody #recommendInput,
+      #recommendHeader.chat-mode ~ #recommendBody #recommendRun { display: none; }
       /* 칩 아래 여백 압축 — 제목부 아래 16px은 다듬기 모드 입력창과의 간격용이라 대화 모드엔 과함 */
       #recommendHeader.chat-mode .title-section { margin-bottom: 4px; }
       /* 하단 고정 입력 바 — 클로드 앱과 같은 위치. 전역 button 규칙(width:100%,height:48px!important) 되돌림 */
@@ -402,7 +405,7 @@
       }
       .chat-history-del:hover { background: #FDECEC; color: #D64545; }
       #recommendEntered { display: none; margin-bottom: 12px; }
-      #recommendHeader.compact #recommendEntered { display: block; }
+      #recommendHeader.compact ~ #recommendBody #recommendEntered { display: block; }
       #recommendEntered .entered-head {
         display: flex;
         align-items: center;
@@ -1876,14 +1879,19 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
         </div>
-        <div class="hint" id="recommendHint"></div>
-        <div class="account-confirm-bar" style="display:none">
-          <span class="acb-text"></span>
-          <span class="acb-actions">
-            <button type="button" class="acb-use">이 계정 사용</button>
-            <button type="button" class="acb-switch">로그아웃</button>
-          </span>
-        </div>
+      </div>
+    </div>
+    <!-- 칩 아래부터는 스크롤 영역 (2026-08 사용자 요구: 칩은 고정, 그 아래는 스크롤).
+         예전엔 입력창·[추천받기]까지 고정 헤더 안이라 스크롤이 버튼 아래에서만 일어났다.
+         상태(compact/chat-mode)는 CSS 형제 선택자(#recommendHeader.x ~ #recommendBody)로 읽는다. -->
+    <div id="recommendBody">
+      <div class="hint" id="recommendHint"></div>
+      <div class="account-confirm-bar" style="display:none">
+        <span class="acb-text"></span>
+        <span class="acb-actions">
+          <button type="button" class="acb-use">이 계정 사용</button>
+          <button type="button" class="acb-switch">로그아웃</button>
+        </span>
       </div>
       <!-- 추천 후 컴팩트 모드: 보낸 문구를 읽기 전용으로 표시 ([초기화] = 결과·입력 비우고 처음으로) -->
       <div id="recommendEntered">
@@ -2128,6 +2136,7 @@
           document.getElementById('topFixed').style.display = 'none';
           document.getElementById('recommendHeader').style.display = 'none';
           document.getElementById('recommendSection').style.display = 'none';
+          document.getElementById('recommendBody').style.display = 'none';
           const tb = document.getElementById('tabBar');
           tb.classList.remove('visible');
           document.getElementById('homeAccountBar').classList.remove('visible'); // 계정 화면(온보딩)에선 상단 계정 바 숨김
@@ -2149,6 +2158,7 @@
         document.getElementById('topFixed').style.display = name === 'review' ? 'flex' : 'none';
         document.getElementById('recommendHeader').style.display = name === 'recommend' ? 'flex' : 'none';
         document.getElementById('recommendSection').style.display = name === 'recommend' ? 'block' : 'none';
+        document.getElementById('recommendBody').style.display = name === 'recommend' ? 'block' : 'none';
         // 대화 하단 입력 바는 추천 화면 + 대화 모드일 때만 보인다 (다른 화면으로 가면 숨김)
         {
           const inCompose = (name === 'recommend' && composeMode);
