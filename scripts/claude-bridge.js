@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 27;
+const BRIDGE_V = 28;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -234,6 +234,32 @@ function writeNoopBrowser() {
 }
 // 시크릿/InPrivate 창으로 URL을 연다. 못 열면 false — 호출한 쪽이 기본 브라우저로 폴백한다
 // (폴백이 없으면 아무 창도 안 떠서 사용자가 막힌다 — BROWSER를 no-op으로 막아 뒀기 때문).
+// 기본 브라우저 실행 파일을 찾는다(win32) — https 연결 프로그램의 ProgId → shell\open\command.
+// **기본 브라우저를 먼저 쓰는 게 중요하다**: 안 그러면 평소 안 쓰는 브라우저가 열려 당황스럽다
+// (실측 신고: 기본이 삼성 인터넷인데 크롬이 열렸다). reg.exe로 읽어 PowerShell 의존을 피한다.
+function winDefaultBrowserExe() {
+  try {
+    const q = spawnSync('reg', ['query', 'HKCU\\SOFTWARE\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice', '/v', 'ProgId'], { encoding: 'utf8' });
+    const prog = (q.stdout || '').match(/ProgId\s+REG_SZ\s+(\S+)/);
+    if (!prog) return null;
+    for (const root of ['HKCU\\SOFTWARE\\Classes', 'HKLM\\SOFTWARE\\Classes']) {
+      const c = spawnSync('reg', ['query', root + '\\' + prog[1] + '\\shell\\open\\command', '/ve'], { encoding: 'utf8' });
+      const line = (c.stdout || '').match(/REG_SZ\s+(.+)/);
+      if (!line) continue;
+      const hit = line[1].trim().match(/^"([^"]+)"/) || line[1].trim().match(/^(\S+\.exe)/i);
+      if (hit && fs.existsSync(hit[1])) return hit[1];
+    }
+  } catch (_e) { /* 못 찾으면 아래 후보 목록으로 */ }
+  return null;
+}
+// 브라우저별 시크릿 창 인자 — 엣지·파이어폭스만 다르고, 나머지 크로미움 계열
+// (크롬·웨일·삼성 인터넷·브레이브·비발디…)은 --incognito를 쓴다
+function privateFlagFor(exe) {
+  const n = path.basename(exe).toLowerCase();
+  if (n.indexOf('msedge') !== -1) return '--inprivate';
+  if (n.indexOf('firefox') !== -1) return '-private-window';
+  return '--incognito';
+}
 const WIN_PRIVATE_BROWSERS = [
   { exe: (process.env.ProgramFiles || 'C:\\Program Files') + '\\Google\\Chrome\\Application\\chrome.exe', flag: '--incognito' },
   { exe: (process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)') + '\\Google\\Chrome\\Application\\chrome.exe', flag: '--incognito' },
@@ -243,10 +269,14 @@ const WIN_PRIVATE_BROWSERS = [
 function openPrivateWindow(url) {
   try {
     if (process.platform === 'win32') {
-      for (const b of WIN_PRIVATE_BROWSERS) {
+      // 기본 브라우저를 먼저 — 못 찾을 때만 크롬·엣지로 폴백
+      const def = winDefaultBrowserExe();
+      const cands = def ? [{ exe: def, flag: privateFlagFor(def) }].concat(WIN_PRIVATE_BROWSERS) : WIN_PRIVATE_BROWSERS;
+      for (const b of cands) {
         if (!fs.existsSync(b.exe)) continue;
         spawn(b.exe, [b.flag, url], { stdio: 'ignore', windowsHide: false }).unref();
-        console.log('[bridge] 시크릿 창으로 로그인 화면을 열었어요: ' + path.basename(b.exe));
+        console.log('[bridge] 시크릿 창으로 로그인 화면을 열었어요: ' + path.basename(b.exe) + ' ' + b.flag
+          + (def && b.exe === def ? ' (기본 브라우저)' : ' (기본 브라우저를 못 찾아 폴백)'));
         return true;
       }
       return false;
