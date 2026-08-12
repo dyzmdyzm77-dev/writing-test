@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 38;
+const BRIDGE_V = 39;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -173,12 +173,24 @@ let accountCache = { at: 0, email: null };
 // 지금 떠 있는 claude 세션이 어느 계정으로 시동됐는지 (startProc에서 기록).
 // 세션은 시동할 때 받은 입장권을 계속 쓰므로, 밖에서 계정을 바꾸면 이 값과 파일의 계정이 어긋난다
 let sessionAccount = null;
+// 실제 로그인 여부는 자격증명 파일로 판단한다 — ~/.claude.json의 oauthAccount는 **로그아웃해도 남는다**
+// (실측: claude auth status는 loggedIn:false인데 그 필드는 그대로 → 플러그인이 로그인된 것처럼 표시했다).
+// 파일만 읽으므로 비용 0. claude auth status를 부르면 정확하지만 프로세스를 띄워야 해서 조회마다 쓰기엔 무겁다.
+function hasClaudeCredentials() {
+  try {
+    const f = path.join(os.homedir(), '.claude', '.credentials.json');
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    return !!(j && j.claudeAiOauth && j.claudeAiOauth.accessToken);
+  } catch (_e) { return false; } // 파일 없음·못 읽음 = 로그인 안 됨으로 본다
+}
 function claudeAccount() {
   if (Date.now() - accountCache.at < 30000) return accountCache.email;
   let email = null;
   try {
-    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
-    email = (j && j.oauthAccount && j.oauthAccount.emailAddress) || null;
+    if (hasClaudeCredentials()) { // 자격증명이 없으면 남은 이메일은 무시한다
+      const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+      email = (j && j.oauthAccount && j.oauthAccount.emailAddress) || null;
+    }
   } catch (_e) { /* 로그인 이력 없음 등 — null 유지 */ }
   accountCache = { at: Date.now(), email };
   return email;

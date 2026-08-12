@@ -32,12 +32,24 @@ function json(res, status, obj) {
 // 파일이 클 수 있어 30초 캐시. 재로그인하면 CLI가 파일을 갱신하므로 자동 반영된다.
 // 캐시 5초 — 로그인 직후 새 계정이 곧바로 잡혀야 플러그인이 로그인 화면에서 홈으로 넘어간다(30초면 너무 늦음)
 let accountCache = { at: 0, email: null };
+// 실제 로그인 여부는 자격증명 파일로 판단한다 — ~/.claude.json의 oauthAccount는 **로그아웃해도 남는다**
+// (실측: claude auth status는 loggedIn:false인데 그 필드는 그대로 → 플러그인이 로그인된 것처럼 표시했다).
+// 파일만 읽으므로 비용 0. claude auth status가 정확하지만 프로세스를 띄워야 해서 조회마다 쓰기엔 무겁다.
+function hasClaudeCredentials() {
+  try {
+    const f = path.join(os.homedir(), '.claude', '.credentials.json');
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    return !!(j && j.claudeAiOauth && j.claudeAiOauth.accessToken);
+  } catch (_e) { return false; } // 파일 없음·못 읽음 = 로그인 안 됨으로 본다
+}
 function claudeAccount() {
   if (Date.now() - accountCache.at < 5000) return accountCache.email;
   let email = null;
   try {
-    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
-    email = (j && j.oauthAccount && j.oauthAccount.emailAddress) || null;
+    if (hasClaudeCredentials()) { // 자격증명이 없으면 남은 이메일은 무시한다
+      const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'));
+      email = (j && j.oauthAccount && j.oauthAccount.emailAddress) || null;
+    }
   } catch (_e) { /* 로그인 이력 없음 등 — null */ }
   accountCache = { at: Date.now(), email };
   return email;
@@ -112,8 +124,9 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.url === '/health') {
     // v: 감시자 코드 버전 — 구버전 프로세스가 계속 돌고 있는지 밖에서 확인하는 용도
-    // (v2 = 창 숨김 수정판, v3 = /account 추가판, v4 = /uninstall 추가판)
-    return json(res, 200, { ok: true, watcher: true, v: 4 });
+    // (v2 = 창 숨김 수정판, v3 = /account 추가판, v4 = /uninstall 추가판,
+    //  v5 = 계정을 자격증명 유무로 판정 — 로그아웃 뒤 남은 이메일을 로그인으로 오해하지 않게)
+    return json(res, 200, { ok: true, watcher: true, v: 5 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
