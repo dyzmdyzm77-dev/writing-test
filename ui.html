@@ -3502,7 +3502,7 @@
             rHint.innerHTML = '<span class="role-chip">버튼</span> 버튼 문구로 봤어요 — 짧은 동작 이름으로 추천해요.';
           }
           // '프레임 안에 프레임이 여럿'이면 하위 프레임별 묶음을 입력창 위에 보여준다 (없으면 빈 배열 → 숨김)
-          renderFramePreview(m.groups || [], text);
+          renderFramePreview(m.groups || [], text, m.rootId || '');
         } else if (!onEnter) {
           // 선택을 해제한 경우에만 비운다 — 진입 조회에서 선택이 없다고 사용자 입력을 지우면 안 된다
           if (el && lastSelectionText && el.value === lastSelectionText) el.value = '';
@@ -4560,19 +4560,22 @@
       let frameGroups = [];      // [{name, texts:[], own?, role?}] — 지금 선택의 하위 프레임 묶음 (없으면 빈 배열)
       let frameGroupSel = -1;    // 고른 그룹 인덱스 (-1 = 전체)
       let frameGroupsAllText = ''; // 전체 문구(입력창 기본값) — [전체]로 되돌릴 때 쓴다
+      let frameGroupsRootId = ''; // 원래 고른 프레임 — [전체]를 누르면 캔버스 선택도 여기로 되돌린다
       function groupText(g) { return (g.texts || []).join('\n'); }
       function hideFramePreview() {
         frameGroups = [];
         frameGroupSel = -1;
         frameGroupsAllText = '';
+        frameGroupsRootId = '';
         const fp = document.getElementById('framePreview');
         if (fp) { fp.innerHTML = ''; fp.style.display = 'none'; }
       }
-      function renderFramePreview(groups, allText) {
+      function renderFramePreview(groups, allText, rootId) {
         const fp = document.getElementById('framePreview');
         if (!fp) return;
         frameGroups = groups || [];
         frameGroupsAllText = allText || '';
+        frameGroupsRootId = rootId || '';
         frameGroupSel = -1;
         if (!frameGroups.length || composeMode) { fp.innerHTML = ''; fp.style.display = 'none'; return; }
         const total = frameGroups.reduce((n, g) => n + (g.texts || []).length, 0);
@@ -4584,7 +4587,7 @@
         const all = document.createElement('button');
         all.type = 'button'; all.className = 'fp-all sel'; all.textContent = '전체';
         all.title = '영역마다 따로 추천을 받아요';
-        all.onclick = () => selectFrameGroup(-1);
+        all.onclick = () => { selectFrameGroup(-1); selectFrameOnCanvas(frameGroupsRootId); };
         // [초기화] — 결과를 비우고 전체로 되돌린다 (팝업 미리보기의 [초기화]와 같은 역할)
         const reset = document.createElement('button');
         reset.type = 'button'; reset.className = 'pp-reset';
@@ -4592,6 +4595,7 @@
         reset.onclick = () => {
           clearGroupResults();
           selectFrameGroup(-1);
+          selectFrameOnCanvas(frameGroupsRootId);
           window.scrollTo({ top: 0, behavior: 'auto' });
         };
         const acts = document.createElement('span');
@@ -4603,7 +4607,7 @@
           const card = document.createElement('div');
           card.className = 'fp-group';
           card.dataset.group = String(i);
-          card.title = '이 프레임 문구만 다듬어요';
+          card.title = '이 프레임을 캔버스에서 선택하고, 이 문구만 다듬어요';
           const head = document.createElement('div'); head.className = 'fp-group-head';
           const name = document.createElement('span'); name.className = 'fp-name'; name.textContent = g.name || '프레임';
           head.appendChild(name);
@@ -4628,7 +4632,7 @@
             const line = document.createElement('div'); line.className = 'fp-line'; line.textContent = t;
             card.appendChild(line);
           });
-          card.onclick = () => selectFrameGroup(i);
+          card.onclick = () => { selectFrameGroup(i); selectFrameOnCanvas(g.id); };
           fp.appendChild(card);
         });
         fp.style.display = 'block';
@@ -4640,6 +4644,12 @@
         const hd = document.getElementById('recommendHeader');
         if (hd && !list.innerHTML) hd.classList.remove('pp-results');
         if (typeof adjustTopPadding === 'function') adjustTopPadding();
+      }
+      // 목록에서 고른 영역을 캔버스에서도 선택한다 — 어느 프레임인지 눈으로 확인하려고.
+      // code.ts가 이 선택의 메아리로는 selection-text를 되보내지 않으므로 입력창이 덮이지 않는다.
+      function selectFrameOnCanvas(nodeId) {
+        if (!nodeId) return;
+        parent.postMessage({ pluginMessage: { type: 'SELECT_FRAME', nodeId: nodeId } }, '*');
       }
       // 그룹 고르기 — 입력창을 그 그룹 문구로 바꾼다 (-1이면 전체로 되돌림).
       // lastSelectionText도 같이 갱신해야 다음 선택 조회가 '사용자가 직접 고친 문구'로 착각해 덮지 않는다.
