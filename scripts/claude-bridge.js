@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 40;
+const BRIDGE_V = 41;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -180,8 +180,19 @@ function hasClaudeCredentials() {
   try {
     const f = path.join(os.homedir(), '.claude', '.credentials.json');
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-    return !!(j && j.claudeAiOauth && j.claudeAiOauth.accessToken);
-  } catch (_e) { return false; } // 파일 없음·못 읽음 = 로그인 안 됨으로 본다
+    if (j && j.claudeAiOauth && j.claudeAiOauth.accessToken) return true;
+  } catch (_e) { /* 파일 없음·못 읽음 — 맥이면 키체인을 마저 본다 */ }
+  // **맥은 자격증명을 파일이 아니라 키체인에 넣는다** (2026-08 실측, 다리 v41 / 감시자 v6).
+  // 맥의 Claude Code는 ~/.claude/.credentials.json을 아예 만들지 않고 키체인 항목
+  // 'Claude Code-credentials'에 저장한다 → 파일만 보면 멀쩡히 로그인된 맥이 늘 '로그인 안 됨'이 되고,
+  // 로그인 대기 화면이 영영 돈다(눌러도 CLI가 "이미 로그인됨"으로 즉시 끝나 브라우저조차 안 열린다).
+  // **존재만 확인한다(-w 없음)** — 비밀번호 값을 읽으면 키체인 접근 허용 팝업이 뜰 수 있다. 약 30ms.
+  // CB_NO_KEYCHAIN=1이면 파일만 본다 (모의 홈으로 '로그인 없음'을 재현하는 테스트용 — 키체인은 HOME을 안 따른다).
+  if (process.platform !== 'darwin' || process.env.CB_NO_KEYCHAIN === '1') return false;
+  try {
+    const r = spawnSync('security', ['find-generic-password', '-s', 'Claude Code-credentials'], { stdio: 'ignore', timeout: 3000 });
+    return r.status === 0;
+  } catch (_e) { return false; } // security를 못 부름 = 로그인 안 됨으로 본다
 }
 function claudeAccount() {
   if (Date.now() - accountCache.at < 30000) return accountCache.email;
