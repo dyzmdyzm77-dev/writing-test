@@ -4,11 +4,12 @@
   "description": "S-1 S/W UX Writing Agent (Figma Plugin)",
   "main": "code.js",
   "scripts": {
-    "build": "node scripts/build-glossary.js && node scripts/register-protocol.js && tsc -p tsconfig.json",
-    "postinstall": "node scripts/register-protocol.js",
+    "build": "node scripts/build-glossary.js && node scripts/register-protocol.js && tsc -p tsconfig.json && node scripts/sync-install.js",
+    "postinstall": "node scripts/register-protocol.js && node scripts/sync-install.js",
     "glossary": "node scripts/build-glossary.js",
     "sync-feedback": "node --use-env-proxy scripts/sync-feedback.js",
     "bridge": "node scripts/claude-bridge.js",
+    "sync-install": "node scripts/sync-install.js",
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
     "watch": "npm run build -- --watch"
