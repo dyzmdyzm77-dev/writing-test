@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 41;
+const BRIDGE_V = 42;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -225,6 +225,17 @@ const stats = { served: 0, lastAt: '', lastText: '', lastSec: '' };
 // 아직 한 번도 못 받았으면(다리만 먼저 켠 상태, 자동시작 등) 계속 대기한다.
 const HEARTBEAT_DEAD_MS = 30000;
 let lastBeat = 0;
+
+// 끄기 전에 **듣던 포트를 먼저 놓는다** (2026-08, BRIDGE_V=42).
+// 왜: process.exit의 exit 핸들러가 killProc→taskkill을 돌리는데, 그게 멈추면 프로세스가 종료 도중
+// 얼어붙어 포트만 물고 응답을 못 하는 좀비가 된다. 그러면 감시자가 새로 켠 다리는 EADDRINUSE로
+// 물러나고(로그: '이미 켜져 있어요'), 플러그인엔 "연동되지 않았어요"만 남는다(실측).
+// 소켓을 먼저 닫아 두면 정리가 느려도 다음 다리가 정상적으로 그 포트를 잡는다.
+function hardExit(code) {
+  try { server.close(); } catch (_e) { /* 아직 안 떴으면 무시 */ }
+  try { server6.close(); } catch (_e) { /* IPv6은 없을 수 있다 */ }
+  process.exit(code || 0);
+}
 setInterval(() => {
   if (lastBeat && Date.now() - lastBeat > HEARTBEAT_DEAD_MS) {
     // **로그인 중이면 안 꺼진다** (2026-08, BRIDGE_V=37): exit 핸들러가 killLoginProc까지 부르므로
@@ -237,7 +248,7 @@ setInterval(() => {
       return;
     }
     console.log('[bridge] 플러그인 심장박동 끊김 — 피그마/플러그인이 닫힌 것으로 보고 같이 꺼집니다.');
-    process.exit(0); // exit 핸들러가 killProc으로 claude 트리를 정리한다
+    hardExit(0); // 포트를 먼저 놓고 종료 — exit 핸들러가 killProc으로 claude 트리를 정리한다
   }
 }, 5000);
 
@@ -292,7 +303,8 @@ function killLoginProc() {
   loginProc = null;
   try {
     if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/PID', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+      // timeout: killProc과 같은 이유 — 종료 경로에서 taskkill이 멈추면 다리가 얼어붙는다
+      spawnSync('taskkill', ['/PID', String(p.pid), '/T', '/F'], { stdio: 'ignore', timeout: 4000, windowsHide: true });
     } else {
       try { process.kill(-p.pid, 'SIGTERM'); } catch (_e2) { p.kill(); }
     }
@@ -312,7 +324,11 @@ function killProc(reason) {
       if (process.platform === 'win32') {
         // shell:true로 띄워서 proc은 cmd 껍데기 — /T로 트리째 죽여야 진짜 claude가 고아로 안 남는다
         // (고아 claude가 설치 파일을 물고 있으면 클로드 앱 업데이트가 "사용 중"으로 막힘)
-        spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+        // ⚠️ timeout 필수 (2026-08 실측): 이 spawnSync는 process.on('exit')에서도 불리는데,
+        // 안 죽는 claude 트리를 만나 taskkill이 멈추면 **다리가 종료 도중에 얼어붙는다** —
+        // 포트 11888은 계속 물고 응답은 못 하는 상태가 되어, 새 인스턴스는 EADDRINUSE로 물러나고
+        // 플러그인엔 "클로드가 연동되지 않았어요"만 뜬다(40분간 그 상태였던 실측 사례).
+        spawnSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore', timeout: 4000, windowsHide: true });
       } else {
         // macOS/리눅스: shell:true라 proc이 sh 껍데기일 수 있음 — startProc의 detached로 만든
         // 프로세스 그룹(-pid)을 통째로 정리한다 (taskkill /T 대응)
@@ -966,7 +982,7 @@ const server = http.createServer(async (req, res) => {
     console.log('[bridge] 종료 요청 받음 — 다리를 끕니다.');
     shuttingDown = true;
     killProc();
-    setTimeout(() => process.exit(0), 200);
+    setTimeout(() => hardExit(0), 200);
     return;
   }
   if (req.method === 'POST' && req.url === '/recommend') {
@@ -1107,16 +1123,28 @@ const server = http.createServer(async (req, res) => {
 // 이미 다리가 떠 있는데 또 켜기가 들어오면(제스처 자동 켜기 중복 등) 조용히 종료 — 돌던 다리는 그대로 유지
 server.on('error', (e) => {
   if (e && e.code === 'EADDRINUSE') {
-    console.log('[bridge] 이미 켜져 있어요(포트 ' + PORT + ' 사용 중) — 이 인스턴스는 종료합니다.');
-    process.exit(0);
+    // 물고 있는 쪽이 살아 있는지 한 번 물어본다 — 응답이 없으면 종료 도중 얼어붙은 좀비다.
+    // 그 사실을 로그에 남겨야 "포트는 잡혀 있는데 플러그인은 연동 안 됨"을 다음에 바로 알아본다.
+    const probe = http.request({ host: '127.0.0.1', port: PORT, path: '/health', method: 'GET', timeout: 2000 }, (r) => {
+      console.log('[bridge] 이미 켜져 있어요(포트 ' + PORT + ' 사용 중, 응답 ' + r.statusCode + ') — 이 인스턴스는 종료합니다.');
+      hardExit(0);
+    });
+    const dead = () => {
+      console.log('[bridge] 포트 ' + PORT + '을 응답 없는 프로세스가 물고 있어요 — 그 프로세스를 끝내야 합니다(작업 관리자에서 node 종료).');
+      hardExit(0);
+    };
+    probe.on('error', dead);
+    probe.on('timeout', () => { try { probe.destroy(); } catch (_e2) {} dead(); });
+    probe.end();
+    return;
   }
   console.log('[bridge] 서버 오류:', e && e.message);
   process.exit(1);
 });
 // 어떤 경로로 죽든(심장박동 끊김, Ctrl+C, /shutdown, 오류) claude 자식을 남기지 않는다
 process.on('exit', () => { killProc(); killLoginProc(); });
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => hardExit(0));
+process.on('SIGTERM', () => hardExit(0));
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('──────────────────────────────────────────────');

@@ -121,6 +121,36 @@ function uninstallSelf() {
   return removed;
 }
 
+// 감시자 자신을 새 코드로 다시 띄운다 — POST /restart 가 부른다.
+// 왜 필요한가(2026-08 실측): 설치본 파일이 새것이어도 **오래 떠 있던 감시자가 옛 코드의 다리를 계속 켜는**
+// 상태가 있었다(파일 v41 / 켜지는 다리 v22). 이러면 플러그인이 [업데이트 필요]로 다리를 껐다 켜도
+// 켜 주는 쪽이 그대로라 영원히 옛 버전이고, 재시작마다 워밍업(구독 사용량)만 나갔다.
+// 그래서 "다리만 껐다 켜기"로 안 풀리면 켜 주는 감시자부터 새로 띄운다. 감시자는 claude를 안 물어 비용 0.
+// 순서 주의: 새 인스턴스가 먼저 뜨면 포트를 못 잡는데, 아래 listen 재시도가 우리가 빠질 때까지 기다려 준다.
+function restartSelf() {
+  try {
+    if (process.platform === 'win32') {
+      const vbs = path.join(ROOT, 'claude-watcher-silent.vbs');
+      if (fs.existsSync(vbs)) {
+        const p = spawn('wscript.exe', [vbs], { detached: true, stdio: 'ignore', windowsHide: true });
+        p.unref();
+      } else {
+        // vbs가 없으면 node를 직접 — 창 안 뜨게 하는 규칙은 다리 스폰과 같다(windowsHide, detached 금지)
+        const p = spawn(process.execPath, [__filename], { stdio: 'ignore', windowsHide: true });
+        p.unref();
+      }
+      return;
+    }
+    // macOS: launchd가 우리를 관리한다 — kickstart -k가 껐다 켜 준다(우리를 죽이므로 아래 exit까지 안 올 수도 있다)
+    const uid = process.getuid();
+    const r = spawnSync('launchctl', ['kickstart', '-k', 'gui/' + uid + '/com.claudebridge.watcher'], { stdio: 'ignore' });
+    if (r.status !== 0) {
+      const p = spawn(process.execPath, [__filename], { detached: true, stdio: 'ignore' });
+      p.unref();
+    }
+  } catch (_e) { /* fail-soft — 못 띄웠으면 다음 로그인 자동시작이 살린다 */ }
+}
+
 // 다리(11888)가 떠 있으면 끈다 — 초기화 시 남은 세션 정리 (없으면 조용히 실패)
 function shutdownBridge() {
   try {
@@ -136,8 +166,10 @@ const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     // v: 감시자 코드 버전 — 구버전 프로세스가 계속 돌고 있는지 밖에서 확인하는 용도
     // (v2 = 창 숨김 수정판, v3 = /account 추가판, v4 = /uninstall 추가판,
-    //  v5 = 계정을 자격증명 유무로 판정 — 로그아웃 뒤 남은 이메일을 로그인으로 오해하지 않게)
-    return json(res, 200, { ok: true, watcher: true, v: 6 });
+    //  v5 = 계정을 자격증명 유무로 판정 — 로그아웃 뒤 남은 이메일을 로그인으로 오해하지 않게,
+    //  v6 = 맥은 자격증명이 키체인에 있어 파일 검사만으로는 '로그인 안 됨'이 되던 것 대응,
+    //  v7 = /restart 추가 + 포트 재시도 — 옛 감시자가 옛 다리를 계속 켜던 것 대응)
+    return json(res, 200, { ok: true, watcher: true, v: 7 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -156,6 +188,17 @@ const server = http.createServer((req, res) => {
     setTimeout(() => process.exit(0), 200);
     return;
   }
+  // 감시자를 새 코드로 다시 띄운다 — 다리를 껐다 켜도 계속 옛 버전이 켜질 때(위 restartSelf 주석) 쓴다.
+  // 응답을 먼저 보낸 뒤 새 인스턴스를 띄우고 우리는 빠진다 — 새 쪽은 포트가 빌 때까지 재시도한다.
+  if (req.method === 'POST' && req.url === '/restart') {
+    json(res, 200, { ok: true, restarting: true, v: 7 });
+    setTimeout(() => {
+      shutdownBridge(); // 옛 코드로 떠 있는 다리도 같이 내린다 — 다음 요청 때 새 감시자가 새 코드로 켠다
+      restartSelf();
+      setTimeout(() => process.exit(0), 300);
+    }, 200);
+    return;
+  }
   // 초기화 — 이 PC를 '새 PC' 상태로 되돌린다 (플러그인 [초기화] 버튼).
   // 응답을 먼저 흘려보낸 뒤 정리한다 — bootout이 우리를 즉시 죽여도 회신은 도착한다.
   if (req.method === 'POST' && req.url === '/uninstall') {
@@ -171,8 +214,16 @@ const server = http.createServer((req, res) => {
   return json(res, 404, { error: 'Not found' });
 });
 
-// 이미 떠 있으면 조용히 종료 (자동 시작 + npm build 중복 실행 대비)
+// 포트가 잡혀 있으면 잠깐 기다렸다 다시 시도하고, 그래도 안 되면 조용히 종료
+// (자동 시작 + npm build 중복 실행 대비). 재시도가 필요한 이유: /restart는 새 인스턴스를 먼저 띄우고
+// 옛 인스턴스가 빠지므로, 첫 시도에서 물러나 버리면 아무도 안 남는다.
+let bindTries = 0;
 server.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE' && bindTries < 6) {
+    bindTries++;
+    setTimeout(() => server.listen(PORT, '127.0.0.1'), 1000);
+    return;
+  }
   if (e && e.code === 'EADDRINUSE') process.exit(0);
   process.exit(1);
 });
@@ -182,5 +233,14 @@ server.listen(PORT, '127.0.0.1', () => {
 // IPv6 루프백(::1)에도 함께 듣는다 — 'localhost'가 ::1로 먼저 해석되는 환경에서
 // 피그마 fetch가 IPv4로 폴백하지 않아 다리 깨우기·계정 조회가 조용히 실패하던 문제 대응(다리와 동일).
 const server6 = http.createServer(server.listeners('request')[0]);
-server6.on('error', () => {}); // ::1을 못 잡아도(EADDRINUSE·IPv6 없음) IPv4만으로 계속 동작
+// ::1을 못 잡아도(EADDRINUSE·IPv6 없음) IPv4만으로 계속 동작 — 다만 /restart 직후엔 옛 인스턴스가
+// 아직 ::1을 물고 있어 첫 시도가 실패한다. 'localhost'가 ::1로 먼저 풀리는 환경에서 그대로 두면
+// 피그마 fetch가 조용히 실패하므로 IPv4와 같은 횟수만큼 재시도한다.
+let bindTries6 = 0;
+server6.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE' && bindTries6 < 6) {
+    bindTries6++;
+    setTimeout(() => server6.listen(PORT, '::1'), 1000);
+  }
+});
 server6.listen(PORT, '::1');

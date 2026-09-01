@@ -125,22 +125,51 @@ async function main() {
   }
   console.log(copied.length ? '[sync] 설치본 갱신 ' + copied.length + '개: ' + copied.join(', ') : '[sync] 설치본은 이미 최신');
 
-  // 2) 떠 있는 감시자가 낡았으면 재기동
+  // 2) 감시자를 다시 띄운다 — 파일이 바뀌었거나, 켜져 있는 다리가 낡았을 때.
+  //    ⚠️ 감시자 버전만 보고 판단하면 안 된다(2026-08 실측): 설치본 파일이 v41인데 **오래 떠 있던 감시자가
+  //    옛 코드(v22)의 다리를 계속 켜는** 상태가 있었다. 감시자 버전은 최신이라 예전 규칙은 건너뛰었고,
+  //    다리만 껐다 켜니 켜 주는 쪽이 그대로여서 영원히 옛 버전 + 재시작마다 워밍업(구독 사용량)만 나갔다.
+  //    감시자는 claude를 안 물어 재기동 비용이 0이므로, 의심스러우면 그냥 새로 띄운다.
   const wantW = readNum(path.join(REPO, 'scripts/bridge-watcher.js'), WATCHER_V_RE);
+  const wantB = readNum(path.join(REPO, 'scripts/claude-bridge.js'), BRIDGE_V_RE);
   const w = await health(11889, 2000);
-  if (w && wantW && typeof w.v === 'number' && w.v < wantW) {
-    console.log('[sync] 감시자 v' + w.v + ' → v' + wantW + ' 재기동');
-    await post(11889, '/shutdown', 3000);
-    await sleep(1000);
-    startWatcher(dir);
-    await sleep(2000);
-  } else if (!w) {
+  const b0 = await health(11888, 2000);
+  const bridgeOld = !!(b0 && wantB && !(typeof b0.v === 'number' && b0.v >= wantB));
+  const watcherOld = !!(w && wantW && typeof w.v === 'number' && w.v < wantW);
+
+  if (!w) {
     startWatcher(dir); // 안 떠 있으면 그냥 띄운다(이미 떠 있으면 EADDRINUSE로 조용히 물러남)
+  } else if (watcherOld || copied.length || bridgeOld) {
+    const why = watcherOld ? '감시자 v' + w.v + ' → v' + wantW
+      : bridgeOld ? '켜져 있는 다리가 v' + (b0.v || '?') + ' (옛 코드를 켜는 감시자일 수 있음)'
+        : '설치본 파일이 바뀜';
+    console.log('[sync] 감시자 재기동 — ' + why);
+    if (typeof w.v === 'number' && w.v >= 7) {
+      await post(11889, '/restart', 3000); // v7+: 스스로 새 코드로 다시 뜬다(다리도 같이 내린다)
+    } else {
+      await post(11889, '/shutdown', 3000);
+      await sleep(1000);
+      startWatcher(dir);
+    }
+    // 새 감시자는 옛 인스턴스가 포트를 놓을 때까지 재시도하므로 **한 번만 확인하면 안 된다**
+    // (실측: 3초 뒤 조회에서 안 잡혀 "감시자가 안 떠 있음"이라고 잘못 알렸는데 그 직후 정상 기동).
+    let w2 = null;
+    for (let i = 0; i < 10 && !w2; i++) {
+      await sleep(1000);
+      w2 = await health(11889, 1500);
+    }
+    if (!w2) { // 못 살아났으면 직접 띄워 본다 — 아무도 안 남는 상태가 최악이다
+      startWatcher(dir);
+      for (let i = 0; i < 5 && !w2; i++) {
+        await sleep(1000);
+        w2 = await health(11889, 1500);
+      }
+    }
+    console.log(w2 ? '[sync] 감시자 v' + w2.v + ' 준비됨' : '[sync] 감시자가 안 떠 있음 — 다음 로그인 자동시작이 살립니다');
   }
 
   // 3) 떠 있는 다리가 낡았으면 내린다 — 다음 요청 때 감시자가 새 코드로 켠다.
   //    여기서 미리 켜지 않는 이유: 워밍업이 클로드를 실제 호출해 구독 사용량이 나간다.
-  const wantB = readNum(path.join(REPO, 'scripts/claude-bridge.js'), BRIDGE_V_RE);
   const b = await health(11888, 2000);
   if (b && wantB && !(typeof b.v === 'number' && b.v >= wantB)) {
     console.log('[sync] 다리 v' + (b.v || '?') + ' → v' + wantB + ' — 내림(다음 요청 때 새 코드로 켜짐)');
