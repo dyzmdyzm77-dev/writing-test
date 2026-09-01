@@ -151,6 +151,55 @@ function restartSelf() {
   } catch (_e) { /* fail-soft — 못 띄웠으면 다음 로그인 자동시작이 살린다 */ }
 }
 
+// ── 설치본 자동 갱신 (POST /update) ──────────────────────────────────────
+// 왜 필요한가(2026-09): 설치 파일로만 세팅한 PC는 설치본이 그 시점 코드로 굳는다. 감시자는 **자기 폴더의**
+// 다리를 켜므로, 플러그인이 [업데이트 필요]를 감지해 껐다 켜도 또 같은 옛 코드가 올라온다 — 빠져나갈 길이 없다.
+// 새 코드를 어디서 구하나: **플러그인이 이미 갖고 있다.** 빌드가 자기완결 설치 파일(클로드-커넥터.bat)을
+// code.js에 base64로 심어 두므로(INSTALLER 마커), 플러그인이 그걸 통째로 보내면 여기서 섹션을 풀어 파일만 갈면 된다.
+// 네트워크·사용자 클릭이 필요 없다(사내 프록시도 안 탄다).
+function readBody(req) {
+  return new Promise((resolve) => {
+    let s = '';
+    req.on('data', (c) => { s += c; if (s.length > 40 * 1024 * 1024) { s = ''; req.destroy(); } });
+    req.on('end', () => { try { resolve(JSON.parse(s || '{}')); } catch (_e) { resolve({}); } });
+    req.on('error', () => resolve({}));
+  });
+}
+// 설치 파일(bat) 텍스트에서 ::NAME:: … ::NEXT:: 사이의 base64를 꺼낸다.
+// (bat의 부트스트랩은 마커를 조각내어 쓰므로 여기 정규식과 자기 매칭되지 않는다 — build-glossary.js 참고)
+function installerSection(text, name, next) {
+  const m = text.match(new RegExp('::' + name + '::([\\s\\S]*?)::' + next + '::'));
+  if (!m) return null;
+  const b64 = m[1].replace(/[^A-Za-z0-9+/=]/g, '');
+  if (!b64) return null;
+  try { return Buffer.from(b64, 'base64'); } catch (_e) { return null; }
+}
+// 설치본 파일을 새 코드로 교체한다. 바뀐 파일 이름 목록을 돌려준다(같으면 안 쓴다 — 멱등).
+function applyInstaller(installerB64) {
+  const text = Buffer.from(String(installerB64 || '').replace(/[^A-Za-z0-9+/=]/g, ''), 'base64').toString('utf8');
+  const parts = [
+    { name: '다리',   buf: installerSection(text, 'BRIDGE', 'EXAMPLES'), dst: path.join(__dirname, 'claude-bridge.js') },
+    { name: '감시자', buf: installerSection(text, 'WATCHER', 'WSILENT'), dst: path.join(__dirname, 'bridge-watcher.js') },
+    { name: '예시',   buf: installerSection(text, 'EXAMPLES', 'GUIDE'),  dst: path.join(ROOT, 'recommend-examples.md') },
+    { name: '가이드', buf: installerSection(text, 'GUIDE', 'LAUNCHER'),  dst: path.join(ROOT, 'ux-writing.md') },
+  ].filter((p) => p.buf && p.buf.length);
+  if (!parts.length) throw new Error('설치 파일에서 코드를 찾지 못했어요');
+  const changed = [];
+  let watcherChanged = false;
+  for (const p of parts) {
+    let same = false;
+    try { same = fs.existsSync(p.dst) && Buffer.compare(fs.readFileSync(p.dst), p.buf) === 0; } catch (_e) {}
+    if (same) continue;
+    fs.mkdirSync(path.dirname(p.dst), { recursive: true });
+    fs.writeFileSync(p.dst, p.buf); // 바이트 그대로 — 인코딩 변환 금지
+    changed.push(p.name);
+    if (p.name === '감시자') watcherChanged = true;
+  }
+  const bridgeSrc = parts.filter((p) => p.name === '다리')[0];
+  const vm = bridgeSrc ? bridgeSrc.buf.toString('utf8').match(/const BRIDGE_V = (\d+)/) : null;
+  return { changed, watcherChanged, bridgeV: vm ? Number(vm[1]) : null };
+}
+
 // 다리(11888)가 떠 있으면 끈다 — 초기화 시 남은 세션 정리 (없으면 조용히 실패)
 function shutdownBridge() {
   try {
@@ -161,15 +210,16 @@ function shutdownBridge() {
   } catch (_e) {}
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.url === '/health') {
     // v: 감시자 코드 버전 — 구버전 프로세스가 계속 돌고 있는지 밖에서 확인하는 용도
     // (v2 = 창 숨김 수정판, v3 = /account 추가판, v4 = /uninstall 추가판,
     //  v5 = 계정을 자격증명 유무로 판정 — 로그아웃 뒤 남은 이메일을 로그인으로 오해하지 않게,
     //  v6 = 맥은 자격증명이 키체인에 있어 파일 검사만으로는 '로그인 안 됨'이 되던 것 대응,
-    //  v7 = /restart 추가 + 포트 재시도 — 옛 감시자가 옛 다리를 계속 켜던 것 대응)
-    return json(res, 200, { ok: true, watcher: true, v: 7 });
+    //  v7 = /restart 추가 + 포트 재시도 — 옛 감시자가 옛 다리를 계속 켜던 것 대응,
+    //  v8 = /update 추가 — 플러그인이 들고 있는 설치 파일로 설치본을 스스로 갱신)
+    return json(res, 200, { ok: true, watcher: true, v: 8 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -191,11 +241,31 @@ const server = http.createServer((req, res) => {
   // 감시자를 새 코드로 다시 띄운다 — 다리를 껐다 켜도 계속 옛 버전이 켜질 때(위 restartSelf 주석) 쓴다.
   // 응답을 먼저 보낸 뒤 새 인스턴스를 띄우고 우리는 빠진다 — 새 쪽은 포트가 빌 때까지 재시도한다.
   if (req.method === 'POST' && req.url === '/restart') {
-    json(res, 200, { ok: true, restarting: true, v: 7 });
+    json(res, 200, { ok: true, restarting: true, v: 8 });
     setTimeout(() => {
       shutdownBridge(); // 옛 코드로 떠 있는 다리도 같이 내린다 — 다음 요청 때 새 감시자가 새 코드로 켠다
       restartSelf();
       setTimeout(() => process.exit(0), 300);
+    }, 200);
+    return;
+  }
+  // 설치본 자동 갱신 — 플러그인이 자기가 들고 있는 설치 파일(base64)을 보내면 그 코드로 갈아끼운다.
+  // 저장소에서 돌고 있으면 거절한다: 소스 폴더를 빌드 산출물로 덮어쓰면 작업 중인 코드가 날아간다
+  // (저장소 PC는 npm run build의 sync-install.js가 담당한다).
+  if (req.method === 'POST' && req.url === '/update') {
+    const body = await readBody(req);
+    if (fs.existsSync(path.join(ROOT, 'package.json'))) {
+      return json(res, 200, { ok: false, reason: 'repo', dir: ROOT });
+    }
+    let r;
+    try { r = applyInstaller(body && body.installer); }
+    catch (e) { return json(res, 500, { ok: false, error: e.message }); }
+    console.log('[watcher] 설치본 갱신 — 바뀐 파일:', r.changed.join(', ') || '(없음)', '다리 v' + r.bridgeV);
+    json(res, 200, { ok: true, changed: r.changed, bridgeV: r.bridgeV, watcherChanged: r.watcherChanged, dir: ROOT });
+    if (!r.changed.length) return; // 이미 최신 — 떠 있는 다리를 굳이 끊지 않는다
+    setTimeout(() => {
+      shutdownBridge(); // 옛 코드로 떠 있는 다리를 내린다 — 다음 /wake가 새 코드로 켠다
+      if (r.watcherChanged) { restartSelf(); setTimeout(() => process.exit(0), 300); } // 우리도 새 코드로
     }, 200);
     return;
   }
