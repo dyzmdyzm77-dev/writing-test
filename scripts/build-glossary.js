@@ -216,7 +216,14 @@ const batContent = [
   '::END::',
   '',
 ].join('\r\n');
-fs.writeFileSync(path.join(root, '클로드-커넥터.bat'), batContent, 'utf8');
+// 페이로드를 품은 설치 파일은 **저장소에 두지 않는다** (2026-09): base64를 iex로 실행하는 모양이라
+// 백신이 드로퍼로 오탐한다(V3가 실제로 격리 — 동료 PC에서 "액세스 거부"). ZIP에 딸려 가면 받자마자 잡히므로
+// gitignore된 out/ 에만 만든다. 내용 자체는 그대로 code.ts에 주입돼 **감시자 자동 갱신(/update)의 재료**로 쓰인다
+// (플러그인 안에만 있고 디스크에 .bat로 떨어지지 않으므로 백신에 걸리지 않는다).
+// 사람이 쓰는 설치 경로는 저장소 루트의 얇은 설치.bat → scripts/register-protocol.js 다.
+const outDir = path.join(root, 'out');
+fs.mkdirSync(outDir, { recursive: true });
+fs.writeFileSync(path.join(outDir, '클로드-커넥터.bat'), batContent, 'utf8');
 const instGen = [
   '// ===== INSTALLER:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드-커넥터.bat을 base64로 주입) =====',
   `const INSTALLER_B64 = ${JSON.stringify(Buffer.from(batContent, 'utf8').toString('base64'))};`,
@@ -316,7 +323,8 @@ const macCommandContent = [
   'finish 0',
   '',
 ].join('\n');
-const macCmdPath = path.join(root, '클로드-커넥터.command');
+// 맥 설치 파일도 같은 이유로 out/ 에만 만든다 (저장소·ZIP에 넣지 않는다 — 위 bat 주석 참고)
+const macCmdPath = path.join(outDir, '클로드-커넥터.command');
 fs.writeFileSync(macCmdPath, macCommandContent, 'utf8');
 fs.chmodSync(macCmdPath, 0o755);
 
