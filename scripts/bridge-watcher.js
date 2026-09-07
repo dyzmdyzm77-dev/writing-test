@@ -165,23 +165,33 @@ function readBody(req) {
     req.on('error', () => resolve({}));
   });
 }
-// 설치 파일(bat) 텍스트에서 ::NAME:: … ::NEXT:: 사이의 base64를 꺼낸다.
-// (bat의 부트스트랩은 마커를 조각내어 쓰므로 여기 정규식과 자기 매칭되지 않는다 — build-glossary.js 참고)
-function installerSection(text, name, next) {
-  const m = text.match(new RegExp('::' + name + '::([\\s\\S]*?)::' + next + '::'));
-  if (!m) return null;
-  const b64 = m[1].replace(/[^A-Za-z0-9+/=]/g, '');
-  if (!b64) return null;
-  try { return Buffer.from(b64, 'base64'); } catch (_e) { return null; }
+// 커넥터 zip에서 파일을 꺼낸다 — 무압축(stored)만 지원하므로 외부 라이브러리·zlib이 필요 없다.
+// (빌드의 zipFiles가 stored로만 만든다. 압축된 항목이 오면 그 항목은 건너뛴다.)
+function unzipStored(buf) {
+  const files = {};
+  let i = 0;
+  while (i + 30 <= buf.length && buf.readUInt32LE(i) === 0x04034b50) {
+    const method = buf.readUInt16LE(i + 8);
+    const size = buf.readUInt32LE(i + 18);
+    const nameLen = buf.readUInt16LE(i + 26);
+    const extraLen = buf.readUInt16LE(i + 28);
+    const name = buf.slice(i + 30, i + 30 + nameLen).toString('utf8');
+    const start = i + 30 + nameLen + extraLen;
+    if (method === 0) files[name] = buf.slice(start, start + size);
+    i = start + size;
+  }
+  return files;
 }
 // 설치본 파일을 새 코드로 교체한다. 바뀐 파일 이름 목록을 돌려준다(같으면 안 쓴다 — 멱등).
 function applyInstaller(installerB64) {
-  const text = Buffer.from(String(installerB64 || '').replace(/[^A-Za-z0-9+/=]/g, ''), 'base64').toString('utf8');
+  const zip = Buffer.from(String(installerB64 || '').replace(/[^A-Za-z0-9+/=]/g, ''), 'base64');
+  const f = unzipStored(zip);
   const parts = [
-    { name: '다리',   buf: installerSection(text, 'BRIDGE', 'EXAMPLES'), dst: path.join(__dirname, 'claude-bridge.js') },
-    { name: '감시자', buf: installerSection(text, 'WATCHER', 'WSILENT'), dst: path.join(__dirname, 'bridge-watcher.js') },
-    { name: '예시',   buf: installerSection(text, 'EXAMPLES', 'GUIDE'),  dst: path.join(ROOT, 'recommend-examples.md') },
-    { name: '가이드', buf: installerSection(text, 'GUIDE', 'LAUNCHER'),  dst: path.join(ROOT, 'ux-writing.md') },
+    { name: '다리',   buf: f['scripts/claude-bridge.js'],  dst: path.join(__dirname, 'claude-bridge.js') },
+    { name: '감시자', buf: f['scripts/bridge-watcher.js'], dst: path.join(__dirname, 'bridge-watcher.js') },
+    { name: '설치',   buf: f['scripts/register-protocol.js'], dst: path.join(__dirname, 'register-protocol.js') },
+    { name: '예시',   buf: f['recommend-examples.md'],     dst: path.join(ROOT, 'recommend-examples.md') },
+    { name: '가이드', buf: f['ux-writing.md'],             dst: path.join(ROOT, 'ux-writing.md') },
   ].filter((p) => p.buf && p.buf.length);
   if (!parts.length) throw new Error('설치 파일에서 코드를 찾지 못했어요');
   const changed = [];
@@ -218,8 +228,9 @@ const server = http.createServer(async (req, res) => {
     //  v5 = 계정을 자격증명 유무로 판정 — 로그아웃 뒤 남은 이메일을 로그인으로 오해하지 않게,
     //  v6 = 맥은 자격증명이 키체인에 있어 파일 검사만으로는 '로그인 안 됨'이 되던 것 대응,
     //  v7 = /restart 추가 + 포트 재시도 — 옛 감시자가 옛 다리를 계속 켜던 것 대응,
-    //  v8 = /update 추가 — 플러그인이 들고 있는 설치 파일로 설치본을 스스로 갱신)
-    return json(res, 200, { ok: true, watcher: true, v: 8 });
+    //  v8 = /update 추가 — 플러그인이 들고 있는 설치 파일로 설치본을 스스로 갱신,
+    //  v9 = /update 입력을 bat 페이로드에서 **커넥터 zip**으로 교체 (백신 오탐 회피))
+    return json(res, 200, { ok: true, watcher: true, v: 9 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -241,7 +252,7 @@ const server = http.createServer(async (req, res) => {
   // 감시자를 새 코드로 다시 띄운다 — 다리를 껐다 켜도 계속 옛 버전이 켜질 때(위 restartSelf 주석) 쓴다.
   // 응답을 먼저 보낸 뒤 새 인스턴스를 띄우고 우리는 빠진다 — 새 쪽은 포트가 빌 때까지 재시도한다.
   if (req.method === 'POST' && req.url === '/restart') {
-    json(res, 200, { ok: true, restarting: true, v: 8 });
+    json(res, 200, { ok: true, restarting: true, v: 9 });
     setTimeout(() => {
       shutdownBridge(); // 옛 코드로 떠 있는 다리도 같이 내린다 — 다음 요청 때 새 감시자가 새 코드로 켠다
       restartSelf();

@@ -224,9 +224,58 @@ const batContent = [
 const outDir = path.join(root, 'out');
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, '클로드-커넥터.bat'), batContent, 'utf8');
+// 플러그인이 들고 다니는 커넥터 배포본 = **평범한 파일들이 든 zip** (2026-09).
+// 예전엔 base64를 품은 .bat 한 장이었는데 백신(V3)이 드로퍼로 격리했다 → 받아도 실행이 안 됐다.
+// 이 zip은 ① [설치 파일 받기] 다운로드 ② 감시자 /update 자동 갱신, 두 곳에서 같이 쓴다.
+// 압축 해제하면 저장소와 같은 배치(scripts/ + 루트 md·vbs)라 설치.bat이 그대로 동작한다.
+// 맥용 얇은 설치 스크립트 — 숨긴 코드 없이 옆의 register-protocol.js만 실행한다
+const macThinInstaller = [
+  '#!/bin/bash',
+  '# 클로드 커넥터 설치 — 이 폴더의 scripts/register-protocol.js 를 실행할 뿐입니다.',
+  'cd "$(dirname "$0")"',
+  'if ! command -v node >/dev/null 2>&1; then',
+  '  echo "Node.js가 필요해요 — https://nodejs.org 에서 LTS를 설치한 뒤 다시 실행해 주세요."',
+  '  read -n 1 -s -r -p "아무 키나 누르면 닫혀요."; exit 1',
+  'fi',
+  'node scripts/register-protocol.js || { echo "설치에 실패했어요. 위 메시지를 개발자에게 알려 주세요."; read -n 1 -s -r; exit 1; }',
+  'if ! command -v claude >/dev/null 2>&1; then',
+  '  echo ""; echo "설정은 끝났어요. 다만 이 Mac에 Claude Code가 없어요. 터미널에서 아래를 실행해 주세요:"',
+  '  echo "  npm install -g @anthropic-ai/claude-code"; echo "  claude login"',
+  'else',
+  '  echo ""; echo "준비 끝! 피그마에서 플러그인을 열고 [추천받기]를 누르면 돼요."',
+  'fi',
+  'read -n 1 -s -r -p "아무 키나 누르면 닫혀요."',
+  '',
+].join('\n');
+const connectorReadme = [
+  '클로드 커넥터 설치 방법',
+  '',
+  '[윈도우]  설치.bat 을 더블클릭하세요.',
+  '[맥]      설치.command 를 우클릭 → [열기] 하세요. (더블클릭은 Gatekeeper가 막습니다)',
+  '',
+  '- Node.js와 Claude Code가 필요합니다. 없으면 설치 중에 안내가 나옵니다.',
+  '- 이 폴더를 지우거나 옮기면 연결이 끊깁니다. 옮겼으면 설치 파일을 다시 실행해 주세요.',
+  '- 추천·번역은 이 PC에 로그인된 본인 클로드 구독 사용량을 씁니다.',
+  '',
+  '안에 든 파일은 모두 평범한 스크립트입니다(숨긴 코드·다운로드 없음).',
+  '',
+].join('\r\n');
+const connectorZip = zipFiles([
+  { name: '설치.bat', data: fs.readFileSync(path.join(root, '설치.bat')) },
+  { name: '설치.command', data: Buffer.from(macThinInstaller, 'utf8'), exec: true },
+  { name: '읽어주세요.txt', data: Buffer.from(connectorReadme, 'utf8') },
+  { name: 'scripts/claude-bridge.js', data: bridgeBytes },
+  { name: 'scripts/bridge-watcher.js', data: watcherBytes },
+  { name: 'scripts/register-protocol.js', data: fs.readFileSync(path.join(root, 'scripts', 'register-protocol.js')) },
+  { name: 'recommend-examples.md', data: Buffer.from(recMd, 'utf8') },
+  { name: 'ux-writing.md', data: fs.readFileSync(path.join(root, 'ux-writing.md')) },
+  { name: 'claude-bridge-silent.vbs', data: launcherBytes },
+  { name: 'claude-watcher-silent.vbs', data: watcherVbsBytes },
+]);
+fs.writeFileSync(path.join(outDir, '클로드-커넥터.zip'), connectorZip);
 const instGen = [
-  '// ===== INSTALLER:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드-커넥터.bat을 base64로 주입) =====',
-  `const INSTALLER_B64 = ${JSON.stringify(Buffer.from(batContent, 'utf8').toString('base64'))};`,
+  '// ===== INSTALLER:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드-커넥터.zip을 base64로 주입) =====',
+  `const INSTALLER_B64 = ${JSON.stringify(connectorZip.toString('base64'))};`,
   '// ===== INSTALLER:END =====',
 ].join('\n');
 const reInst = /\/\/ ===== INSTALLER:BEGIN[\s\S]*?\/\/ ===== INSTALLER:END =====/;
@@ -341,6 +390,58 @@ function crc32(buf) {
   for (let i = 0; i < buf.length; i++) crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
+// 여러 파일을 담는 zip (stored, 무압축) — 커넥터 배포용.
+// **왜 zip인가**: 예전엔 코드를 base64로 품은 .bat 한 장을 내려줬는데, 그 모양이 드로퍼와 같아
+// 백신(V3)이 악성코드로 격리했다(2026-09 실측). zip 안에 평범한 .js/.md/.bat을 그대로 넣으면
+// 백신이 내용을 그대로 보고 판단하므로 오탐이 크게 준다. 무압축(stored)인 이유는 감시자가
+// /update 에서 외부 라이브러리 없이 항목을 잘라 읽기 때문(zlib 불필요).
+// entries: [{ name, data, exec }] — exec=true면 유닉스 실행 권한(0755)을 실어 맥에서 복원된다.
+function zipFiles(entries) {
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const e of entries) {
+    const nameBuf = Buffer.from(e.name, 'utf8');
+    const data = e.data;
+    const crc = crc32(data);
+    const lfh = Buffer.alloc(30);
+    lfh.writeUInt32LE(0x04034b50, 0);
+    lfh.writeUInt16LE(20, 4);
+    lfh.writeUInt16LE(0x0800, 6);   // UTF-8 파일명
+    lfh.writeUInt16LE(0, 8);        // stored
+    lfh.writeUInt32LE(0, 10);       // 시각/날짜 0 — 재현 가능한 빌드
+    lfh.writeUInt32LE(crc, 14);
+    lfh.writeUInt32LE(data.length, 18);
+    lfh.writeUInt32LE(data.length, 22);
+    lfh.writeUInt16LE(nameBuf.length, 26);
+    lfh.writeUInt16LE(0, 28);
+    const cdh = Buffer.alloc(46);
+    cdh.writeUInt32LE(0x02014b50, 0);
+    cdh.writeUInt16LE(0x031E, 4);   // made by unix — 외부 속성의 권한이 유효
+    cdh.writeUInt16LE(20, 6);
+    cdh.writeUInt16LE(0x0800, 8);
+    cdh.writeUInt16LE(0, 10);
+    cdh.writeUInt32LE(0, 12);
+    cdh.writeUInt32LE(crc, 16);
+    cdh.writeUInt32LE(data.length, 20);
+    cdh.writeUInt32LE(data.length, 24);
+    cdh.writeUInt16LE(nameBuf.length, 28);
+    cdh.writeUInt32LE((((e.exec ? 0o100755 : 0o100644) << 16) >>> 0), 38);
+    cdh.writeUInt32LE(offset, 42);
+    parts.push(lfh, nameBuf, data);
+    central.push(cdh, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([Buffer.concat(parts), cdBuf, eocd]);
+}
+
 function zipSingleExecutable(name, data) {
   const nameBuf = Buffer.from(name, 'utf8');
   const crc = crc32(data);
@@ -377,7 +478,10 @@ function zipSingleExecutable(name, data) {
   eocd.writeUInt32LE(30 + nameBuf.length + data.length, 16); // central directory 시작 오프셋
   return Buffer.concat([lfh, nameBuf, data, cdh, nameBuf, eocd]);
 }
-const macZip = zipSingleExecutable('클로드-커넥터.command', Buffer.from(macCommandContent, 'utf8'));
+// 맥도 위의 커넥터 zip 하나로 통일됐다 — 예전의 '.command 한 장 zip'은 더 이상 쓰지 않는다
+// (payload 내장 .command도 백신 오탐 대상이고, zip 안 평범한 파일들로 대체됐다).
+// 마커는 남겨 두고 빈 값을 넣는다 — code.ts가 두 플랫폼 모두 INSTALLER_B64(zip)를 쓴다.
+const macZip = Buffer.alloc(0);
 const instMacGen = [
   '// ===== INSTALLER_MAC:BEGIN — 자동 생성 영역. 직접 수정 금지 (build-glossary.js가 클로드-커넥터.command를 zip(+x 보존)으로 주입) =====',
   `const INSTALLER_MAC_ZIP_B64 = ${JSON.stringify(macZip.toString('base64'))};`,
