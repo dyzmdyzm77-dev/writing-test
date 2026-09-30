@@ -16,12 +16,10 @@
 - "X → X처럼 똑같아 보이는 제안"이 나오면 → 네이버가 합성어를 띄어 쓴 것 → glossary.md "합성어 보호"에 단어 추가
 - 네이버가 표기를 바꾸는 단어(렌탈→렌털 등) → "예외 표기" 표에 추가
 
-## 피드백 환류 워크플로우
+## 피드백 환류 워크플로우 — 제거됨 (2026-09)
 
-- **좋아요는 다듬기·대화 두 모드 다 있어야 한다** (2026-07: 대화 모드 카드에 복사만 있고 좋아요가 빠져 있던 것을 수정). 대화 모드엔 '원본 문구'가 없어서 `before`로 **그 제안을 부른 사용자 요청 메시지**를 보낸다 — sync-feedback.js가 before를 기준으로 묶고 **비어 있으면 후보에서 통째로 버리므로** 빈 값을 보내면 안 된다. 카드 구조·좋아요 키 구분자(`'\\u0001'`)·wireLikeButtons는 renderRecommend와 공유 — 한쪽만 바꾸면 어긋난다
-- 추천 카드의 좋아요(👍)는 제보 저장소(report-admin)에 `reason='추천 좋아요'` 마커로 저장됨 — 이 문자열은 code.ts(LIKE_SUGGESTION)와 scripts/sync-feedback.js가 공유하므로 한쪽만 바꾸면 안 됨
-- `npm run sync-feedback` → 좋아요+오수정 제보를 내려받아 `feedback-candidates.md` 생성(커밋 금지, gitignore됨) → 사람이 골라 recommend-examples.md/ux-writing.md에 옮기고 `npm run build`
-- 사내 프록시 때문에 node fetch에 `--use-env-proxy` 필요 (npm 스크립트에 포함됨, Node 24+)
+- 좋아요(👍)·오수정 제보·`npm run sync-feedback`은 **전부 제거했다.** 저장소가 Vercel 제보 앱(report-admin)이었는데 사내 프록시가 Vercel을 막아 더 쓸 수 없고, 사용자가 "지금은 필요 없다"고 결정했다. 예시(recommend-examples.md)·규칙(ux-writing.md) 보강은 사람이 직접 편집 → `npm run build`. 복구는 git 히스토리(`feature/local-passport` 이전 커밋): code.ts LIKE_SUGGESTION/REPORT 핸들러, ui.html like-btn·report-panel, scripts/sync-feedback.js.
+- 사내 프록시 때문에 node fetch에 `--use-env-proxy` 필요 (Node 24+) — 감시자의 바깥 요청(네이버 열쇠)도 같은 방식(자식 node에 플래그)으로 넘는다
 
 ## 핵심 설계 결정 (바꾸기 전에 읽을 것)
 
@@ -62,14 +60,13 @@
 
 - **맞춤법 열쇠(passportKey)는 감시자가 로컬에서 발급한다 — Vercel은 폴백 (2026-09, 감시자 v10, feature/local-passport)**: "맞춤법 검사기가 작동하지 않아요"의 실제 원인은 플러그인·서버가 아니라 **사내 프록시(McAfee Web Gateway)가 Vercel을 403으로 막는 것**이었다 — `/mwg-internal/…QuotaPlugin&quotatype=coaching` = 시간 제한(quota) 분류라 브라우저에서 활성화 버튼을 누르면 한동안 열리고 다시 닫힌다(GitHub·vercel.com도 같은 분류). 플러그인 fetch는 그 페이지를 볼 수도 누를 수도 없어 403만 받고, 열쇠가 없으니 검사가 통째로 죽었다. **네이버 자체는 프록시가 안 막는다**(실측 200 + 열쇠 포함). 플러그인이 네이버 검색 페이지를 직접 못 읽는 건 CORS 때문인데 로컬 node인 감시자는 무관 → 감시자 `GET /passport`가 네이버 페이지에서 정규식으로 열쇠를 뽑고 10분 캐시한다(비용 0, 클로드 안 부름). code.ts `fetchNaverPassportKey`는 **감시자(6초) → 실패하면 Vercel** 순 — 감시자가 없거나 옛 버전(404)인 PC는 지금과 같게 동작. 검토에서 바깥으로 나가는 곳이 네이버 한 곳만 남는다. **바깥 HTTPS는 자식 node에 `--use-env-proxy`를 붙여 맡긴다**: 손으로 짠 CONNECT 터널은 이 프록시에서 ETIMEDOUT이 났고(실측), 감시자 프로세스 자체는 vbs 런처가 플래그 없이 띄우므로 요청 때만 자식으로 띄운다(10분에 1회, 자식이 죽어도 감시자는 산다). 옛 Node면 플래그 없이 재시도. 교훈 둘: ① 리스너 없는 소켓 'error'는 감시자를 통째로 죽인다(첫 배포판이 /passport 첫 호출에 사망) — 바깥 I/O는 자식으로 격리하는 게 안전 ② 오류는 `toErr`로 감싸 메시지 없는 502를 만들지 말 것(빈 메시지 때문에 원인 추적이 한 바퀴 늦었다). 검증: vm에서 fetch를 감싸 normal·Vercel 403·감시자 다운 세 경우의 경로를 실측 — 앞 둘은 감시자에서 OK, 셋째는 Vercel 폴백. 제보·좋아요는 여전히 Vercel — 사용자가 "지금은 필요 없다"고 해 이 브랜치에선 건드리지 않았다(없애면 Vercel 의존이 0이 된다).
 
-## 서버 구조 (2026-07 이사)
+## 서버 구조 — 서버 없음 (2026-09)
 
-- 심부름꾼 서버는 **Vercel 제보 앱(ux-writing-reports 저장소, report-admin-amber.vercel.app)에 통합** — 플러그인이 쓰는 건 `GET /api/passport`(맞춤법 열쇠)와 제보(/report·좋아요)뿐. `POST /api/recommend`·`POST /api/translate`는 서버에 남아 있지만 플러그인은 더 이상 호출 안 함(클로드 다리 전용 전환). 이사 이유: 사내 보안 프록시가 workers.dev를 '1회성 사용' 안내 페이지로 가로채 플러그인 fetch가 `Failed to fetch`로 실패 (vercel.app은 통과)
-- 구 Cloudflare Worker(naver-passport-proxy/)는 **2026-07 삭제** (Vercel 이사 후 미사용 확인) — 롤백이 필요하면 git 히스토리에서 복구: code.ts NAVER_PROXY_URL을 워커 주소로 바꾸고 passport 경로 결합부 수정, manifest allowedDomains에 workers.dev 재추가
-- `npm run build`는 recommend-examples.md를 code.ts + **옆 폴더의 ux-writing-reports/api/recommend.js**(있을 때만)에 주입 — 주입 후 그쪽 저장소에서 커밋+푸시해야 실서버 반영
-- 서버 배포 = ux-writing-reports 저장소에 git push (Vercel 자동 배포). vercel.com 대시보드는 사내에서 차단이라 안 열리지만 배포에는 불필요
+- **플러그인은 이제 외부 서버를 하나도 안 쓴다.** 바깥으로 나가는 곳은 네이버 SpellerProxy(검사)와, 감시자가 대신 긁는 네이버 검색 페이지(열쇠) 둘뿐이고 나머지는 전부 localhost(감시자 11889·다리 11888)다. 다리의 클로드 호출은 개인 구독.
+- 역사: Cloudflare Worker(2026-07 삭제, 프록시가 workers.dev를 가로챔) → Vercel 제보 앱 report-admin-amber.vercel.app(2026-07~09, `GET /api/passport`·`/api/report`) → **2026-09 제거**: 같은 프록시가 vercel.app을 coaching/quota 분류로 수시 403 → 열쇠 발급을 감시자로 옮기고 제보·좋아요를 없앴다. manifest allowedDomains에서 vercel.app 제거(m.search.naver.com만 남음), build-glossary.js의 ux-writing-reports 내보내기(api/recommend.js·api/bridge-setup.js) 제거. 복구는 git 히스토리.
+- 교훈: **사내 프록시 정책은 예고 없이 바뀐다** — 외부 서버에 기대는 경로는 언젠가 막힌다. 로컬(감시자·다리)에서 해결할 수 있는 건 로컬로.
 
 ## 주의
 
-- 검토 시 텍스트가 외부(Vercel 서버 + 네이버)로 전송됨 — 서버 주소는 code.ts의 NAVER_PROXY_URL, manifest.json allowedDomains와 함께 변경
+- 검토 시 텍스트가 외부(네이버 SpellerProxy)로 전송됨 — 도메인은 manifest.json allowedDomains(m.search.naver.com)와 함께 변경. 열쇠는 감시자가 로컬에서 네이버 검색 페이지를 긁어 발급(문구 전송 없음)
 - 네이버 SpellerProxy는 비공식 API (passportKey 방식) — 깨지면 로컬 규칙만으로 동작

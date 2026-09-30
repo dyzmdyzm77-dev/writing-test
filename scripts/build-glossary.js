@@ -495,51 +495,8 @@ src = src.replace(reInstMac, instMacGen);
 
 fs.writeFileSync(tsPath, src, 'utf8');
 
-// ── 서버로도 내보내기: GET /api/bridge-setup (맥 터미널 한 줄 설치) ──────────
-// 사용자가 다운로드 폴더의 파일을 실행하기 싫어하는 경우를 위한 주 경로:
-//   curl -fsSL https://report-admin-amber.vercel.app/api/bridge-setup | bash
-// 파이프 실행이라 Gatekeeper 격리도 없다. 옆 폴더에 서버 저장소가 있을 때만 쓰고,
-// 그쪽에서 커밋+푸시해야 실서버에 반영된다 (recommend.js 주입과 같은 흐름).
-const setupApiSrc = [
-  '// GET /api/bridge-setup — 클로드 다리 맥 설치 스크립트 (터미널 한 줄 설치용).',
-  '// ===== 자동 생성 파일: 플러그인 저장소의 npm run build가 통째로 덮어쓴다. 직접 수정 금지 =====',
-  '// 사용법:  curl -fsSL https://<이 서버>/api/bridge-setup | bash',
-  `const SCRIPT_B64 = ${JSON.stringify(Buffer.from(macCommandContent, 'utf8').toString('base64'))};`,
-  '',
-  'export default function handler(req, res) {',
-  "  res.setHeader('Access-Control-Allow-Origin', '*'); // 플러그인이 배포 여부를 확인할 수 있게",
-  "  res.setHeader('Cache-Control', 'no-store');",
-  "  res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8');",
-  "  res.end(Buffer.from(SCRIPT_B64, 'base64'));",
-  '}',
-  '',
-].join('\n');
-for (const sibling of ['ux-writing-reports', 'report-admin']) {
-  const apiDir = path.join(root, '..', sibling, 'api');
-  if (fs.existsSync(apiDir)) {
-    fs.writeFileSync(path.join(apiDir, 'bridge-setup.js'), setupApiSrc, 'utf8');
-    console.log('[installer] ' + sibling + '/api/bridge-setup.js 반영 — 그쪽 저장소에서 커밋+푸시 필요');
-  }
-}
-
-// Vercel 제보 앱(ux-writing-reports)의 api/recommend.js에도 같은 예시를 주입 — 현재 실서버 (옆 폴더에 클론돼 있을 때만).
-// 주입 후 그쪽 저장소에서 커밋+푸시해야 Vercel에 배포된다.
-// (구 Cloudflare 워커(naver-passport-proxy) 주입은 2026-07 워커 삭제와 함께 제거 — git 히스토리에서 복구 가능)
-const serverRecGen = [
-  '// ===== RECOMMEND:BEGIN — 자동 생성 영역. 직접 수정하지 말고 recommend-examples.md를 고친 뒤 npm run build =====',
-  'const RECOMMEND_EXAMPLES = [',
-  ...validExamples.map((e) => `  { input: ${JSON.stringify(e.input)}, suggestions: ${JSON.stringify(e.suggestions)} },`),
-  '];',
-  '// ===== RECOMMEND:END =====',
-].join('\n');
-const vercelRecPath = path.join(root, '..', 'ux-writing-reports', 'api', 'recommend.js');
-if (fs.existsSync(vercelRecPath)) {
-  const vercelSrc = fs.readFileSync(vercelRecPath, 'utf8');
-  if (reRec.test(vercelSrc)) {
-    fs.writeFileSync(vercelRecPath, vercelSrc.replace(reRec, serverRecGen), 'utf8');
-    console.log('[recommend] ux-writing-reports/api/recommend.js에도 반영 — 그쪽 저장소에서 커밋+푸시 필요');
-  }
-}
+// (Vercel 제보 앱 ux-writing-reports로의 내보내기 — api/bridge-setup.js·api/recommend.js 주입 — 는 2026-09 제거.
+//  사내 프록시가 Vercel을 막아 서버를 더 쓰지 않는다. 복구는 git 히스토리.)
 
 console.log(`[glossary] 용어 ${terms.length}건, 권장 문구 ${phrases.length}건, 합성어 ${compounds.length}건, 동작 명사 ${actionNouns.length}건, 예외 표기 ${keepSpellings.length}건 반영`);
 console.log(`[recommend] 추천 예시 ${validExamples.length}건 반영 (code.ts)`);

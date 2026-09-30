@@ -215,7 +215,7 @@ function applyInstaller(installerB64) {
 // 대신 긁어 줬는데, 사내 프록시(McAfee, coaching/quota 분류)가 Vercel을 수시로 403으로 막아
 // "맞춤법 검사기가 작동하지 않아요"가 떴다. 네이버 자체는 프록시가 안 막는다(실측). 로컬 node인
 // 감시자는 CORS와 무관하므로 여기서 직접 긁으면 바깥으로 나가는 곳이 네이버 한 곳만 남는다.
-// 플러그인은 "감시자 → 실패하면 Vercel" 순으로 묻는다 — 감시자가 없는 PC도 지금과 같게 동작.
+// 플러그인은 열쇠를 **여기서만** 받는다(Vercel 폴백은 2026-09 제거 — 사내 프록시가 Vercel을 막아 서버를 더 쓰지 않는다).
 // 프록시: 회사 PC는 직접 인터넷이 안 되므로 HTTPS_PROXY/HTTP_PROXY 환경변수가 있으면 CONNECT 터널을 쓴다
 // (Node의 --use-env-proxy 플래그는 vbs 런처가 안 붙이므로 여기서 직접 처리). 없으면 직접 접속.
 // 바깥 HTTPS 요청은 **자식 node에 --use-env-proxy를 붙여** 맡긴다 (2026-09).

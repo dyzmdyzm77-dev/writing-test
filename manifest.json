@@ -12,8 +12,7 @@
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
-      "https://m.search.naver.com",
-      "https://report-admin-amber.vercel.app"
+      "https://m.search.naver.com"
     ],
     "devAllowedDomains": [
       "http://localhost:11888",

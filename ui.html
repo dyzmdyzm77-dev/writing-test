@@ -662,91 +662,7 @@
         min-width: 0; /* 긴 텍스트가 flex 칸을 넘치지 않게 */
       }
       /* 항목별 "오수정 제보" 버튼 (우측 상단) */
-      .preview-report-btn {
-        flex-shrink: 0;
-        width: 24px !important; /* 전역 button(width:100%, min-width:64px) 무시 */
-        height: 24px !important; /* 전역 button height:48px !important 무시 */
-        min-width: unset;
-        padding: 0;
-        margin: 2px 0 0 0; /* '원문' 라벨 높이에 맞춰 살짝 내림 */
-        line-height: 0;
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: #B0B0B0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .preview-report-btn:hover {
-        color: #E5484D; /* 제보(경고) 느낌의 빨강 */
-      }
-      .preview-report-btn.reported {
-        color: #E5484D; /* 이미 제보한 항목은 빨강으로 고정 */
-        cursor: default;
-      }
-      .preview-report-btn svg {
-        display: block;
-      }
       /* 제보 입력창 (버튼 클릭 시 아래 줄 전체 폭으로 열림) */
-      .report-panel {
-        flex-basis: 100%; /* flex-wrap 상태에서 한 줄 전체 차지 */
-        width: 100%;
-        display: none;
-        margin-top: 4px;
-      }
-      .report-panel.open {
-        display: block;
-      }
-      .report-input {
-        width: 100%;
-        box-sizing: border-box;
-        min-height: 56px;
-        resize: vertical;
-        padding: 8px 10px;
-        font-size: 13px;
-        font-family: inherit;
-        border: 1px solid #D5D5D5;
-        border-radius: 6px;
-        outline: none;
-      }
-      .report-input:focus {
-        border-color: #2F88FF;
-      }
-      .report-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        margin-top: 6px;
-      }
-      .report-actions button {
-        width: auto !important;
-        min-width: unset;
-        height: 32px !important;
-        line-height: 1 !important; /* 전역 button의 line-height:48px 덮어써서 글자 세로 중앙 정렬 */
-        padding: 0 14px;
-        margin: 0;
-        font-size: 13px;
-        border-radius: 6px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .report-cancel {
-        background: #F0F0F0;
-        border: 1px solid #D5D5D5;
-        color: #353535;
-      }
-      .report-submit {
-        background: #E5484D;
-        border: 1px solid #E5484D;
-        color: #ffffff;
-      }
-      .report-submit:disabled {
-        opacity: 0.5;
-        cursor: default;
-      }
       /* 변경 전/제안은 박스 없이 가로 구분선 하나로만 구분 */
       .preview-before-box {
         padding-bottom: 12px;
@@ -1594,30 +1510,6 @@
       /* 카드 오른쪽 액션 버튼 묶음 (좋아요 + 복사 세로 배치) */
       .sugg-actions { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
       /* 좋아요 버튼 — 복사 버튼과 같은 형태, 누르면 파란색으로 고정 */
-      .like-btn {
-        width: auto !important;
-        height: auto !important;
-        line-height: normal !important;
-        flex: 0 0 auto;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: #FFFFFF;
-        border: 1px solid #D9D9D9 !important;
-        border-radius: 4px;
-        color: #757575;
-        padding: 6px !important;
-        margin: 0;
-        cursor: pointer;
-      }
-      .like-btn:hover { background: #F2F2F2; color: #353535; }
-      .like-btn svg { display: block; }
-      .like-btn.liked {
-        color: #1D6CEB;
-        border-color: #9DC0F5 !important;
-        background: #F0F6FF;
-        cursor: default;
-      }
       /* 추천 문구에서 원본 대비 바뀐 부분 표시 (검토의 형광펜 느낌) */
       .sugg-diff {
         background: #FFF1A8;
@@ -2067,17 +1959,11 @@
       let lastSelectionText = ''; // 캔버스에서 마지막으로 선택한 영역의 텍스트 (추천 입력창 자동 채움용)
       let popupSelected = false;  // 지금 선택이 '텍스트 여러 개 든 컴포넌트'(팝업)인가 — 추천받기가 요소별로 갈린다
       let recommendBusy = false;  // 추천 로딩 중인가 — 이때 캔버스 선택을 바꿔도 미리보기를 안 바꾼다(결과와 어긋나지 않게)
-      const likedKeys = new Set();    // 이번 세션에서 좋아요한 추천 키 (원본+추천)
-      const pendingLikes = new Map(); // 전송 중인 좋아요: key → 버튼
       let selectedNodeIds = new Set(); // 선택된 노드 ID들 (여러 개 선택 가능)
-      const reportedKeys = new Set(); // 이미 "오수정 제보"한 항목 (nodeId::after 조합) — 재렌더링돼도 유지
-      const pendingReports = new Map(); // 전송 중인 제보: reportKey → { panel, btn, submit } (결과 회신 시 해당 UI 갱신)
 
       // 항목별 "오수정 제보" 아이콘 (깃발)
-      const REPORT_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 3v18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M5 4h11l-2 3.5L16 11H5z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
       // 제보 상태를 노드+수정안 조합으로 식별 (같은 노드라도 수정안이 바뀌면 새 제보 가능)
-      function reportKey(item) { return (item.nodeId || '') + '::' + (item.after || ''); }
       // 검토 후 스크롤 동작 예약:
       // - 최초 검토: 목록 맨 위로
       // - 추가 검토: 새로 추가된 카드 중 가장 위의 것이 화면 중앙에 오도록
@@ -2271,7 +2157,6 @@
           return;
         }
         selectedNodeIds.clear(); // 미리보기 새로고침 시 선택 초기화
-        reportedKeys.clear(); // 새 검토면 제보 상태도 초기화
         const selectAllCheckbox = document.getElementById('selectAll');
         if (selectAllCheckbox) {
           selectAllCheckbox.checked = false;
@@ -2388,7 +2273,6 @@
         if (buttonGroup) buttonGroup.classList.remove('active');
         previewData = [];
         selectedNodeIds.clear();
-        reportedKeys.clear();
         const selectAllCheckbox = document.getElementById('selectAll');
         if (selectAllCheckbox) selectAllCheckbox.checked = false;
         setResultHeaderVisible(false); // '검토 결과 N건' 헤더 숨김
@@ -2448,24 +2332,6 @@
           showToast(event.data.pluginMessage.message);
         }
 
-        if (event.data.pluginMessage.type === 'report-result') {
-          const { key, ok, error } = event.data.pluginMessage;
-          const p = pendingReports.get(key);
-          pendingReports.delete(key);
-          if (ok) {
-            reportedKeys.add(key);
-            if (p) {
-              p.panel.classList.remove('open');
-              p.btn.classList.add('reported');
-              p.btn.title = '제보됨 — 이 수정안을 잘못됐다고 알림';
-              p.btn.setAttribute('aria-label', p.btn.title);
-            }
-            showToast('제보를 보냈어요. 감사합니다!');
-          } else {
-            if (p && p.submit) { p.submit.disabled = false; p.submit.textContent = '제보 보내기'; }
-            showToast('제보 실패했어요. 잠시 후 다시 시도해 주세요.');
-          }
-        }
 
         // 로그인 창 열기 결과 — 대기 화면이 이걸 보고 계속 기다릴지/실패를 알릴지 정한다
         if (event.data.pluginMessage.type === 'login-open-result') {
@@ -2491,23 +2357,6 @@
         }
 
         // 좋아요 전송 결과 — 성공하면 버튼을 파란색으로 고정
-        if (event.data.pluginMessage.type === 'like-result') {
-          const likeMsg = event.data.pluginMessage;
-          const likeBtn = pendingLikes.get(likeMsg.key);
-          pendingLikes.delete(likeMsg.key);
-          if (likeMsg.ok) {
-            likedKeys.add(likeMsg.key);
-            if (likeBtn) {
-              likeBtn.classList.add('liked');
-              likeBtn.title = '좋아요한 추천이에요';
-              likeBtn.disabled = false;
-            }
-            showToast('좋아요! 예시 후보로 저장했어요.');
-          } else {
-            if (likeBtn) likeBtn.disabled = false;
-            showToast('좋아요 저장에 실패했어요.');
-          }
-        }
 
         // 대화형 문구 제작 응답 — 대화에 어시스턴트 말풍선(+제안 카드)으로 덧붙인다
         if (event.data.pluginMessage.type === 'compose-result') {
@@ -3259,65 +3108,7 @@
             </div>
           `;
 
-          // 항목별 "오수정 제보" 버튼 (우측 상단)
-          const alreadyReported = reportedKeys.has(reportKey(item));
-          const reportBtn = document.createElement('button');
-          reportBtn.className = 'preview-report-btn' + (alreadyReported ? ' reported' : '');
-          reportBtn.tabIndex = -1; // 항목(div) 포커스로 충분
-          reportBtn.innerHTML = REPORT_SVG;
-          const reportLbl = alreadyReported ? '제보됨 — 이 수정안을 잘못됐다고 알림' : '이 수정안이 잘못됐다고 제보하기';
-          reportBtn.title = reportLbl;
-          reportBtn.setAttribute('aria-label', reportLbl);
-
-          // 제보 입력창 (버튼 클릭 시 아래 줄 전체 폭으로 열림)
-          const reportPanel = document.createElement('div');
-          reportPanel.className = 'report-panel';
-          reportPanel.innerHTML = `
-            <textarea class="report-input" placeholder="이 수정안이 왜 잘못됐는지 적어주세요 (선택)"></textarea>
-            <div class="report-actions">
-              <button class="report-cancel" tabindex="-1">취소</button>
-              <button class="report-submit" tabindex="-1">제보 보내기</button>
-            </div>
-          `;
-          const reportInput = reportPanel.querySelector('.report-input');
-          const reportCancel = reportPanel.querySelector('.report-cancel');
-          const reportSubmit = reportPanel.querySelector('.report-submit');
-
-          const closePanel = () => reportPanel.classList.remove('open');
-
-          reportBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // 항목 선택/이동과 분리
-            if (reportBtn.classList.contains('reported')) {
-              showToast('이미 제보한 항목이에요.');
-              return;
-            }
-            const opening = !reportPanel.classList.contains('open');
-            reportPanel.classList.toggle('open', opening);
-            if (opening) setTimeout(() => reportInput.focus(), 0);
-          });
-          reportCancel.addEventListener('click', (e) => { e.stopPropagation(); closePanel(); });
-          reportPanel.addEventListener('click', (e) => e.stopPropagation()); // 패널 클릭이 항목 선택으로 번지지 않게
-
-          reportSubmit.addEventListener('click', (e) => {
-            e.stopPropagation();
-            reportSubmit.disabled = true;
-            reportSubmit.textContent = '보내는 중...';
-            const key = reportKey(item);
-            pendingReports.set(key, { panel: reportPanel, btn: reportBtn, submit: reportSubmit });
-            parent.postMessage({ pluginMessage: {
-              type: 'REPORT',
-              key: key,
-              nodeId: item.nodeId,
-              before: item.before,
-              after: item.after,
-              reason: item.reason || '',
-              comment: (reportInput.value || '').trim()
-            } }, '*');
-          });
-
           div.appendChild(contentEl);
-          div.appendChild(reportBtn);
-          div.appendChild(reportPanel);
 
           // Wrapper에 아이템 추가
           wrapper.appendChild(div);
@@ -3669,13 +3460,9 @@
             html += '<div class="chat-sugg">';
             m.suggestions.forEach((sg) => {
               // 다듬기 모드(renderRecommend)와 같은 카드 구조 — 좋아요 + 복사를 오른쪽에 세로로
-              const likeKey = encodeURIComponent(lastUserText + '\\u0001' + sg.text);
-              const liked = likedKeys.has(likeKey);
               html += '<div class="sugg-card"><div class="sugg-main"><span class="sugg-text">' + escapeHtml(sg.text) + '</span>' +
                 (sg.reason ? '<div class="sugg-reason">' + escapeHtml(sg.reason) + '</div>' : '') +
                 '</div><div class="sugg-actions">' +
-                '<button class="like-btn' + (liked ? ' liked' : '') + '" title="' + (liked ? '좋아요한 추천이에요' : '이 추천 좋아요 — 예시 후보로 저장') + '" aria-label="좋아요"' +
-                ' data-like-key="' + likeKey + '" data-like-orig="' + encodeURIComponent(lastUserText) + '" data-like-text="' + encodeURIComponent(sg.text) + '" data-like-reason="' + encodeURIComponent(sg.reason || '') + '">' + LIKE_ICON + '</button>' +
                 '<button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(sg.text) + '">' + COPY_ICON + '</button>' +
                 '</div></div>';
             });
@@ -3692,7 +3479,6 @@
           composeBusyStartedAt = 0; // 다음 질문은 0초부터
         }
         wireCopyButtons(box);
-        wireLikeButtons(box);
         // 새 메시지가 보이도록 아래로
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
       }
@@ -4536,7 +4322,6 @@
       // 복사 아이콘 (버튼 안에 텍스트 대신 사용)
       var COPY_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
       // 좋아요(엄지) 아이콘
-      var LIKE_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 10h3v11H3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M6 19.5V11l4.8-7.2c.9-1.3 3-.6 2.9 1L13 9h5.6a2 2 0 0 1 2 2.4l-1.5 7a2 2 0 0 1-2 1.6H8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       // 원본 대비 추천 문구에서 바뀐(새로 들어온) 단어를 형광펜(<span class="sugg-diff">)으로 감싼 HTML 생성
       // 단어 단위 LCS — 원본과 공통인 단어는 그대로, 나머지(바뀜·추가)만 표시
       function diffMarkHtml(original, suggestion) {
@@ -4739,13 +4524,9 @@
           } else {
             g.suggestions.forEach((s) => {
               const item = { text: s.text || '', reason: s.reason || '' };
-              const likeKey = encodeURIComponent(orig + '\\u0001' + item.text);
-              const liked = likedKeys.has(likeKey);
               html += '<div class="sugg-card"><div class="sugg-main"><span class="sugg-text">' + diffMarkHtml(orig, item.text) + '</span>' +
                 (item.reason ? '<div class="sugg-reason">' + escapeHtml(item.reason) + '</div>' : '') +
                 '</div><div class="sugg-actions">' +
-                '<button class="like-btn' + (liked ? ' liked' : '') + '" title="' + (liked ? '좋아요한 추천이에요' : '이 추천 좋아요 — 예시 후보로 저장') + '" aria-label="좋아요"' +
-                ' data-like-key="' + likeKey + '" data-like-orig="' + encodeURIComponent(orig) + '" data-like-text="' + encodeURIComponent(item.text) + '" data-like-reason="' + encodeURIComponent(item.reason) + '">' + LIKE_ICON + '</button>' +
                 '<button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(item.text) + '">' + COPY_ICON + '</button>' +
                 '</div></div>';
             });
@@ -4754,7 +4535,6 @@
         });
         list.innerHTML = html;
         wireCopyButtons(list);
-        wireLikeButtons(list);
         if (typeof adjustTopPadding === 'function') adjustTopPadding();
       }
       // 팝업 선택 시 입력창 대신 뜨는 미리보기 — 감지된 문구를 역할별로 나열
@@ -4930,13 +4710,9 @@
         suggestions.forEach((s) => {
           // 문자열(예시 사전) 또는 {text, reason}(AI) 둘 다 지원
           const item = (typeof s === 'string') ? { text: s, reason: '' } : { text: s.text || '', reason: s.reason || '' };
-          const likeKey = encodeURIComponent(original + '\\u0001' + item.text); // 문구에 안 나올 구분자로 원본/추천 경계 표시 (키 충돌 방지)
-          const liked = likedKeys.has(likeKey);
           html += '<div class="sugg-card"><div class="sugg-main"><span class="sugg-text">' + diffMarkHtml(original, item.text) + '</span>' +
             (item.reason ? '<div class="sugg-reason">' + escapeHtml(item.reason) + '</div>' : '') +
             '</div><div class="sugg-actions">' +
-            '<button class="like-btn' + (liked ? ' liked' : '') + '" title="' + (liked ? '좋아요한 추천이에요' : '이 추천 좋아요 — 예시 후보로 저장') + '" aria-label="좋아요"' +
-            ' data-like-key="' + likeKey + '" data-like-orig="' + encodeURIComponent(original) + '" data-like-text="' + encodeURIComponent(item.text) + '" data-like-reason="' + encodeURIComponent(item.reason) + '">' + LIKE_ICON + '</button>' +
             '<button class="copy-btn" title="복사" aria-label="복사" data-copy="' + encodeURIComponent(item.text) + '">' + COPY_ICON + '</button>' +
             '</div></div>';
         });
@@ -4952,7 +4728,6 @@
         // AI 카드를 받은 뒤에도 남아 있어 계속 새 제안을 받을 수 있다.
         attachAskAiButton(list, original);
         wireCopyButtons(list);
-        wireLikeButtons(list);
         adjustTopPadding();
       }
       // 추천 결과 맨 아래에 [AI 추천 더 받기] 버튼을 (하나만) 붙인다
@@ -4970,25 +4745,6 @@
       function wireCopyButtons(container) {
         container.querySelectorAll('.copy-btn').forEach((b) => {
           b.onclick = () => copyText(decodeURIComponent(b.dataset.copy));
-        });
-      }
-      // 좋아요 버튼 — 누르면 원본+추천 쌍을 제보 저장소로 보낸다 (예시 후보 수집)
-      function wireLikeButtons(container) {
-        container.querySelectorAll('.like-btn').forEach((b) => {
-          b.onclick = () => {
-            const key = b.dataset.likeKey;
-            if (likedKeys.has(key)) { showToast('이미 좋아요한 추천이에요.'); return; }
-            if (pendingLikes.has(key)) return; // 전송 중 중복 클릭 무시
-            pendingLikes.set(key, b);
-            b.disabled = true;
-            parent.postMessage({ pluginMessage: {
-              type: 'LIKE_SUGGESTION',
-              key: key,
-              before: decodeURIComponent(b.dataset.likeOrig || ''),
-              after: decodeURIComponent(b.dataset.likeText || ''),
-              comment: decodeURIComponent(b.dataset.likeReason || ''),
-            } }, '*');
-          };
         });
       }
       function copyText(t) {
