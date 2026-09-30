@@ -210,6 +210,56 @@ function applyInstaller(installerB64) {
   return { changed, watcherChanged, bridgeV: vm ? Number(vm[1]) : null };
 }
 
+// ── 네이버 맞춤법 열쇠(passportKey) 로컬 발급 (GET /passport) ──────────────────────
+// 왜 여기서 하나(2026-09): 플러그인은 네이버 검색 페이지를 직접 못 읽는다(CORS) → 그동안 Vercel 서버가
+// 대신 긁어 줬는데, 사내 프록시(McAfee, coaching/quota 분류)가 Vercel을 수시로 403으로 막아
+// "맞춤법 검사기가 작동하지 않아요"가 떴다. 네이버 자체는 프록시가 안 막는다(실측). 로컬 node인
+// 감시자는 CORS와 무관하므로 여기서 직접 긁으면 바깥으로 나가는 곳이 네이버 한 곳만 남는다.
+// 플러그인은 "감시자 → 실패하면 Vercel" 순으로 묻는다 — 감시자가 없는 PC도 지금과 같게 동작.
+// 프록시: 회사 PC는 직접 인터넷이 안 되므로 HTTPS_PROXY/HTTP_PROXY 환경변수가 있으면 CONNECT 터널을 쓴다
+// (Node의 --use-env-proxy 플래그는 vbs 런처가 안 붙이므로 여기서 직접 처리). 없으면 직접 접속.
+// 바깥 HTTPS 요청은 **자식 node에 --use-env-proxy를 붙여** 맡긴다 (2026-09).
+// 손으로 짠 CONNECT 터널은 이 프록시에서 ETIMEDOUT이 났고(실측), Node 24의 내장 프록시 지원은
+// 이 저장소의 npm 스크립트가 이미 같은 방식으로 프록시를 넘고 있어 검증돼 있다.
+// 감시자 프로세스 자체는 플래그 없이 떠 있으므로(vbs 런처) 요청 때만 자식으로 띄운다 — 10분에 한 번이라 부담 없다.
+// 자식이 죽어도 감시자는 안 죽는다(격리). 옛 Node(플래그 없음)면 플래그 없이 한 번 더 시도한다.
+const { execFile } = require('child_process');
+const FETCH_CHILD = [
+  "const url = process.argv[1], hdr = JSON.parse(process.argv[2] || '{}');",
+  "fetch(url, { headers: hdr, redirect: 'follow' }).then(async (r) => {",
+  "  const t = await r.text(); process.stdout.write(r.status + '\\n' + t);",
+  "}).catch((e) => { process.stderr.write(String((e && (e.cause && e.cause.message)) || (e && e.message) || e)); process.exit(2); });",
+].join('\n');
+function fetchText(urlStr, headers, timeoutMs, useProxyFlag = true) {
+  return new Promise((resolve, reject) => {
+    const args = (useProxyFlag ? ['--use-env-proxy'] : []).concat(['-e', FETCH_CHILD, urlStr, JSON.stringify(headers || {})]);
+    execFile(process.execPath, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
+      if (err) {
+        // 이 Node가 --use-env-proxy를 모르면 플래그 없이 재시도 (직접 접속이 되는 환경용)
+        if (useProxyFlag && /bad option|use-env-proxy/i.test(String(stderr || err.message))) return fetchText(urlStr, headers, timeoutMs, false).then(resolve, reject);
+        return reject(new Error('바깥 요청 실패: ' + String(stderr || err.message).trim().slice(0, 200)));
+      }
+      const i = stdout.indexOf('\n');
+      resolve({ status: Number(stdout.slice(0, i)), body: stdout.slice(i + 1) });
+    });
+  });
+}
+let passportCache = { at: 0, key: null };
+const PASSPORT_TTL = 10 * 60 * 1000; // 열쇠는 한동안 유효하다 — 매 검토마다 네이버 페이지(900KB)를 긁지 않게
+async function naverPassportKey() {
+  if (passportCache.key && Date.now() - passportCache.at < PASSPORT_TTL) return { key: passportCache.key, cached: true };
+  const r = await fetchText(
+    'https://search.naver.com/search.naver?query=' + encodeURIComponent('맞춤법검사기'),
+    { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', Accept: 'text/html' },
+    15000
+  );
+  if (r.status !== 200) throw new Error('네이버 검색페이지 HTTP ' + r.status);
+  const m = r.body.match(/passportKey=([0-9a-zA-Z]+)/);
+  if (!m) throw new Error('passportKey 못 찾음 (페이지 길이 ' + r.body.length + ')');
+  passportCache = { at: Date.now(), key: m[1] };
+  return { key: m[1], cached: false };
+}
+
 // 다리(11888)가 떠 있으면 끈다 — 초기화 시 남은 세션 정리 (없으면 조용히 실패)
 function shutdownBridge() {
   try {
@@ -229,8 +279,9 @@ const server = http.createServer(async (req, res) => {
     //  v6 = 맥은 자격증명이 키체인에 있어 파일 검사만으로는 '로그인 안 됨'이 되던 것 대응,
     //  v7 = /restart 추가 + 포트 재시도 — 옛 감시자가 옛 다리를 계속 켜던 것 대응,
     //  v8 = /update 추가 — 플러그인이 들고 있는 설치 파일로 설치본을 스스로 갱신,
-    //  v9 = /update 입력을 bat 페이로드에서 **커넥터 zip**으로 교체 (백신 오탐 회피))
-    return json(res, 200, { ok: true, watcher: true, v: 9 });
+    //  v9 = /update 입력을 bat 페이로드에서 **커넥터 zip**으로 교체 (백신 오탐 회피),
+    //  v10 = GET /passport — 네이버 맞춤법 열쇠를 로컬에서 발급 (사내 프록시가 Vercel을 막아도 검사가 되게))
+    return json(res, 200, { ok: true, watcher: true, v: 10 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -238,6 +289,17 @@ const server = http.createServer(async (req, res) => {
   // 주의: 여기 계정이 보여도 입장권이 만료됐을 수 있다(유효성은 실제 호출 때만 알 수 있음 — 다리 /health의 problem 참고).
   if (req.url === '/account') {
     return json(res, 200, { ok: true, account: claudeAccount(), claude: hasClaude() });
+  }
+  // 네이버 맞춤법 열쇠 — 플러그인이 Vercel 대신 여기서 받는다 (위 naverPassportKey 주석 참고). 비용 0, 클로드 안 부름.
+  if (req.url === '/passport') {
+    try {
+      const r = await naverPassportKey();
+      return json(res, 200, { ok: true, passportKey: r.key, cached: r.cached, source: 'watcher' });
+    } catch (e) {
+      const err = toErr(e);
+      console.log('[watcher] 열쇠 발급 실패:', err.message, e && e.stack ? '\n' + String(e.stack).split('\n').slice(0, 4).join('\n') : '');
+      return json(res, 502, { ok: false, error: err.message });
+    }
   }
   if (req.method === 'POST' && req.url === '/wake') {
     if (!hasClaude()) return json(res, 200, { ok: false, problem: 'claude-missing' });
@@ -252,7 +314,7 @@ const server = http.createServer(async (req, res) => {
   // 감시자를 새 코드로 다시 띄운다 — 다리를 껐다 켜도 계속 옛 버전이 켜질 때(위 restartSelf 주석) 쓴다.
   // 응답을 먼저 보낸 뒤 새 인스턴스를 띄우고 우리는 빠진다 — 새 쪽은 포트가 빌 때까지 재시도한다.
   if (req.method === 'POST' && req.url === '/restart') {
-    json(res, 200, { ok: true, restarting: true, v: 9 });
+    json(res, 200, { ok: true, restarting: true, v: 10 });
     setTimeout(() => {
       shutdownBridge(); // 옛 코드로 떠 있는 다리도 같이 내린다 — 다음 요청 때 새 감시자가 새 코드로 켠다
       restartSelf();
