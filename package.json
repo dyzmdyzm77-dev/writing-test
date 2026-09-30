@@ -11,7 +11,8 @@
     "sync-install": "node scripts/sync-install.js",
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
-    "watch": "npm run build -- --watch"
+    "watch": "npm run build -- --watch",
+    "font:subset": "node scripts/font-subset.js"
   },
   "author": "",
   "license": "",
@@ -21,7 +22,8 @@
     "@typescript-eslint/eslint-plugin": "^6.12.0",
     "@typescript-eslint/parser": "^6.12.0",
     "eslint": "^8.54.0",
-    "typescript": "^5.3.2"
+    "typescript": "^5.3.2",
+    "subset-font": "^2.9.0"
   },
   "eslintConfig": {
     "extends": [

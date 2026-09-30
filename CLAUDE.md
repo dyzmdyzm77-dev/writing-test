@@ -62,6 +62,9 @@
 
 - **CLI에 모델 별칭(`--model opus`)을 넘기지 말고 id로 넘길 것 (2026-09, BRIDGE_V=43)**: Claude Code 2.1.260에서 `--model opus`가 "There's an issue with the selected model (claude-opus-5). It may not exist or you may not have access to it."로 거절됐는데, **같은 id를 직접** 넘기면(`--model claude-opus-5`) 정상 응답했다(실측 — sonnet·haiku도 명시 id로 확인). CLI 자동 업데이트 뒤 별칭 해석이 깨진 것으로 보인다. 플러그인에선 다리가 살아 있어(🟢 연결 중) 호출 시점에만 실패하니 "AI 추천은 실패했어요… 예시와 규칙 기반" 폴백 토스트로 나타난다 — 연결 문제로 오해하기 쉽다. 다리는 `MODEL_IDS`(별칭→id, 환경변수 `BRIDGE_MODEL_ID_<별칭>`으로 덮어쓰기)로 바꿔 넘긴다. 모델 세대가 바뀌면 이 표만 고친다.
 
+- **ui.html 크기의 90%는 폰트였다 — 서브셋으로 2.9MB → 0.9MB (2026-09)**: Pretendard 가변 폰트 원본(woff2 2.0MB, 한글 11,172자 전체)을 base64로 통째 내장하고 있었고 플러그인을 열 때마다 이걸 CSS로 읽었다. 실제로 쓰는 굵기는 400/500/600/700, 화면·AI 문구는 상용 한글이므로 **KS X 1001 2,350자 + 라틴 + UI 기호(+화면 문구에 등장하는 비상용 글자)만 남긴 서브셋(470KB, 가변 축 유지)**으로 교체했다. `src`에 `local('Pretendard Variable'), local('Pretendard')`를 앞에 둬 폰트가 설치된 PC는 내장 데이터를 디코드하지 않는다. 상용 밖 글자(뷁 등)는 시스템 글꼴로 대체돼 보인다 — 깨지지 않는다. 검증: 내장 데이터만으로 별도 FontFace를 만들어 상용 한글·라틴·4굵기 렌더 확인(설치된 PC에선 local()이 잡혀 서브셋 자체 검증이 안 되므로 이렇게 해야 한다). 도구: `subset-font`(HarfBuzz wasm, devDependency) — Python fonttools가 없는 PC에서도 된다. 재생성은 **`npm run font:subset -- <PretendardVariable.woff2>`**(`scripts/font-subset.js`: KS X 1001 목록은 EUC-KR 한글 영역을 디코드해 만들고, 화면 문구의 비상용 한글을 자동 포함, ui.html의 @font-face까지 교체). **원본 폰트 파일은 저장소에 없다**(2MB 바이너리를 ZIP 배포에 싣지 않으려고) — 다시 만들 땐 Pretendard 배포본에서 받는다.
+- 빌드 정리(2026-09): payload 내장 `.bat/.command` 생성·`zipSingleExecutable`·`INSTALLER_MAC` 주입을 제거 — 이제 빌드는 커넥터 zip 하나만 만든다(`out/클로드-커넥터.zip`). 죽은 코드 점검 결과 그 외 미참조 함수는 없었다.
+
 ## 서버 구조 — 서버 없음 (2026-09)
 
 - **플러그인은 이제 외부 서버를 하나도 안 쓴다.** 바깥으로 나가는 곳은 네이버 SpellerProxy(검사)와, 감시자가 대신 긁는 네이버 검색 페이지(열쇠) 둘뿐이고 나머지는 전부 localhost(감시자 11889·다리 11888)다. 다리의 클로드 호출은 개인 구독.
