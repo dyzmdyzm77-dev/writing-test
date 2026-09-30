@@ -48,11 +48,21 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 42;
+const BRIDGE_V = 43;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
 const ALLOWED_MODELS = ['haiku', 'sonnet', 'opus'];
+// 별칭 → 실제 모델 id. CLI에 `--model opus`(별칭)를 넘기면 2.1.260에서
+// "There's an issue with the selected model (claude-opus-5)"로 거절되는데, 같은 id를 **직접** 넘기면 된다
+// (2026-09 실측 — CLI 자동 업데이트 뒤 별칭 해석이 깨진 것으로 보임). 그래서 별칭은 우리 쪽에서 id로 바꿔 넘긴다.
+// 모델이 바뀌면 여기만 고친다. 환경변수 BRIDGE_MODEL_ID_<별칭>으로 임시 덮어쓸 수 있다.
+const MODEL_IDS = {
+  opus: process.env.BRIDGE_MODEL_ID_OPUS || 'claude-opus-5',
+  sonnet: process.env.BRIDGE_MODEL_ID_SONNET || 'claude-sonnet-5',
+  haiku: process.env.BRIDGE_MODEL_ID_HAIKU || 'claude-haiku-4-5-20251001',
+};
+const modelIdFor = (alias) => MODEL_IDS[alias] || alias;
 const TURN_TIMEOUT_MS = 90000;   // 요청 1건 제한시간
 const MAX_TURNS = 30;            // 이만큼 쓰면 세션 재시작 (대화 누적 방지)
 
@@ -348,7 +358,7 @@ function startProc() {
   // 이 세션이 어느 계정의 입장권으로 도는지 기록 — 밖에서 계정이 바뀌었는지 비교하는 기준
   sessionAccount = claudeAccount();
   console.log('[bridge] 클로드 세션 시동 중… (모델: ' + currentModel + ')');
-  const thisProc = spawn('claude', ['-p', '--model', currentModel, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], {
+  const thisProc = spawn('claude', ['-p', '--model', modelIdFor(currentModel), '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], {
     shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV,
     detached: process.platform !== 'win32', // POSIX: 자기 프로세스 그룹 생성 — killProc이 그룹째 정리할 수 있게
   });
