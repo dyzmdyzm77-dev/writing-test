@@ -9,6 +9,12 @@
 - ui.html은 빌드 불필요 (플러그인 재실행만)
 - 검증은 vm 샌드박스로: code.js를 `vm.runInContext`에 figma 스텁과 함께 로드해 `suggestFriendlyKorean(text, naverChecked)` 호출
 
+## 배포 (2026-09)
+
+- **`npm run dist`** → `out/S1-UX-Writing-Agent-V<버전>.zip` (`scripts/make-dist.js`). 버전은 ui.html `#appVersion`에서 읽는다 — 버전을 올릴 땐 그 숫자 하나만 바꾸고 dist를 다시 만든다. 사용자는 zip을 풀어 `설치.bat` 한 번(맥은 `node scripts/register-protocol.js`) → 피그마에 `manifest.json` 임포트. 안에 `읽어주세요.txt`가 그 절차를 안내한다.
+- 담는 것은 실행에 필요한 12개만: manifest/code.js/ui.html, 설치.bat, vbs 2개, scripts의 다리·감시자·register-protocol, 예시·규칙 md. **package.json은 넣지 않는다** — 감시자 `/update`가 ROOT에 package.json이 있으면 "저장소에서 도는 중"으로 보고 자동 갱신을 거절하므로, 배포 폴더엔 없어야 커넥터 자동 갱신이 된다. 개발용(code.ts·CLAUDE.md·glossary.md·build 스크립트)은 빼서 758KB.
+- 폴더는 사용자가 지우지 않을 곳에 두게 안내할 것 — 감시자가 그 폴더의 파일을 실행한다. 플러그인 파일(code.js·ui.html) 갱신은 새 zip 덮어쓰기(커넥터는 자동).
+
 ## 용어집 워크플로우
 
 - 단순 치환/합성어 보호/동작 명사/예외 표기는 **glossary.md에서 편집** → `npm run build`

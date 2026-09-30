@@ -12,7 +12,8 @@
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
     "watch": "npm run build -- --watch",
-    "font:subset": "node scripts/font-subset.js"
+    "font:subset": "node scripts/font-subset.js",
+    "dist": "node scripts/make-dist.js"
   },
   "author": "",
   "license": "",
