@@ -223,51 +223,89 @@ function claudeAccount() {
 // 추천도 claude-missing. 멀쩡한 npm 설치본은 PATH 뒤쪽에 가려져 있었다.
 // 그래서 후보를 차례로 `--version`으로 찔러 보고 **처음 응답한 것**을 쓴다. 시동 때 한 번 정하고(동기, 후보당 1~2초),
 // 점검이 실패하면 다시 고른다(사용자가 그새 설치·복구했을 수 있다).
+// 데스크톱 앱이 Claude Code를 두는 곳 아래에서 실행 파일을 찾는다 — 버전 폴더 안에 해시 폴더가 한 겹 더 있는
+// 배치(2026-10 실측: Claude-Data\claude_<id>\claude-code\2.1.299\f0584be0fbaf\claude.exe)까지 3단까지 내려간다.
+function findBinUnder(root, bin, depth = 3) {
+  const out = [];
+  const walk = (dir, d) => {
+    let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_e) { return; }
+    for (const en of ents) {
+      const p = path.join(dir, en.name);
+      if (en.isFile() && en.name.toLowerCase() === bin) out.push(p);
+      else if (en.isDirectory() && d > 0) walk(p, d - 1);
+    }
+  };
+  walk(root, depth);
+  return out;
+}
 function claudeCandidates() {
   const home = os.homedir();
-  const list = ['claude']; // PATH 우선 — 멀쩡하면 지금까지와 똑같이 동작
+  const list = ['claude']; // PATH
   if (process.platform === 'win32') {
     const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
     const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
     list.push(path.join(appdata, 'npm', 'claude.cmd'));           // npm install -g
     list.push(path.join(home, '.local', 'bin', 'claude.exe'));     // 공식 네이티브 설치
-    // 데스크톱 앱 번들 (MSIX 패키지 / 일반 설치) — 버전 폴더 중 최신
-    const bundleRoots = [path.join(appdata, 'Claude', 'claude-code')];
-    try {
-      for (const d of fs.readdirSync(path.join(local, 'Packages'))) {
-        if (/^Claude_/i.test(d)) bundleRoots.push(path.join(local, 'Packages', d, 'LocalCache', 'Roaming', 'Claude', 'claude-code'));
-      }
-    } catch (_e) { /* 패키지 폴더 없음 */ }
-    for (const root of bundleRoots) {
+    // Claude 데스크톱 앱 번들 — **위치가 앱 버전마다 바뀌었다**. 지금(2026-10)은 Claude-Data\claude_<id>\claude-code,
+    // 예전엔 Packages\Claude_<id>\LocalCache\Roaming\Claude\claude-code. 둘 다 본다.
+    // (이걸 못 찾아서 "Claude 앱은 깔려 있는데 커넥터가 Claude Code 없음"이 됐다 — 실측 신고)
+    const roots = [path.join(appdata, 'Claude', 'claude-code')];
+    for (const base of [path.join(local, 'Claude-Data'), path.join(local, 'Packages')]) {
       try {
-        const vers = fs.readdirSync(root).map((v) => path.join(root, v)).filter((p) => fs.existsSync(path.join(p, 'claude.exe')))
-          .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-        if (vers.length) list.push(path.join(vers[0], 'claude.exe'));
+        for (const d of fs.readdirSync(base)) {
+          if (!/^claude_/i.test(d)) continue;
+          roots.push(path.join(base, d, 'claude-code'), path.join(base, d, 'LocalCache', 'Roaming', 'Claude', 'claude-code'));
+        }
       } catch (_e) { /* 없음 */ }
     }
+    for (const r of roots) list.push(...findBinUnder(r, 'claude.exe'));
   } else {
     list.push(path.join(home, '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude');
     try { const pre = spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8', timeout: 8000 }).stdout.trim(); if (pre) list.push(path.join(pre, 'bin', 'claude')); } catch (_e) {}
+    const sup = path.join(home, 'Library', 'Application Support');
+    list.push(...findBinUnder(path.join(sup, 'Claude', 'claude-code'), 'claude'));
+    try { for (const d of fs.readdirSync(path.join(sup, 'Claude-Data'))) list.push(...findBinUnder(path.join(sup, 'Claude-Data', d, 'claude-code'), 'claude')); } catch (_e) {}
   }
   return [...new Set(list)].filter((c) => c === 'claude' || fs.existsSync(c));
 }
 // shell:true 스폰에 쓰는 명령 문자열 (경로에 공백이 있으면 따옴표)
 const shellQuote = (c) => (c === 'claude' ? c : '"' + c + '"');
-function resolveClaudeCmd() {
-  for (const c of claudeCandidates()) {
-    try {
-      const r = spawnSync(shellQuote(c), ['--version'], { shell: true, env: CLAUDE_ENV, encoding: 'utf8', timeout: 20000, windowsHide: true });
-      if (r.status === 0 && /\d+\.\d+/.test(String(r.stdout || ''))) {
-        if (c !== 'claude') console.log('[bridge] PATH의 claude가 응답하지 않아 다른 설치본을 씁니다: ' + c + ' (' + String(r.stdout).trim() + ')');
-        return shellQuote(c);
-      }
-      if (c === 'claude') console.log('[bridge] PATH의 claude 실패: ' + String(r.stderr || r.stdout || '').trim().slice(0, 160));
-    } catch (_e) { /* 다음 후보 */ }
-  }
-  return 'claude'; // 전부 실패 — 이름 그대로 두고 점검이 claude-missing으로 알린다
+const verNum = (s) => { const m = String(s).match(/(\d+)\.(\d+)\.(\d+)/); return m ? (+m[1]) * 1e6 + (+m[2]) * 1e3 + (+m[3]) : 0; };
+// 후보를 전부 `--version`으로 찔러 보고 **가장 최신 버전**을 쓴다.
+// "처음 응답한 것"을 쓰면 오래된 npm 설치본(실측 2.1.263)이 먼저 잡혀, 응답은 하지만 모델 목록이 낡아
+// "isn't described by this version's model catalog"로 모든 호출을 거절했다. 같은 PC에 데스크톱 앱의 최신본이 있어도.
+// **병렬·비동기로** 찌른다: 차례로 하면 15초가 걸려(실측) 다리가 늦게 떠서, 플러그인이 로그인 때 다리를
+// 12초만 기다리는 동안 시간 초과가 났다. 다리는 먼저 듣기 시작하고, claude를 쓰는 곳만 claudeReady를 기다린다.
+function probeVersion(c) {
+  return new Promise((resolve) => {
+    let out = '', done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let p;
+    try { p = spawn(shellQuote(c), ['--version'], { shell: true, env: CLAUDE_ENV, windowsHide: true }); }
+    catch (_e) { return finish(null); }
+    p.stdout.on('data', (d) => { out += d.toString(); });
+    p.on('error', () => finish(null));
+    p.on('close', (code) => finish(code === 0 && /\d+\.\d+/.test(out) ? out.trim() : null));
+    setTimeout(() => { try { p.kill(); } catch (_e) {} finish(null); }, 20000);
+  });
 }
-let CLAUDE_CMD = resolveClaudeCmd();
-function checkClaudeAvailable() {
+async function resolveClaudeCmd() {
+  const cands = claudeCandidates();
+  const results = await Promise.all(cands.map(async (c) => ({ c, out: await probeVersion(c) })));
+  let best = null;
+  for (const r of results) {
+    if (!r.out) { if (r.c === 'claude') console.log('[bridge] PATH의 claude가 응답하지 않아요 — 다른 설치본을 찾습니다.'); continue; }
+    const v = verNum(r.out);
+    if (!best || v > best.v) best = { c: r.c, v, label: r.out };
+  }
+  if (!best) return 'claude'; // 전부 실패 — 이름 그대로 두고 점검이 claude-missing으로 알린다
+  console.log('[bridge] 사용할 Claude Code: ' + (best.c === 'claude' ? 'PATH의 claude' : best.c) + ' (' + best.label + ')');
+  return shellQuote(best.c);
+}
+let CLAUDE_CMD = 'claude';
+let claudeReady = resolveClaudeCmd().then((c) => { CLAUDE_CMD = c; });
+async function checkClaudeAvailable() {
+  await claudeReady;
   const probe = spawn(CLAUDE_CMD, ['--version'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
   let out = '';
   probe.stdout.on('data', (d) => { out += d.toString(); });
@@ -277,8 +315,9 @@ function checkClaudeAvailable() {
     console.log('[bridge] Claude Code 점검: ' + claudeStatus + (out ? ' (' + out.trim() + ')' : ''));
     // 못 찾았으면 후보를 다시 훑는다 — 그새 설치·복구됐거나, 쓰던 설치본이 사라졌을 수 있다
     if (claudeStatus === 'claude-missing') {
-      const again = resolveClaudeCmd();
-      if (again !== CLAUDE_CMD) { CLAUDE_CMD = again; claudeStatus = null; checkClaudeAvailable(); }
+      const before = CLAUDE_CMD;
+      claudeReady = resolveClaudeCmd().then((c) => { CLAUDE_CMD = c; });
+      claudeReady.then(() => { if (CLAUDE_CMD !== before) { claudeStatus = null; checkClaudeAvailable(); } });
     }
   });
 }
@@ -497,6 +536,7 @@ const askedCount = new Map();
 const REPARSE_BAD = (v) => v == null || (Array.isArray(v) && v.length === 0);
 function runTurn(buildAsk, model, reparse) {
   const job = queue.then(async () => {
+    await claudeReady; // 어떤 claude를 쓸지 정해진 뒤에 세션을 띄운다
     const jobStart = Date.now(); // 시간 예산 — 플러그인 쪽 제한(130초)을 넘길 재시도는 포기한다
     if (model && ALLOWED_MODELS.indexOf(model) !== -1 && model !== currentModel) {
       console.log('[bridge] 모델 변경: ' + currentModel + ' → ' + model);
@@ -841,6 +881,8 @@ function json(res, status, obj) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // 로그인·로그아웃은 claude를 직접 띄운다 — 어떤 claude를 쓸지 정해질 때까지 기다린다(/health 등은 즉시 응답)
+  if (req.method === 'POST' && /^\/(open-login|claude-logout|login-terminal)/.test(req.url || '')) await claudeReady;
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); return res.end(); }
   if (req.method === 'GET' && req.url === '/health') {
     restartIfAccountChanged(); // 밖에서 계정을 바꿨으면 옛 계정 세션을 먼저 버린다 (아래 워밍업이 옛 계정으로 돌지 않게)

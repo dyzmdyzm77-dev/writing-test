@@ -76,9 +76,14 @@ function claudeInstallPaths() {
     const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
     const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
     out.push(path.join(appdata, 'npm', 'claude.cmd'), path.join(home, '.local', 'bin', 'claude.exe'));
+    // 데스크톱 앱 번들 — 위치가 앱 버전마다 바뀐다(지금: Claude-Data\\claude_<id>\\claude-code\\<ver>\\<hash>\\claude.exe)
     const roots = [path.join(appdata, 'Claude', 'claude-code')];
-    try { for (const d of fs.readdirSync(path.join(local, 'Packages'))) if (/^Claude_/i.test(d)) roots.push(path.join(local, 'Packages', d, 'LocalCache', 'Roaming', 'Claude', 'claude-code')); } catch (_e) {}
-    for (const r of roots) { try { for (const v of fs.readdirSync(r)) out.push(path.join(r, v, 'claude.exe')); } catch (_e) {} }
+    for (const base of [path.join(local, 'Claude-Data'), path.join(local, 'Packages')]) {
+      try { for (const d of fs.readdirSync(base)) if (/^claude_/i.test(d)) roots.push(path.join(base, d, 'claude-code'), path.join(base, d, 'LocalCache', 'Roaming', 'Claude', 'claude-code')); } catch (_e) {}
+    }
+    const walk = (dir, depth) => { let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_e) { return; }
+      for (const en of ents) { const p = path.join(dir, en.name); if (en.isFile() && en.name.toLowerCase() === 'claude.exe') out.push(p); else if (en.isDirectory() && depth > 0) walk(p, depth - 1); } };
+    for (const r of roots) walk(r, 3);
   } else {
     out.push(path.join(home, '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude');
   }
@@ -300,8 +305,9 @@ const server = http.createServer(async (req, res) => {
     //  v8 = /update 추가 — 플러그인이 들고 있는 설치 파일로 설치본을 스스로 갱신,
     //  v9 = /update 입력을 bat 페이로드에서 **커넥터 zip**으로 교체 (백신 오탐 회피),
     //  v10 = GET /passport — 네이버 맞춤법 열쇠를 로컬에서 발급 (사내 프록시가 Vercel을 막아도 검사가 되게),
-    //  v11 = Claude Code를 PATH 밖(npm·공식 설치·데스크톱 번들)에서도 찾는다 — 있어도 '없다'며 다리를 안 켜던 것)
-    return json(res, 200, { ok: true, watcher: true, v: 11 });
+    //  v11 = Claude Code를 PATH 밖(npm·공식 설치·데스크톱 번들)에서도 찾는다 — 있어도 '없다'며 다리를 안 켜던 것,
+    //  v12 = 데스크톱 앱의 새 Claude Code 위치(Claude-Data\\claude_<id>\\claude-code\\<ver>\\<hash>)도 찾는다)
+    return json(res, 200, { ok: true, watcher: true, v: 12 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -334,7 +340,7 @@ const server = http.createServer(async (req, res) => {
   // 감시자를 새 코드로 다시 띄운다 — 다리를 껐다 켜도 계속 옛 버전이 켜질 때(위 restartSelf 주석) 쓴다.
   // 응답을 먼저 보낸 뒤 새 인스턴스를 띄우고 우리는 빠진다 — 새 쪽은 포트가 빌 때까지 재시도한다.
   if (req.method === 'POST' && req.url === '/restart') {
-    json(res, 200, { ok: true, restarting: true, v: 11 });
+    json(res, 200, { ok: true, restarting: true, v: 12 });
     setTimeout(() => {
       shutdownBridge(); // 옛 코드로 떠 있는 다리도 같이 내린다 — 다음 요청 때 새 감시자가 새 코드로 켠다
       restartSelf();
