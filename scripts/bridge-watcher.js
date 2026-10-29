@@ -66,9 +66,28 @@ function claudeAccount() {
   return email;
 }
 
+// Claude Code가 이 PC에 있나 — PATH만 보지 않는다 (2026-10, 감시자 v11).
+// 데스크톱 앱 번들·npm 전역·공식 설치본은 PATH에 안 잡혀 있을 수 있는데, 다리(v44)는 그런 설치본도 찾아 쓴다.
+// 여기서 PATH만 보고 "없다"고 하면 다리를 아예 안 켜서 다리의 탐색이 기회조차 못 얻는다. 존재만 본다(실행은 다리가 점검).
+function claudeInstallPaths() {
+  const home = os.homedir();
+  const out = [];
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    out.push(path.join(appdata, 'npm', 'claude.cmd'), path.join(home, '.local', 'bin', 'claude.exe'));
+    const roots = [path.join(appdata, 'Claude', 'claude-code')];
+    try { for (const d of fs.readdirSync(path.join(local, 'Packages'))) if (/^Claude_/i.test(d)) roots.push(path.join(local, 'Packages', d, 'LocalCache', 'Roaming', 'Claude', 'claude-code')); } catch (_e) {}
+    for (const r of roots) { try { for (const v of fs.readdirSync(r)) out.push(path.join(r, v, 'claude.exe')); } catch (_e) {} }
+  } else {
+    out.push(path.join(home, '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude');
+  }
+  return out;
+}
 function hasClaude() {
   const finder = process.platform === 'win32' ? 'where' : 'which';
-  try { return spawnSync(finder, ['claude'], { stdio: 'ignore', shell: true }).status === 0; } catch (_e) { return false; }
+  try { if (spawnSync(finder, ['claude'], { stdio: 'ignore', shell: true }).status === 0) return true; } catch (_e) {}
+  return claudeInstallPaths().some((p) => { try { return fs.existsSync(p); } catch (_e) { return false; } });
 }
 
 let waking = false; // 연타 방지 — 다리는 어차피 EADDRINUSE로 중복 정리하지만 프로세스 낭비를 줄인다
@@ -280,8 +299,9 @@ const server = http.createServer(async (req, res) => {
     //  v7 = /restart 추가 + 포트 재시도 — 옛 감시자가 옛 다리를 계속 켜던 것 대응,
     //  v8 = /update 추가 — 플러그인이 들고 있는 설치 파일로 설치본을 스스로 갱신,
     //  v9 = /update 입력을 bat 페이로드에서 **커넥터 zip**으로 교체 (백신 오탐 회피),
-    //  v10 = GET /passport — 네이버 맞춤법 열쇠를 로컬에서 발급 (사내 프록시가 Vercel을 막아도 검사가 되게))
-    return json(res, 200, { ok: true, watcher: true, v: 10 });
+    //  v10 = GET /passport — 네이버 맞춤법 열쇠를 로컬에서 발급 (사내 프록시가 Vercel을 막아도 검사가 되게),
+    //  v11 = Claude Code를 PATH 밖(npm·공식 설치·데스크톱 번들)에서도 찾는다 — 있어도 '없다'며 다리를 안 켜던 것)
+    return json(res, 200, { ok: true, watcher: true, v: 11 });
   }
   // 이 PC에 로그인된 클로드 계정 — 플러그인 첫 화면·홈이 "누구 계정으로 쓰는지" 보여주는 데 쓴다.
   // 감시자가 답하는 이유: 다리를 켜면 워밍업으로 클로드가 실제 호출돼 구독 사용량이 나간다.
@@ -314,7 +334,7 @@ const server = http.createServer(async (req, res) => {
   // 감시자를 새 코드로 다시 띄운다 — 다리를 껐다 켜도 계속 옛 버전이 켜질 때(위 restartSelf 주석) 쓴다.
   // 응답을 먼저 보낸 뒤 새 인스턴스를 띄우고 우리는 빠진다 — 새 쪽은 포트가 빌 때까지 재시도한다.
   if (req.method === 'POST' && req.url === '/restart') {
-    json(res, 200, { ok: true, restarting: true, v: 10 });
+    json(res, 200, { ok: true, restarting: true, v: 11 });
     setTimeout(() => {
       shutdownBridge(); // 옛 코드로 떠 있는 다리도 같이 내린다 — 다음 요청 때 새 감시자가 새 코드로 켠다
       restartSelf();

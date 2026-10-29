@@ -978,10 +978,12 @@
       .bridge-loading.failed .bridge-loading-actions,
       .bridge-loading.stopped .bridge-loading-actions,
       .bridge-loading.outdated .bridge-loading-actions,
+      .bridge-loading.nocli .bridge-loading-actions,
       .bridge-loading.login .bridge-loading-actions { display: flex; }
       .bridge-loading.failed .loading-spinner,
       .bridge-loading.stopped .loading-spinner,
       .bridge-loading.outdated .loading-spinner,
+      .bridge-loading.nocli .loading-spinner,
       .bridge-loading.login .loading-spinner { display: none; }
       /* 설치 파일은 "못 켰을 때"와 "커넥터가 너무 낡아 자동 갱신도 안 될 때"만 제안 —
          직접 꺼둔 경우엔 이미 깔려 있으니 안 보여준다 */
@@ -990,6 +992,7 @@
       .bridge-loading.outdated .bl-install { display: block; }
       /* 낡은 커넥터 화면에선 [설치 파일 받기]가 주된 조치 — 위아래 순서를 바꿔 강조한다 */
       .bridge-loading.outdated .bl-install { order: -1; }
+      .bridge-loading.nocli .bridge-loading-sub code { font-size: 12px; background: #F2F2F2; padding: 2px 6px; border-radius: 4px; word-break: break-all; user-select: all; }
       .bridge-loading.outdated #bridgeLoadingRetry { background: #FFFFFF; color: #353535; border: 1px solid #D9D9D9; }
       /* 직접 꺼둔 경우엔 켤 때까지 이 화면 — 추천은 클로드가 하는 일이라 닫아도 쓸 게 없다.
          (못 켠 경우(failed)는 켤 방법 자체가 막힌 상황이라 닫고 나갈 길을 남겨 둔다) */
@@ -1043,6 +1046,11 @@
       .login-waiting.failed .loading-spinner { display: none; }
       .login-waiting .lw-install { display: none; }
       .login-waiting.failed .lw-install { display: block; }
+      /* Claude Code가 없는 경우 — 커넥터 설치 그림·버튼은 원인이 아니므로 숨기고 안내 문구만 (2026-10) */
+      .login-waiting.failed.nocli .lw-install,
+      .login-waiting.failed.nocli .lw-install-art,
+      .login-waiting.failed.nocli .lw-install-art-win { display: none !important; }
+      .login-waiting.failed.nocli .lw-sub code { font-size: 12px; background: #F2F2F2; padding: 2px 6px; border-radius: 4px; word-break: break-all; user-select: all; }
       /* 맥 설치 3단계 그림 — 연결 실패 상태 + 맥에서만 (윈도우는 단계가 달라 숨김) */
       .login-waiting .lw-install-art { display: none; }
       body.is-mac .login-waiting.failed .lw-install-art { display: block; width: 100%; max-width: 210px; margin: 8px 0 14px; }
@@ -2368,7 +2376,7 @@
           }
           if (isLoginWaiting()) {
             if (!lr.ok) {
-              setLoginWaitFailed(lr.error);
+              setLoginWaitFailed(lr.error, lr.problem);
             } else if (lr.mode === 'terminal') {
               // 브라우저가 아니라 터미널로 열린 경우 — 기다리는 곳이 다르니 안내를 바꾼다
               document.getElementById('loginWaitingSub').textContent =
@@ -2640,6 +2648,9 @@
                 && bridgeLoadState === 'off' && currentView === 'recommend' && !bridgeDismissed) {
               setBridgeLoadState('outdated');
             }
+            // 다리는 떠 있는데 Claude Code를 못 찾는 경우(깨진 설치본 등)도 같은 안내로
+            if (bs.alive && bs.problem === 'claude-missing' && currentView === 'recommend' && bridgeLoadState === 'off' && !bridgeDismissed) setBridgeLoadState('nocli');
+            if (bs.alive && bs.problem !== 'claude-missing' && bridgeLoadState === 'nocli') setBridgeLoadState('off');
             // 새 버전으로 올라왔으면 그 화면은 스스로 걷는다
             if (bs.alive && bs.problem !== 'bridge-old' && bridgeLoadState === 'outdated') setBridgeLoadState('off');
             if (!bridgeWakePoll && !installOffer) {
@@ -2673,6 +2684,14 @@
 
         // 새 코드로 재시작이 끝났다 — 덮개를 걷고(성공) 또는 조치 화면으로 바꾼다(실패).
         // 이 신호가 없으면 '연결하는 중' 덮개가 영영 돌 수 있다 (재시작엔 켜기 폴링이 없어서).
+        // 감시자가 "Claude Code가 없어 다리를 못 켠다"고 답했다 — 20초 헛대기 없이 바로 설치 안내로 (2026-10)
+        if (event.data.pluginMessage.type === 'claude-missing') {
+          if (bridgeWakePoll) { clearInterval(bridgeWakePoll); bridgeWakePoll = null; }
+          if (bridgeWakeBtn) bridgeWakeBtn.disabled = false;
+          bridgeWakeFailed = false; installOffer = false; // 커넥터 문제가 아니다 — 설치 파일 받기로 유도하지 않는다
+          setBridgeLoadState('nocli');
+        }
+
         if (event.data.pluginMessage.type === 'bridge-restart-done') {
           const done = event.data.pluginMessage;
           bridgeRestarting = false;
@@ -3733,6 +3752,9 @@
         login:   { title: '클로드에 로그인해 주세요.', sub: '문구 추천은 클로드가 만들어요.<br>로그인하면 바로 이어서 쓸 수 있어요.' },
         // 옛 버전이 연결됐는데 자동 갱신까지 실패한 상태 — 이 PC의 커넥터가 너무 낡아 새 코드를 못 받는다.
         // 설치 파일을 한 번 실행하면 커넥터가 최신이 되고, 그 뒤로는 갱신이 자동으로 된다.
+        // Claude Code(claude 명령)가 없는 경우 — 커넥터는 깔렸어도 추천·로그인은 Claude Code가 한다 (2026-10)
+        nocli: { title: 'Claude Code를 먼저 설치해 주세요.',
+                 sub: '추천은 Claude Code가 만들어요. 명령 프롬프트에서 아래를 실행한 뒤 [다시 시도하기]를 눌러 주세요.<br><br><code>npm install -g @anthropic-ai/claude-code</code>' },
         outdated: { title: '클로드 커넥터가 오래됐어요.',
                     sub: (IS_MAC
                       ? '설치 파일을 받아 압축을 풀고, 나온 파일을 우클릭 → [열기] 로 한 번만 실행해 주세요.'
@@ -3754,9 +3776,10 @@
         el.classList.toggle('stopped', bridgeLoadState === 'stopped');
         el.classList.toggle('login', bridgeLoadState === 'login');
         el.classList.toggle('outdated', bridgeLoadState === 'outdated');
+        el.classList.toggle('nocli', bridgeLoadState === 'nocli');
         const retryBtn = document.getElementById('bridgeLoadingRetry');
         if (retryBtn) retryBtn.textContent = bridgeLoadState === 'login' ? '클로드 로그인하기'
-          : bridgeLoadState === 'outdated' ? '다시 시도하기' : '클로드 연결하기';
+          : (bridgeLoadState === 'outdated' || bridgeLoadState === 'nocli') ? '다시 시도하기' : '클로드 연결하기';
         const copy = BRIDGE_LOAD_COPY[bridgeLoadState];
         if (!copy) return;
         document.getElementById('bridgeLoadingTitle').textContent = copy.title;
@@ -4278,10 +4301,23 @@
       }
       // 로그인 창을 아예 못 연 경우 — 스피너를 걷고 이유·조치를 보여준다.
       // (다리가 없는 PC에서 실제로 브라우저가 안 뜨는데, 예전엔 오류 토스트가 이 화면에 가려 안 보였다)
-      function setLoginWaitFailed(errText) {
+      function setLoginWaitFailed(errText, problem) {
         const el = document.getElementById('loginWaiting');
         if (!el) return;
         el.classList.add('active', 'failed');
+        // Claude Code가 없는 경우는 커넥터 설치가 답이 아니다 — 원인을 그대로 알린다 (2026-10).
+        // 예전엔 errText를 버리고 항상 "커넥터 설치 파일을 받아 실행하세요"를 띄워, 커넥터를 이미 깐 새 PC
+        // 사용자가 설치만 반복했다(실측 신고: "커넥터 설치했는데 브라우저도 안 뜨고 무반응").
+        el.classList.toggle('nocli', problem === 'claude-missing');
+        if (problem === 'claude-missing') {
+          document.getElementById('loginWaitingTitle').textContent = 'Claude Code를 먼저 설치해 주세요.';
+          document.getElementById('loginWaitingSub').innerHTML =
+            '로그인 창은 Claude Code가 열어요. 명령 프롬프트에서 아래를 실행한 뒤<br>[클로드 로그인]을 다시 눌러 주세요.<br><br>' +
+            '<code>npm install -g @anthropic-ai/claude-code</code>';
+          if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null; }
+          stopAccountWatch();
+          return;
+        }
         document.getElementById('loginWaitingTitle').textContent = 'Agent 이용을 위해 아래 파일을 설치해 주세요.';
         // 맥은 .command를 zip으로 받는다 — 두 줄 안내(상세한 우클릭→열기 단계는 아래 일러스트가 보여준다).
         const lwSub = document.getElementById('loginWaitingSub');

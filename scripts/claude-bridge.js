@@ -48,7 +48,7 @@ const PORT = Number(process.env.BRIDGE_PORT) || 11888; // BRIDGE_PORT는 테스�
 // 다리 코드 버전 — /health로 노출한다. 코드를 pull·복사해도 **이미 떠 있는 다리는 옛 코드 그대로**라
 // 껐다 켜기 전엔 새 동작이 안 나온다(터미널이 뜨는 등). 플러그인이 이 값으로 구버전을 감지해 재시작시킨다.
 // 동작이 바뀌는 수정을 하면 이 숫자를 올리고 code.ts의 BRIDGE_MIN_V도 같이 올린다.
-const BRIDGE_V = 43;
+const BRIDGE_V = 44;
 // 기본 모델. 요청(플러그인)이 model을 지정하면 그 요청만 그 모델로 처리한다.
 // haiku=빠름/가벼움, sonnet=중간, opus=기본(최고품질, 조금 느림)
 const CLAUDE_MODEL = process.env.BRIDGE_MODEL || 'opus';
@@ -216,14 +216,70 @@ function claudeAccount() {
   accountCache = { at: Date.now(), email };
   return email;
 }
+// ── 실제로 동작하는 claude 찾기 (2026-10, BRIDGE_V=44) ─────────────────────
+// PATH에서 이름으로 'claude'만 부르면 **맨 앞에 잡히는 것이 깨져 있어도** 그걸 쓴다. 실측: 사용자 PATH 앞쪽의
+// %USERPROFILE%\bin\claude.cmd(데스크톱 앱 번들 Claude Code를 부르는 래퍼)가, 데스크톱 앱 업데이트로 번들 폴더가
+// 사라지자 "claude.exe not found"로 즉시 실패 → 로그인 프로세스가 바로 죽어 **브라우저도 안 뜨고 무반응**,
+// 추천도 claude-missing. 멀쩡한 npm 설치본은 PATH 뒤쪽에 가려져 있었다.
+// 그래서 후보를 차례로 `--version`으로 찔러 보고 **처음 응답한 것**을 쓴다. 시동 때 한 번 정하고(동기, 후보당 1~2초),
+// 점검이 실패하면 다시 고른다(사용자가 그새 설치·복구했을 수 있다).
+function claudeCandidates() {
+  const home = os.homedir();
+  const list = ['claude']; // PATH 우선 — 멀쩡하면 지금까지와 똑같이 동작
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    list.push(path.join(appdata, 'npm', 'claude.cmd'));           // npm install -g
+    list.push(path.join(home, '.local', 'bin', 'claude.exe'));     // 공식 네이티브 설치
+    // 데스크톱 앱 번들 (MSIX 패키지 / 일반 설치) — 버전 폴더 중 최신
+    const bundleRoots = [path.join(appdata, 'Claude', 'claude-code')];
+    try {
+      for (const d of fs.readdirSync(path.join(local, 'Packages'))) {
+        if (/^Claude_/i.test(d)) bundleRoots.push(path.join(local, 'Packages', d, 'LocalCache', 'Roaming', 'Claude', 'claude-code'));
+      }
+    } catch (_e) { /* 패키지 폴더 없음 */ }
+    for (const root of bundleRoots) {
+      try {
+        const vers = fs.readdirSync(root).map((v) => path.join(root, v)).filter((p) => fs.existsSync(path.join(p, 'claude.exe')))
+          .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+        if (vers.length) list.push(path.join(vers[0], 'claude.exe'));
+      } catch (_e) { /* 없음 */ }
+    }
+  } else {
+    list.push(path.join(home, '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude');
+    try { const pre = spawnSync('npm', ['prefix', '-g'], { encoding: 'utf8', timeout: 8000 }).stdout.trim(); if (pre) list.push(path.join(pre, 'bin', 'claude')); } catch (_e) {}
+  }
+  return [...new Set(list)].filter((c) => c === 'claude' || fs.existsSync(c));
+}
+// shell:true 스폰에 쓰는 명령 문자열 (경로에 공백이 있으면 따옴표)
+const shellQuote = (c) => (c === 'claude' ? c : '"' + c + '"');
+function resolveClaudeCmd() {
+  for (const c of claudeCandidates()) {
+    try {
+      const r = spawnSync(shellQuote(c), ['--version'], { shell: true, env: CLAUDE_ENV, encoding: 'utf8', timeout: 20000, windowsHide: true });
+      if (r.status === 0 && /\d+\.\d+/.test(String(r.stdout || ''))) {
+        if (c !== 'claude') console.log('[bridge] PATH의 claude가 응답하지 않아 다른 설치본을 씁니다: ' + c + ' (' + String(r.stdout).trim() + ')');
+        return shellQuote(c);
+      }
+      if (c === 'claude') console.log('[bridge] PATH의 claude 실패: ' + String(r.stderr || r.stdout || '').trim().slice(0, 160));
+    } catch (_e) { /* 다음 후보 */ }
+  }
+  return 'claude'; // 전부 실패 — 이름 그대로 두고 점검이 claude-missing으로 알린다
+}
+let CLAUDE_CMD = resolveClaudeCmd();
 function checkClaudeAvailable() {
-  const probe = spawn('claude', ['--version'], { shell: true, env: CLAUDE_ENV });
+  const probe = spawn(CLAUDE_CMD, ['--version'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
   let out = '';
   probe.stdout.on('data', (d) => { out += d.toString(); });
   probe.on('error', () => { claudeStatus = 'claude-missing'; });
   probe.on('close', (code) => {
     claudeStatus = (code === 0 && /\d+\.\d+/.test(out)) ? 'ok' : 'claude-missing';
     console.log('[bridge] Claude Code 점검: ' + claudeStatus + (out ? ' (' + out.trim() + ')' : ''));
+    // 못 찾았으면 후보를 다시 훑는다 — 그새 설치·복구됐거나, 쓰던 설치본이 사라졌을 수 있다
+    if (claudeStatus === 'claude-missing') {
+      const again = resolveClaudeCmd();
+      if (again !== CLAUDE_CMD) { CLAUDE_CMD = again; claudeStatus = null; checkClaudeAvailable(); }
+    }
   });
 }
 // 처리 현황 — /health로 노출해 "정말 클로드가 답했는지" 밖에서 확인할 수 있게 한다
@@ -358,7 +414,7 @@ function startProc() {
   // 이 세션이 어느 계정의 입장권으로 도는지 기록 — 밖에서 계정이 바뀌었는지 비교하는 기준
   sessionAccount = claudeAccount();
   console.log('[bridge] 클로드 세션 시동 중… (모델: ' + currentModel + ')');
-  const thisProc = spawn('claude', ['-p', '--model', modelIdFor(currentModel), '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], {
+  const thisProc = spawn(CLAUDE_CMD, ['-p', '--model', modelIdFor(currentModel), '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], {
     shell: true, cwd: EMPTY_CWD, env: CLAUDE_ENV,
     detached: process.platform !== 'win32', // POSIX: 자기 프로세스 그룹 생성 — killProc이 그룹째 정리할 수 있게
   });
@@ -854,7 +910,7 @@ const server = http.createServer(async (req, res) => {
       // (코드 붙여넣기 유발), 브라우저를 고르지도(기본 브라우저 아님) 않는 유일한 방법.
       // 부작용: 브라우저의 claude 웹 로그인도 풀린다 — 계정을 바꾸려는 의도와 방향이 같아 수용.
       const startLogin = () => {
-        const thisLogin = spawn('claude', ['auth', 'login', '--claudeai'], {
+        const thisLogin = spawn(CLAUDE_CMD, ['auth', 'login', '--claudeai'], {
           shell: true, env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true,
           detached: process.platform !== 'win32', // killLoginProc의 그룹 kill용 (killProc과 동일 패턴)
         });
@@ -887,7 +943,7 @@ const server = http.createServer(async (req, res) => {
       // 로그인 화면이 나온다. 클릭 한 번으로 "로그아웃 → 새 계정 로그인"이 끝난다.
       if (switchMode) {
         killLoginProc(); // 대기 중인 옛 로그인 절차가 있으면 접는다
-        const lo = spawn('claude', ['auth', 'logout'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
+        const lo = spawn(CLAUDE_CMD, ['auth', 'logout'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
         lo.on('error', () => { /* claude 없음 등 — 아래 웹 로그아웃은 그대로 진행 */ });
         // **탭은 반드시 1개** (2026-08, BRIDGE_V=40, 사용자 요구): 웹 로그아웃 주소를 따로 열면
         // 로그인 화면이 두 개(로그아웃 착지 화면 + OAuth 화면) 떠서 어느 쪽에 로그인해야 하는지 알 수 없고,
@@ -943,7 +999,7 @@ const server = http.createServer(async (req, res) => {
         ].join('\r\n') + '\r\n');
         const bat = path.join(os.tmpdir(), 'claude-bridge-login.bat');
         fs.writeFileSync(bat, '@echo off\r\n' +
-          'start "claude-login" cmd /k claude /login\r\n' +
+          'start "claude-login" cmd /k ' + CLAUDE_CMD + ' /login\r\n' +
           'powershell -NoProfile -ExecutionPolicy Bypass -File "' + ps1 + '"\r\n');
         spawn('cmd', ['/c', bat], { env: CLAUDE_ENV, stdio: 'ignore', windowsHide: true });
       } else if (process.platform === 'darwin') {
@@ -952,7 +1008,7 @@ const server = http.createServer(async (req, res) => {
         // 1번(구독 계정)이 선택되고, 권한이 없으면 keystroke 줄만 조용히 실패해 사용자가 엔터 한 번 누르면 된다(fail-soft).
         // 엔터 직전에 Terminal을 다시 앞으로 가져와 다른 앱에 키가 들어가는 것을 막는다.
         spawn('osascript', [
-          '-e', 'tell application "Terminal" to do script "claude /login"',
+          '-e', 'tell application "Terminal" to do script "' + CLAUDE_CMD.replace(/"/g, '\\"') + ' /login"',
           '-e', 'tell application "Terminal" to activate',
           '-e', 'delay 6',
           '-e', 'tell application "Terminal" to activate',
@@ -971,7 +1027,7 @@ const server = http.createServer(async (req, res) => {
   // 클로드 계정 로그아웃 — 플러그인 홈의 [로그아웃] 버튼이 호출. claude auth logout으로 CLI 로그인을 해제한다.
   // (이 PC의 저장된 자격증명을 지운다 — 다시 쓰려면 재로그인 필요.) 로그아웃 후엔 세션·계정캐시를 정리한다.
   if (req.method === 'POST' && req.url === '/claude-logout') {
-    const lo = spawn('claude', ['auth', 'logout'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
+    const lo = spawn(CLAUDE_CMD, ['auth', 'logout'], { shell: true, env: CLAUDE_ENV, windowsHide: true });
     let err = '';
     lo.stderr.on('data', (d) => { err += d.toString(); });
     lo.on('error', (e) => { json(res, 500, { ok: false, error: '로그아웃 실행 실패: ' + e.message }); });
