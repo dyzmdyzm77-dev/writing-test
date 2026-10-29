@@ -25,7 +25,8 @@ const readme = [
   '1. 이 폴더를 지우지 않을 곳에 두세요 (예: 문서 폴더). 커넥터가 이 폴더의 파일을 실행합니다.',
   '2. [윈도우] 설치.bat 을 더블클릭하세요.',
   '   [맥]    터미널에서 이 폴더로 이동한 뒤  node scripts/register-protocol.js  를 실행하세요.',
-  '   - Node.js 가 필요합니다. 없으면 https://nodejs.org 에서 LTS를 설치한 뒤 다시 실행하세요.',
+  '   - [윈도우] Node.js는 이 폴더에 들어 있어 따로 설치할 필요가 없습니다 (runtime 폴더).',
+  '   - [맥] Node.js가 필요합니다. 없으면 https://nodejs.org 에서 LTS를 설치한 뒤 실행하세요.',
   '   - 문구 추천·번역·대화를 쓰려면 Claude Code 로그인이 필요합니다 (검토만 쓰면 없어도 됩니다).',
   '     npm install -g @anthropic-ai/claude-code  →  claude login',
   '3. 피그마 데스크톱 → Plugins → Development → Import plugin from manifest → 이 폴더의 manifest.json',
@@ -68,6 +69,23 @@ const entries = FILES.map((f) => {
   if (!fs.existsSync(p)) throw new Error('배포에 넣을 파일이 없어요: ' + f);
   return { name: folder + '/' + f, data: fs.readFileSync(p) };
 });
+
+// ── Node.js 실행 파일 동봉 (윈도우, 2026-10) ──
+// 커넥터(감시자·다리)는 Node로 돈다. 새 PC에 Node가 없으면 설치.bat이 "Node.js is required"로 멈춰
+// 아무것도 안 됐다(실측 신고). 사용자가 Node를 따로 깔지 않게 이 빌드 PC의 node.exe를 runtime\에 넣는다 —
+// 설치.bat·자동시작 vbs가 runtime\node.exe를 먼저 찾는다. 인터넷에서 받아 설치하는 방식은 쓰지 않는다:
+// 백신이 '내려받아 실행'을 드로퍼로 보고(V3 전례), Node 설치는 관리자 권한이 필요하고, 프록시에 막힐 수 있다.
+// node.exe는 OpenJS Foundation 서명본 그대로 넣는다(서명이 깨지지 않게 바이트 그대로). 라이선스(MIT 외)도 같이.
+// 맥은 해당 없음 — 맥 사용자는 Node를 설치하거나 npm install로 세팅한다.
+if (process.platform === 'win32' && !process.argv.includes('--no-node')) {
+  const nodeExe = process.execPath;
+  entries.push({ name: folder + '/runtime/node.exe', data: fs.readFileSync(nodeExe) });
+  const licSrc = [path.join(path.dirname(nodeExe), 'LICENSE'), path.join(root, 'out', 'node-LICENSE.txt')].find((p) => fs.existsSync(p));
+  const licText = licSrc ? fs.readFileSync(licSrc, 'utf8')
+    : 'Node.js ' + process.version + ' — MIT License and third-party licenses: https://github.com/nodejs/node/blob/' + process.version + '/LICENSE\r\n';
+  entries.push({ name: folder + '/runtime/LICENSE-node.txt', data: Buffer.from(licText, 'utf8') });
+  console.log('[dist] Node.js ' + process.version + ' 동봉 (runtime/node.exe, 라이선스 ' + (licSrc ? '원문' : '링크') + ')');
+}
 entries.unshift({ name: folder + '/읽어주세요.txt', data: Buffer.from('﻿' + readme, 'utf8') }); // 메모장용 BOM
 const out = zip(entries);
 fs.mkdirSync(path.join(root, 'out'), { recursive: true });

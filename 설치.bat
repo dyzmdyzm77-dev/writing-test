@@ -2,39 +2,33 @@
 rem Claude connector setup - runs scripts\register-protocol.js in this folder.
 rem No hidden payload, no download. Kept deliberately simple to avoid antivirus false positives.
 rem Notes: ASCII only, and no parenthesized if-blocks (cmd mis-parses them with UTF-8 text).
+rem Node.js: the distribution zip ships runtime\node.exe, so nothing needs to be installed.
+rem          If that folder is missing (developer checkout), the PC's own node is used.
 cd /d "%~dp0"
 
+set "NODE=%~dp0runtime\node.exe"
+if exist "%NODE%" goto HAVENODE
+set "NODE=node"
 where node >nul 2>&1 || goto NONODE
+:HAVENODE
 
-node scripts\register-protocol.js
+"%NODE%" scripts\register-protocol.js
 if errorlevel 1 goto FAILED
 
-where claude >nul 2>&1 || goto NOCLAUDE
-
 echo.
-echo   Setup done. Open the plugin in Figma and press [Recommend].
+echo   Setup done. Open the plugin in Figma and sign in to Claude.
 echo.
 pause
 exit /b 0
 
 :NONODE
 echo.
-echo   Node.js is required. Install the LTS build from https://nodejs.org
-echo   then run this file again.
+echo   Node.js was not found, and this folder has no runtime\node.exe.
+echo   Please download the latest S1-UX-Writing-Agent zip again (it includes Node.js),
+echo   or install the LTS build from https://nodejs.org and run this file again.
 echo.
 pause
 exit /b 1
-
-:NOCLAUDE
-echo.
-echo   Setup done, but Claude Code is not installed on this PC.
-echo   Run these two commands in a terminal, then reopen the plugin:
-echo.
-echo       npm install -g @anthropic-ai/claude-code
-echo       claude login
-echo.
-pause
-exit /b 0
 
 :FAILED
 echo.
